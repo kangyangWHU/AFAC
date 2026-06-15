@@ -17,7 +17,16 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
 TILE_MAX = 1500             # tile 像素硬上限
-CELL_BUDGET = 600           # 单 tile 最大单元格数（防输出截断）。降到 450 会多~50% tile→API限流，已回退
+MIN_COL_PX = 40             # 真实表格列的最小像素宽。无框表回退到空白缝检测时，会把
+# 单元格内的字间空隙(中位~14px)误判成列线→列数虚高数倍(实测某表 468 列 vs 真实 109)→
+# max_cols 虚高→每 tile 行预算被压到 3→tile 数爆炸(1843)。用"1500px 内最多容纳
+# TILE_MAX/MIN_COL_PX 个真实列"作物理上限：≥40px 的真列不会被误删(物理放不下更多),
+# 只剔除 <40px 的字间幻影列。仅用于行预算估计，不改变实际切列与重建。
+CELL_BUDGET = 300           # 单 tile 最大单元格数（防输出截断）。
+# 实测：API 输出受 token 预算限制，输出超 ~7100 字符即截断(未闭合<table>、丢行)。
+# 含表 tile 每格约 16 字符(p99=25)。CELL_BUDGET=600 时 10.1% 的 tile 截断、大表 TEDS 被拖低。
+# 截断从 ~431 cell 起；400 已 0 截断。取 300 留余量(300×16≈4.8k,300×25≈7.5k)确保不截断。
+# 之前不敢降是怕 tile 变多触发共享 key 限流——该约束已解除(改用限流重试)。
 BLANK_INK = 0.0015          # tile 平均墨量低于此 → 判为空白块（仅跳真正空白；0.003 的faint表头不再误跳）
 
 
@@ -113,7 +122,11 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
 
     # 先按像素分列组，得到每组最大列数 → 据此限制每 tile 行数，使 cell ≤ budget
     col_cuts, col_cells = _group_boundaries(col_bnd, tile_max)
-    max_cols = max(col_cells) if col_cells else 1
+    # 每列带的真实列数受物理上限约束：带宽/最小列宽。剔除字间幻影列，避免行预算虚低。
+    def _real_cols(c):
+        w = (col_cuts[c + 1] - col_cuts[c]) if c + 1 < len(col_cuts) else tile_max
+        return min(col_cells[c], max(1, w // MIN_COL_PX))
+    max_cols = max((_real_cols(c) for c in range(len(col_cells))), default=1)
     max_rows = max(1, cell_budget // max(1, max_cols))
     row_cuts, row_cells = _group_boundaries(row_bnd, tile_max, max_cells=max_rows)
 
