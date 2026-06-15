@@ -124,8 +124,10 @@ def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4):
                 cc = min(cc, round(density * pix_w(c)))   # 用密度估封顶 col_cells，防爆炸
             W.append(max(1, cc))
 
-    # 第二遍：按 W_c 重组。band 行数取中位数（用 max 恢复截断行实测净中性——恢复的行
-    # 多为空格、内容已随截断丢失，且 max 会在别处过补；故仍用中位数 + 退化块剔除）。
+    # 第二遍：按 W_c 重组。band 行数取「非退化列的最大值」(=密集/行标签列，读满全行)。
+    # 稀疏列(三角表的数据列)会把空格行折叠→读得少；取中位会被稀疏列拖垮、整段丢行
+    # (实测某表 GT 250 行 → 中位重建只剩 125)。先用退化过滤(deg_hi/deg_lo 围绕中位)剔除
+    # 幻觉/异常列，再在剩余列里取 max 作为该 band 真实行数。短读的稀疏列底部补空对齐。
     all_rows = []
     for r in range(n_band):
         grids = parsed[r]
@@ -139,15 +141,16 @@ def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4):
                    for g in grids]
         if not any(content):
             continue
-        band = [[] for _ in range(med)]
+        nrows = max(len(g) for c, g in enumerate(grids) if content[c])  # 密集列=真实行数
+        band = [[] for _ in range(nrows)]
         for c in range(n_col):
             g = grids[c]
             wc = W[c]
             if not content[c]:
-                for i in range(med):
+                for i in range(nrows):
                     band[i].extend([""] * wc)
                 continue
-            for i in range(med):
+            for i in range(nrows):
                 cells = list(g[i]) if i < len(g) else []
                 cells = (cells + [""] * wc)[:wc]
                 band[i].extend(cells)
