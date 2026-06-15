@@ -14,6 +14,7 @@
 """
 import re
 from collections import Counter
+from rapidfuzz.distance import Levenshtein as _Lev
 from teds import _first_table, _parse_grid
 
 _GT_TABLE_OPEN = '<table border="1" cellpadding="8" cellspacing="0">'
@@ -178,14 +179,73 @@ def _is_caption_row(cells):
     return sum(1 for c in cells if c and c.strip()) <= 4
 
 
-def _split_at_headers(rows, min_seg=3):
-    """在"纯文字表头/标题行"处把行序列切成多个子表段（标题行归入其下方子表）。
-    仅当能切出 ≥2 段、且每段 ≥min_seg 行时才生效，避免误切。
+def _row_sim(a, b):
+    """两行整行签名的归一化相似度 ∈[0,1]（数字也参与，1=完全相同）。"""
+    sa, sb = "|".join(a), "|".join(b)
+    m = max(len(sa), len(sb))
+    return 1.0 - _Lev.distance(sa, sb) / m if m else 1.0
+
+
+_NUM_RE = re.compile(r"-?[\d,]+\.?\d*%?")
+
+
+def _is_num(s):
+    return bool(_NUM_RE.fullmatch((s or "").replace(" ", "")))
+
+
+def _first_cell(row):
+    for c in row:
+        if c and c.strip():
+            return c.strip()
+    return ""
+
+
+def _split_at_headers(rows, min_seg=3, sim_hi=0.85, max_frac=0.4):
+    """在"子表边界行"处把行序列切成多个子表段（边界行归入其下方子表）。
+
+    两个**与"标题长短/有无数字"无关**的边界信号(取并集)：
+      B. **首列『数字运行→文本』**(主力)：数据行首列是数字、子表标题/表头首列是文本。
+         沿首列向下,**只用数据行累积"数字运行"**,**忽略每段开头的文本行(表头/多级表头)**——
+         否则重复表头会污染运行、让后续边界全漏(实测召回掉到 61%)。当数字运行 ≥2 后遇到
+         文本行 → 该处即子表边界。对 OCR 鲁棒(认数字)、短标题不漏、无状态污染。
+         GT 实测:多表召回 100%、单表仅 1 误检(交费期间这类文本列被合并的个案)。
+         注:曾试"翻转后须重现表头"做确认,虽去掉那 1 误检,但召回暴跌到 85%(误杀边界后
+         表头未在窗口内重现的真子表)——得不偿失,不用确认。
+      A. **重复表头**(备份)：与首行整行高度相似的后续行，带 max_frac 防误判闸。GT 上被 B
+         覆盖，但 B 依赖数字首列；纯文本首列的多子表由 A 兜底；0 误检故保留。
+    仅当能切出 ≥2 段、每段 ≥min_seg 行时才生效。
     """
-    segs = []
-    cur = []
-    for row in rows:
-        if _is_caption_row(row) and len(cur) >= min_seg:
+    n = len(rows)
+    if n < 2 * min_seg:
+        return [rows]
+    header = rows[0]
+    bnds = set()
+
+    # B. 首列 数字运行(≥2,忽略开局文本) → 文本 = 边界（主力）
+    fc = [_first_cell(r) for r in rows]
+    run = 0
+    for i in range(1, n):
+        cur = fc[i]
+        if not cur:
+            continue
+        if _is_num(cur):
+            run += 1                          # 数据行,累积数字运行
+        else:
+            if run >= 2:                      # 已建立数字运行 → 该文本行是子表边界
+                bnds.add(i)
+                run = 0
+            # run<2: 仍在该段开头表头区,忽略此文本行(不计边界、不重置已有运行)
+
+    # A. 重复表头（仅当 B 一个边界都没找到时兜底：纯文本首列的多子表，B 的数字运行建不起来）。
+    # 不与 B 取并集——并集会让 A 在 B 已正确切分的数字表上过切(实测召回 100%→96%)。
+    if not bnds:
+        hdr_match = [i for i in range(1, n) if _row_sim(rows[i], header) >= sim_hi]
+        if 0 < len(hdr_match) <= max_frac * n:
+            bnds |= set(hdr_match)
+
+    segs, cur = [], []
+    for i, row in enumerate(rows):
+        if i in bnds and len(cur) >= min_seg:
             segs.append(cur)
             cur = [row]
         else:
