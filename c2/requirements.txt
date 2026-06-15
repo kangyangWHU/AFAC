@@ -1,0 +1,14 @@
+# AFAC c2 多模态文档解析 —— Python 依赖
+# 评测与表格 TEDS
+numpy>=1.24
+rapidfuzz>=3.0          # C 级编辑距离 / cdist，用于文本编辑距离与网格 TEDS
+apted>=1.0.3            # 小型/含跨行跨列表格的精确树编辑距离
+lxml>=4.9              # HTML 表格解析
+beautifulsoup4>=4.12    # HTML 辅助解析
+# 图像处理（切块 / 预处理）
+Pillow>=10.0
+opencv-python-headless>=4.8   # 去噪/二值化/去倾斜（无 GUI 依赖，便于服务器复现）
+# 数据与流程
+pandas>=2.0
+tqdm>=4.65
+requests>=2.31         # FinixDoc-VL API 调用

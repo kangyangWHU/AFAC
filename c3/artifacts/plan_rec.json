@@ -1,0 +1,60 @@
+{
+  "decisions": [
+    {
+      "model": "popularity",
+      "priority": 1,
+      "signal": "cold_start_share=0.4743, empty_test_share=0.3515",
+      "rationale": "近半测试用户序列≤2、部分为空，热门是冷启动/空序列的兜底",
+      "space_hint": {}
+    },
+    {
+      "model": "repeat_freq",
+      "priority": 1,
+      "signal": "repeat_rate=0.5638, target_eq_mostfreq=0.3057",
+      "rationale": "复购率高，按历史频次排序是主信号",
+      "space_hint": {}
+    },
+    {
+      "model": "blend",
+      "priority": 1,
+      "signal": "repeat+pop+covis 组合",
+      "rationale": "三者加权融合+去重+热门回填，作为综合主力",
+      "space_hint": {}
+    },
+    {
+      "model": "covisitation",
+      "priority": 2,
+      "signal": "repeat_rate=0.5638",
+      "rationale": "约44%为非复购，用共现召回补齐",
+      "space_hint": {}
+    },
+    {
+      "model": "sasrec",
+      "priority": 4,
+      "signal": "cold_start_share=0.4743, test_seq_median=3",
+      "rationale": "测试序列极短，序列模型大概率无增量；作对照组验证后再决定是否放弃",
+      "space_hint": {}
+    }
+  ],
+  "round0_feedback": {
+    "popularity_val_ndcg": 0.3203,
+    "repeat_plus_pop_val_ndcg": 0.5088
+  },
+  "first_trial": "blend(repeat_freq + covisitation + popularity)",
+  "budget": {
+    "strategy": "cheap_rules_first_then_confirm_heavy",
+    "screen_cheap_first": [
+      "popularity",
+      "repeat_freq",
+      "covisitation",
+      "blend"
+    ],
+    "heavy_quota": "≤25% 预算给 sasrec/mf 做对照"
+  },
+  "stopping_policy": {
+    "min_gain": 0.003,
+    "patience_rounds": 3,
+    "reserve_for_final_retrain_sec": 600
+  },
+  "source": "deterministic_fallback"
+}

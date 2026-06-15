@@ -1,0 +1,30 @@
+{
+  "task": "recommendation",
+  "metric": "ndcg@10",
+  "n_users": 50000,
+  "n_train": 40000,
+  "n_test": 10000,
+  "n_items": 2156,
+  "train_seq_len": {
+    "mean": 46.2212,
+    "median": 32,
+    "p90": 114,
+    "max": 189
+  },
+  "test_seq_len": {
+    "mean": 6.2514,
+    "median": 3,
+    "p90": 3,
+    "max": 174
+  },
+  "cold_start_share": 0.4743,
+  "empty_test_share": 0.3515,
+  "repeat_rate": 0.5638,
+  "target_eq_last": 0.2422,
+  "target_eq_mostfreq": 0.3057,
+  "target_in_global_top10": 0.562,
+  "distinct_targets": 235,
+  "target_concentration_top10": 0.562,
+  "val_popularity_ndcg": 0.3203,
+  "val_repeat_plus_pop_ndcg": 0.5088
+}

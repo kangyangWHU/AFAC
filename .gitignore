@@ -1,0 +1,37 @@
+# ============ Python ============
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# ============ 环境 ============
+.venv/
+venv/
+env/
+
+# ============ 大型原始数据集（比赛提供，可重新下载）============
+**/data/
+*.jpg
+*.jpeg
+*.png
+
+# ============ c4：大型派生产物（可由代码重建）============
+c4/index/
+c4/processed/
+c4/chunks/
+c4/labeling/
+
+# ============ c3：大型派生产物 ============
+c3/data/
+
+c2/cache/
+c2/out/
+# ============ 临时/系统 ============
+*.tmp
+*.log.*
+.DS_Store
+
+# 说明：
+#  - 保留 c2/out/（评测结果、提交文件 submission_A.csv 等可追溯产物）
+#  - 保留全部 src 代码、plan.md、doc、requirements

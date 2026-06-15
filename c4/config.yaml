@@ -1,0 +1,95 @@
+# 赛题四 全局配置。改算法/调参只改这里，不动代码。
+
+paths:
+  raw_root: data/public_dataset_upload/raw
+  questions_dir: data/public_dataset_upload/questions/group_a
+  doc_index: doc_index.json
+  processed_dir: processed
+  chunks_dir: chunks
+  index_dir: index
+
+# LLM（仅 Qwen 系，合规）。本地 vLLM 开发用；正式提交切百炼。
+# 切百炼 qwen3.7-plus：base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+#                     api_key: env:BAILIAN   model: qwen3.7-plus
+llm:
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key: file:.bailian_key   # 也支持 env:BAILIAN / 字面量
+  model: qwen3.7-plus
+  temperature: 0.0
+  max_tokens: 3072          # 留足空间让逐项分析后能写出"答案："行(防截断->空答案/过度选择)
+                            # 平均仅~400 tok/call(prompt要求简洁)，提高上限只救少数长推理题，成本低
+  enable_thinking: false     # Qwen3.6 思考模式：关→省token(2 vs 279)，靠prompt显式CoT
+  timeout: 120
+  retries: 2
+
+# 文本归一化（解析后、入块前）
+normalize:
+  strip_cjk_spaces: true     # 去除中文字符间的伪空格（PyMuPDF 常见："研 发"->"研发"）
+  collapse_spaces: true      # 合并连续空白
+
+# 结构感知分块
+chunker:
+  target_chars: 600          # 目标块大小（字符）
+  max_chars: 1000            # 块上限，超则切分
+  min_chars: 80              # 过短块并入相邻
+  merge_short_articles: true # 法规短条文合并到 target_chars
+  table_as_chunk: true       # 表格独立成块（不与正文混切）
+  parent_window: 1           # small-to-big：检索命中后回填前后 N 个兄弟块
+  drop_low_value: true       # 建索引时丢弃目录/空壳表/碎片块
+
+# BM25 词法检索
+bm25:
+  tokenizer: jieba           # jieba | char
+  k1: 1.5
+  b: 0.75
+  topk: 8                    # 单 query 返回块数
+  drop_stopwords: true
+
+# 检索编排
+retrieval:
+  per_option_query: true     # multi/tf 对每个选项单独检索
+  per_option_per_doc: true   # 每个选项在【每个候选文档内】单独检索(治大文档错段/某年值漏召回)
+  per_option_doc_k: 3        # 每个(选项×文档)取前 k
+  dedup: true
+  min_per_doc: 2             # 每个候选文档至少保底召回块数（多文档题防漏）
+  max_chunks: 14             # 最终证据块上限（控 token）。指标/选项定向块走 reserved 优先纳入
+  per_query_k: 4             # 单条 query 取前 k
+  backfill_parent: true      # 命中块回填前后兄弟块(small-to-big)
+  filter_low_value: true     # 过滤目录页/空壳表/碎片块
+  # 指标定向检索：对比题里选项偏向某一文档，另一文档漏掉关键表。
+  # 对每个候选文档额外跑这些 query，保证关键指标表被各文档都拉到。
+  metric_queries:
+    financial_reports: "主要会计数据 营业收入 营业总收入 归属于上市公司股东的净利润 经营活动产生的现金流量净额 研发投入 研发费用 现金分红 股息"
+    # financial_contracts 的指标定向反而引入噪声(募集书释义/碎表多)，暂禁用
+  metric_per_doc: 3          # 每个文档从指标定向 query 至少纳入的块数
+  # 自适应兜底：模型答空/无 时，提高 min_per_doc 重检索重问
+  adaptive_on_empty: true
+  adaptive_min_per_doc: 5
+
+# Qwen embedding（合规）。供 B 榜语义路由。
+# backend=local: 本地 Qwen3-Embedding(零API token,无需key) ; backend=bailian: text-embedding-v4(需key)
+embed:
+  backend: local
+  device: cpu
+  local_model: Qwen/Qwen3-Embedding-0.6B
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key: env:BAILIAN
+  model: text-embedding-v4
+  dim: 1024
+  batch: 32
+  enabled: true
+
+# B 榜文档路由
+router:
+  chunk_k: 30                # 每条 query 在域内取前 k chunk 做 doc 聚合
+  top_k: 5                   # 路由返回候选文档数（喂给后续检索）
+  sig_weight: 1.0            # 文档签名(标题/目录)命中的乘性加成权重(实测最优;0=纯正文sum)
+
+# 推理
+reasoner:
+  max_evidence_chars: 12000  # 喂给模型的证据上限（控 token）
+
+# 伪表清洗（解析过度检测的版面表）
+table_clean:
+  enabled: true
+  reclass_min_digits: 5      # 表格块数字<此 且 像释义/正文 -> 重分类为 text 并去管道符

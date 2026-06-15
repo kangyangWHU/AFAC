@@ -1,0 +1,31 @@
+{
+  "task": "classification",
+  "metric": "accuracy",
+  "n_nodes": 13752,
+  "n_edges_undirected": 27597,
+  "avg_degree": 4.0135,
+  "median_degree": 2,
+  "isolated_ratio": 0.203,
+  "n_features": 767,
+  "feat_nnz_per_node": 136.7537,
+  "n_classes": 10,
+  "class_counts": {
+    "0": 349,
+    "1": 1713,
+    "2": 1131,
+    "3": 433,
+    "4": 4127,
+    "5": 247,
+    "6": 389,
+    "7": 655,
+    "8": 1724,
+    "9": 233
+  },
+  "imbalance_ratio": 17.7124,
+  "edge_homophily": 0.79,
+  "test_with_labeled_neighbor_ratio": 0.7448,
+  "n_train": 11001,
+  "n_test": 2751,
+  "val_majority_baseline_acc": 0.3753,
+  "val_feature_only_LR_acc": 0.3539
+}

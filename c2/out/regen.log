@@ -1,0 +1,110 @@
+待处理图片 100 张 → ../out/submission_A.csv
+  [1/100] 0e28acf1-b5e0-4925-808d-028affe0517a.jpg kind=long calls=9 len=8455 累计1s
+  [2/100] 11d2c468-8853-410c-906b-e62eba4861fd.jpg kind=long calls=20 len=18324 累计2s
+  [3/100] 14ed0d23-8f15-49d1-8f48-a616e5a7b750.jpg kind=long calls=8 len=7959 累计2s
+  [4/100] 1733e03c-d139-45a1-9ea5-8150aea75a98.jpg kind=long calls=15 len=14235 累计3s
+  [5/100] 1c3ec669-c688-4bfe-915e-51b7143343fa.jpg kind=long calls=23 len=21136 累计4s
+  [6/100] 1eebc3ae-6617-40c6-80fa-2f5fa55042cd.jpg kind=long calls=18 len=17798 累计6s
+  [7/100] 2417b258-b6fc-442c-bab5-5df771c4a9bd.jpg kind=long calls=15 len=14235 累计6s
+  [8/100] 295c0775-81a6-4e2e-9f0b-d856f372da24.jpg kind=long calls=17 len=15712 累计7s
+  [9/100] 2f76ff1e-6a22-48c7-8299-3b44ac156039.jpg kind=long calls=37 len=34791 累计10s
+  [10/100] 3ed0a71a-7641-4a48-8aab-9c618f1aa387.jpg kind=long calls=6 len=5734 累计10s
+  [11/100] 483bd6bf-88b2-4c1c-8aed-8e639a3ae385.jpg kind=long calls=13 len=12375 累计10s
+  [12/100] 4c9f106a-f120-4217-8f42-2fe92d052116.jpg kind=long calls=10 len=9577 累计11s
+  [13/100] 5bd42e94-0a3c-4c8b-824e-c034b8cc6a14.jpg kind=long calls=18 len=17176 累计12s
+  [14/100] 5c909fb8-61e7-406b-bc5e-db9f00d30c3a.jpg kind=long calls=19 len=16888 累计12s
+  [15/100] 5e289683-fb3a-41c0-b038-32093e977032.jpg kind=long calls=18 len=16267 累计13s
+  [16/100] 613ef75d-818d-403c-ab19-04f5b98ff90a.jpg kind=long calls=7 len=6283 累计13s
+  [17/100] 6140c70e-6126-49a3-92b0-a1ea5522636c.jpg kind=long calls=9 len=8315 累计14s
+  [18/100] 64494d4d-e54a-4ea9-b0d3-23ad5568acc4.jpg kind=long calls=10 len=9577 累计14s
+  [19/100] 6692a075-2d31-4004-b42c-a2cdd432b618.jpg kind=long calls=10 len=9762 累计15s
+  [20/100] 6b678430-2a03-4dd9-9eb0-42bc906a9989.jpg kind=long calls=18 len=16539 累计15s
+  [21/100] 734c49e3-fc7b-47ee-a376-aa640670cde9.jpg kind=long calls=18 len=16539 累计16s
+  [22/100] 7595a50a-c59c-4ba1-9baa-c08bb4fe3be2.jpg kind=long calls=18 len=17176 累计17s
+  [23/100] 76d0ad5b-ff11-4452-a56b-713a1dfc9816.jpg kind=long calls=18 len=16539 累计18s
+  [24/100] 78930f19-7632-4523-a108-63d42f7ca0f0.jpg kind=long calls=8 len=6941 累计18s
+  [25/100] 7de016e8-2fc2-47b1-b02e-aafee52d7c58.jpg kind=long calls=15 len=14235 累计19s
+  [26/100] 801a2384-994f-48a7-b664-592597495097.jpg kind=long calls=20 len=18857 累计19s
+  [27/100] 80c0cc92-233e-455f-a339-728520630c02.jpg kind=long calls=7 len=6427 累计20s
+  [28/100] 81f65653-1de7-4058-8275-2ae47859eba7.jpg kind=long calls=17 len=17421 累计20s
+  [29/100] 8654bcbb-7d3a-47d7-9e21-12343d84d289.jpg kind=long calls=18 len=16267 累计21s
+  [30/100] 8d275a50-7e27-413d-8e85-c0e8fb910ad9.jpg kind=long calls=9 len=8481 累计21s
+  [31/100] 8e33f963-c109-4087-9461-2bdae27b624b.jpg kind=long calls=18 len=17798 累计22s
+  [32/100] 93b63d70-ef1f-4027-b2b8-1c3165d59f31.jpg kind=long calls=15 len=14915 累计23s
+  [33/100] 97953b4d-67c3-49c7-922e-450b565dd401.jpg kind=long calls=12 len=10721 累计23s
+  [34/100] af1e5d99-41e8-440e-abf7-fdb8b12d942c.jpg kind=long calls=20 len=18857 累计24s
+  [35/100] b129ad92-2f2e-4910-afb9-83f6966fc5e6.jpg kind=long calls=18 len=16539 累计25s
+  [36/100] c1728302-1da3-417a-be06-99cce390a426.jpg kind=long calls=12 len=11218 累计25s
+  [37/100] c4d7c04e-db75-4a79-88db-5c72a1496997.jpg kind=long calls=9 len=8665 累计26s
+  [38/100] ce922548-8afc-4e82-af9b-16f821860102.jpg kind=long calls=18 len=17798 累计26s
+  [39/100] d1252849-49b4-49d6-8e64-239c47948593.jpg kind=long calls=18 len=16539 累计27s
+  [40/100] d5375b98-7441-4cbd-bd8b-6b42beab0de4.jpg kind=long calls=10 len=8653 累计28s
+  [41/100] d71d562d-e2aa-4cd1-ac5b-a2484d82385f.jpg kind=long calls=9 len=7706 累计28s
+  [42/100] d792b78c-d270-4bea-9134-fcc8e32ca10a.jpg kind=long calls=18 len=17798 累计29s
+  [43/100] dacfd6b3-1166-4f7e-bf89-010e48a690f1.jpg kind=long calls=15 len=14235 累计29s
+  [44/100] ddefc845-63d0-4869-be03-ec0bc25dae68.jpg kind=long calls=12 len=12387 累计30s
+  [45/100] e707b76d-6123-427b-8332-638455a402d5.jpg kind=long calls=18 len=16267 累计31s
+  [46/100] ec71aa1e-dda8-497d-bd4d-de38ae8eef48.jpg kind=long calls=13 len=12187 累计31s
+  [47/100] ed36fc47-79b6-4ce1-9777-ec7567bf93f3.jpg kind=long calls=20 len=18324 累计32s
+  [48/100] ef04a8a0-c28d-4a49-90c8-8943b5adae41.jpg kind=long calls=13 len=12818 累计32s
+  [49/100] f6497e33-3cda-4727-b369-98517ed50ad1.jpg kind=long calls=20 len=18547 累计33s
+  [50/100] f907bdb7-1876-41f7-968b-c66bf19eb2f3.jpg kind=long calls=18 len=16539 累计34s
+  [51/100] 0cd74f08-df57-421d-923e-3fa3f1d017c1.jpg kind=table calls=28 len=167923 累计34s
+  [52/100] 0f372a06-467a-465c-91ee-ea17f2ed0a62.jpg kind=table calls=32 len=18933 累计39s
+  [53/100] 1829aea8-c97e-43eb-a97c-285b0f56ee3c.jpg kind=table calls=243 len=429325 累计64s
+  [54/100] 185a2337-c7a0-41f0-a283-a3d8c22a1041.jpg kind=table calls=8 len=90426 累计64s
+  [55/100] 1e4c0f3c-8425-49ef-997b-15fc76bd9fc1.jpg kind=table calls=12 len=33434 累计64s
+  [56/100] 276f08ab-b337-4baa-87d0-b7ea40c31fbc.jpg kind=table calls=50 len=107999 累计65s
+  [57/100] 3792d522-0021-48be-94f6-660f0704cf23.jpg kind=table calls=20 len=130923 累计244s
+  [58/100] 3b243a83-1024-4139-b39c-a987cdeece47.jpg kind=table calls=20 len=154487 累计247s
+  [59/100] 3bfd625b-bc23-4b2f-9fdd-7d3208b8cd65.jpg kind=table calls=435 len=639285 累计270s
+  [60/100] 41c420f9-5026-43c6-8ae6-caf4c60adee6.jpg kind=table calls=12 len=13340 累计270s
+  [61/100] 425fb187-8c30-49ba-a959-13759942a53a.jpg kind=table calls=18 len=54107 累计279s
+  [62/100] 471413c1-992f-43c7-9b41-287418fcb319.jpg kind=table calls=30 len=171425 累计286s
+  [63/100] 4752c7d7-df43-48fc-8e1c-b15b57a76a51.jpg kind=table calls=45 len=303869 累计480s
+  [64/100] 4c2588e5-f850-4fb4-bc7f-8ac47d2418b0.jpg kind=table calls=27 len=129271 累计483s
+  [65/100] 4c9e11b2-a594-472b-8658-1b88e2fdeaaf.jpg kind=table calls=78 len=105539 累计496s
+  [warn] tile 调用失败，置空：FinixDoc-VL 调用失败（重试 6 次）：HTTPSConnectionPool(host='finixdocapi.alipay.com', port=443): Max retries exceeded with url: /a
+  [warn] tile 调用失败，置空：FinixDoc-VL 调用失败（重试 6 次）：('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+  [warn] tile 调用失败，置空：FinixDoc-VL 调用失败（重试 6 次）：('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+  [warn] tile 调用失败，置空：FinixDoc-VL 调用失败（重试 6 次）：('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+  [warn] tile 调用失败，置空：FinixDoc-VL 调用失败（重试 6 次）：('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+  [warn] tile 调用失败，置空：FinixDoc-VL 调用失败（重试 6 次）：HTTPSConnectionPool(host='finixdocapi.alipay.com', port=443): Max retries exceeded with url: /a
+  [warn] tile 调用失败，置空：FinixDoc-VL 调用失败（重试 6 次）：HTTPSConnectionPool(host='finixdocapi.alipay.com', port=443): Read timed out. (read timeout=240
+  [warn] tile 调用失败，置空：FinixDoc-VL 调用失败（重试 6 次）：('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+  [66/100] 4e32dba9-0799-4442-9909-e4a80733f122.jpg kind=table calls=20 len=67036 累计1809s
+  [67/100] 58b3cb9e-ef05-45c4-875d-39dd34ea9dbe.jpg kind=table calls=105 len=41661 累计1840s
+  [68/100] 5b93ec6f-42f0-4571-8c4f-a79d3517537a.jpg kind=table calls=29 len=16056 累计1857s
+  [69/100] 5bbd7e2c-75ae-4844-bcbd-9ae46326dedd.jpg kind=table calls=30 len=51805 累计1857s
+  [70/100] 6dfcd28f-b67a-49de-86ee-3c79a5077351.jpg kind=table calls=7 len=43836 累计1974s
+  [71/100] 71f773c9-6a07-4b44-bee7-8c267c9c6b07.jpg kind=table calls=252 len=424664 累计1986s
+  [72/100] 7859d2f1-5d29-44cc-8b33-baf26f9e0f33.jpg kind=table calls=11 len=44571 累计1987s
+  [73/100] 7e001e38-3836-4d53-bc7b-e7b96acc0718.jpg kind=table calls=22 len=6488 累计1988s
+  [74/100] 81016aef-ec9c-495e-8eee-2dc0012027d7.jpg kind=table calls=27 len=177162 累计1993s
+  [75/100] 81386925-b114-4c45-898a-a9e374afb6ee.jpg kind=table calls=55 len=83463 累计1998s
+  [76/100] 8154f223-bf21-4d41-b729-cea88fd4fd4e.jpg kind=table calls=12 len=13363 累计1998s
+  [77/100] 88684b6b-c5c6-4841-8708-518344458535.jpg kind=table calls=31 len=160756 累计2010s
+  [78/100] 8a150db7-d18e-436a-98d5-1eab1951b8c1.jpg kind=table calls=14 len=5752 累计2014s
+  [79/100] 8e60d5f8-1462-4d57-bcfa-3cc5c3a82d2a.jpg kind=table calls=8 len=58731 累计2116s
+  [80/100] 9212016c-38ce-46b7-8b33-2504a165bb5e.jpg kind=table calls=9 len=7493 累计2117s
+  [81/100] aa754157-8785-4822-8dc8-c014046856c3.jpg kind=table calls=4 len=7783 累计2159s
+  [82/100] ab129e6b-7f2a-49fb-b323-54f62682f4ff.jpg kind=table calls=103 len=129618 累计2164s
+  [83/100] aecf66d9-d361-4b7b-948a-e5e8693c4877.jpg kind=table calls=40 len=310360 累计2165s
+  [84/100] afa837b9-0af7-46f6-b4c8-a81c86663e32.jpg kind=table calls=15 len=6574 累计2179s
+  [85/100] b1044f0e-008d-45d4-8238-29910bafc7a5.jpg kind=table calls=46 len=329376 累计2728s
+  [86/100] b8c1ae8f-9938-46a4-9ee9-1f7e7ea63d77.jpg kind=table calls=45 len=283171 累计2999s
+  [87/100] bac0aeac-2cea-49c3-8714-d8f8753afcde.jpg kind=table calls=80 len=567058 累计3001s
+  [88/100] baf9a56f-852d-4d4f-be57-581d3e16468e.jpg kind=table calls=163 len=192325 累计3007s
+  [89/100] bf21c4c0-cab4-4116-9b64-fe341dad80e1.jpg kind=table calls=80 len=528368 累计3009s
+  [90/100] c3c0bcd5-25b7-4840-b3ae-f1af11a541b0.jpg kind=table calls=15 len=18740 累计3015s
+  [91/100] d14d1076-a83f-4e0e-a912-fa67ac7403ae.jpg kind=table calls=7 len=43836 累计3016s
+  [92/100] d1752e16-eb38-4504-bd3f-45afaba26bba.jpg kind=table calls=48 len=284186 累计3017s
+  [93/100] d8b59365-8a47-4d71-8d6f-564f8084aac8.jpg kind=table calls=21 len=13380 累计3053s
+  [94/100] dbaff0f7-74a8-4614-82f2-7ff61a7d850a.jpg kind=table calls=11 len=10003 累计3053s
+  [95/100] dc98af1d-ad8e-4418-baf1-ab775b5b0843.jpg kind=table calls=47 len=87570 累计3054s
+  [96/100] deb8de95-9c68-4a98-93bb-1be5816bdc1c.jpg kind=table calls=110 len=144688 累计3059s
+  [97/100] e082df7b-7afb-44ba-bf46-2c28ebe6c460.jpg kind=table calls=40 len=311583 累计3060s
+  [98/100] e4e9de30-9e6e-4624-88e8-fd9b801272c5.jpg kind=table calls=9 len=8521 累计3060s
+  [99/100] f353d76e-efd7-4a3c-8579-38b3f916a6d3.jpg kind=table calls=50 len=84590 累计3069s
+  [100/100] f3cfab65-77d7-4c72-8f40-b4bc14624f52.jpg kind=table calls=8 len=58703 累计3212s
+完成：100 行，用时 3213s → ../out/submission_A.csv

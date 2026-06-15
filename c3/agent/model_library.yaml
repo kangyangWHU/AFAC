@@ -1,0 +1,81 @@
+# Agent 可调用的模型库与搜索空间。
+# 只描述「有哪些选项、各自适合/不适合什么情形、超参边界」，
+# 不写任何「针对本数据集的最优组合」——最优解必须由实验循环跑出来。
+
+classification:
+  models:
+    feature_lr:
+      desc: 仅用节点特征的逻辑回归；不依赖图。
+      good_for: 孤立节点多、homophily 低、需要强 baseline。
+      cost: very_low
+      space: {C: [0.1, 1.0, 10.0], class_weight: [null, balanced]}
+    feature_mlp:
+      desc: 仅用节点特征的 MLP。
+      good_for: 特征信息丰富、孤立节点多。
+      cost: low
+      space: {hidden: [128, 256], dropout: [0.2, 0.5], lr: [0.001, 0.01], class_weight: [null, balanced]}
+    lightgbm:
+      desc: 梯度提升树，吃稠密/稀疏特征。
+      good_for: 特征强、类别不平衡。
+      cost: low
+      space: {num_leaves: [31, 63], lr: [0.05, 0.1], n_estimators: [200, 500]}
+    gcn:
+      desc: 图卷积；靠邻居消息传递。
+      good_for: 图稠密、homophily 高。
+      bad_for: 平均度低、孤立节点多。
+      cost: medium
+      space: {layers: [2, 3], hidden: [64, 128, 256], dropout: [0.3, 0.5, 0.7], lr: [0.001, 0.01], weight_decay: [0, 0.0005]}
+    gat:
+      desc: 带注意力的 GNN。
+      good_for: 邻居质量不均、需要加权聚合。
+      cost: medium
+      space: {layers: [2, 3], hidden: [64, 128], heads: [4, 8], dropout: [0.3, 0.6], lr: [0.005, 0.01]}
+  postproc:
+    correct_and_smooth:
+      desc: 在任意 backbone 的预测上做标签传播修正（Correct & Smooth）。
+      good_for: homophily 高时极强且几乎免费。
+      space: {alpha1: [0.5, 0.8, 0.9], alpha2: [0.5, 0.8], num_prop: [10, 50]}
+    feature_propagation:
+      desc: 用图传播填补孤立/稀疏节点特征。
+      good_for: 孤立节点多时改善 backbone 输入。
+      space: {num_prop: [10, 40]}
+
+recommendation:
+  models:
+    popularity:
+      desc: 全局/分群热门列表。
+      good_for: 极冷启动、空序列用户的兜底。
+      cost: trivial
+      space: {group_by: [null, u_cat_01], recency_decay: [0.0, 0.9]}
+    repeat_freq:
+      desc: 按用户历史交互频次排序（复购）。
+      good_for: 复购率高的数据。
+      cost: trivial
+      space: {weight_last: [1.0, 1.5, 2.0]}
+    covisitation:
+      desc: item-item 共现矩阵，召回与历史共现的 item。
+      good_for: 覆盖非复购部分。
+      cost: low
+      space: {window: [2, 5, 10], normalize: [count, pmi]}
+    blend:
+      desc: repeat_freq + covisitation + popularity 的加权融合 + 去重 + 热门回填。
+      good_for: 综合主力方案。
+      cost: low
+      space: {w_repeat: [1.0, 2.0], w_covis: [0.5, 1.0], w_pop: [0.1, 0.3]}
+    item_content_knn:
+      desc: 用 item 匿名特征做内容相似召回。
+      good_for: 新 item / 长尾召回（B 榜 item 暴增时）。
+      cost: low
+      space: {k: [50, 200]}
+    sasrec:
+      desc: 自注意力序列推荐模型。
+      good_for: 训练序列长且测试序列也长时。
+      bad_for: 测试序列极短/冷启动占比高。
+      cost: high
+      space: {dim: [64, 128], max_len: [20, 50], epochs: [20, 50], lr: [0.001]}
+    mf_bpr:
+      desc: 隐式反馈矩阵分解（BPR）。
+      good_for: 交互稠密。
+      bad_for: 冷用户多。
+      cost: medium
+      space: {dim: [32, 64], reg: [0.001, 0.01]}

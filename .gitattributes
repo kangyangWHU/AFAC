@@ -1,0 +1,3 @@
+# 提交文件等保持原样，避免行尾转换破坏 CSV 格式
+c2/out/*.csv -text
+*.csv -text

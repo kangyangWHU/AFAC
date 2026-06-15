@@ -1,0 +1,2867 @@
+{
+ "2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/2.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "11": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/11.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "6": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/6.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "10": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/10.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "15": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/15.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/1.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "9": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/9.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "4": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/4.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "8": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/8.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "16": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/16.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "3": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/3.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "5": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/5.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "13": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/13.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "7": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/7.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "14": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/14.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "12": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/insurance/12.pdf",
+  "domain": "insurance",
+  "ext": "pdf"
+ },
+ "text08": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text08.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text09": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text09.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text06": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text06.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text03": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text03.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text07": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text07.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text11": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text11.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text13": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text13.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text04": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text04.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text01": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text01.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text10": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text10.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text02": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text02.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text05": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text05.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text14": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text14.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "text12": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_contracts/text12.pdf",
+  "domain": "financial_contracts",
+  "ext": "pdf"
+ },
+ "annual_byd_2025_report": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_reports/annual_byd_2025_report.PDF",
+  "domain": "financial_reports",
+  "ext": "pdf"
+ },
+ "annual_chinamobile_2025_report": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_reports/annual_chinamobile_2025_report.PDF",
+  "domain": "financial_reports",
+  "ext": "pdf"
+ },
+ "annual_cscec_2024_report": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_reports/annual_cscec_2024_report.pdf",
+  "domain": "financial_reports",
+  "ext": "pdf"
+ },
+ "annual_byd_2024_report": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_reports/annual_byd_2024_report.PDF",
+  "domain": "financial_reports",
+  "ext": "pdf"
+ },
+ "annual_cmb_2025_report": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_reports/annual_cmb_2025_report.PDF",
+  "domain": "financial_reports",
+  "ext": "pdf"
+ },
+ "annual_catl_2024_report": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_reports/annual_catl_2024_report.PDF",
+  "domain": "financial_reports",
+  "ext": "pdf"
+ },
+ "annual_cscec_2025_report": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_reports/annual_cscec_2025_report.pdf",
+  "domain": "financial_reports",
+  "ext": "pdf"
+ },
+ "annual_midea_2025_report": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_reports/annual_midea_2025_report.PDF",
+  "domain": "financial_reports",
+  "ext": "pdf"
+ },
+ "annual_midea_2024_report": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_reports/annual_midea_2024_report.PDF",
+  "domain": "financial_reports",
+  "ext": "pdf"
+ },
+ "annual_catl_2025_report": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/financial_reports/annual_catl_2025_report.PDF",
+  "domain": "financial_reports",
+  "ext": "pdf"
+ },
+ "csrc_0063_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0063_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0047_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0047_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0067_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0067_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0045_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0045_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0005_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0005_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0065_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0065_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0048_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0048_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0013_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0013_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0056_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0056_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0003_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0003_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0054_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0054_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0009_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0009_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0004_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0004_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0068_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0068_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0053_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0053_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0057_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0057_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0046_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0046_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0011_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0011_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0034_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0034_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0055_att3": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0055_att3.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0020_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0020_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0038_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0038_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0016_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0016_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0042_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0042_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0020_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0020_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0038_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0038_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0021_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0021_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0029_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0029_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0033_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0033_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0019_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0019_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0051_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0051_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0050_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0050_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0066_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0066_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0032_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0032_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0010_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0010_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0043_att3": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0043_att3.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0039_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0039_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0013_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0013_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0007_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0007_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0041_att5": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0041_att5.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0048_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0048_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0052_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0052_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0030_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0030_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0018_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0018_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0061_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0061_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0055_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0055_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0017_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0017_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0056_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0056_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0043_att4": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0043_att4.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0055_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0055_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0040_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0040_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0049_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0049_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0006_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0006_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0015_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0015_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0026_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0026_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0033_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0033_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0008_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0008_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0043_att5": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0043_att5.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0024_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0024_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0012_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0012_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0001_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0001_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0041_att3": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0041_att3.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0011_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0011_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0014_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0014_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0040_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0040_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0031_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0031_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0068_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0068_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0050_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0050_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0025_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0025_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0036_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0036_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0060_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0060_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0037_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0037_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0024_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0024_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0052_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0052_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0058_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0058_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0036_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0036_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0043_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0043_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0026_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0026_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0002_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0002_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0014_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0014_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0051_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0051_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0057_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0057_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0029_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0029_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0061_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0061_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0023_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0023_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0008_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0008_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0037_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0037_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0019_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0019_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0035_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0035_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0046_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0046_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0025_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0025_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0041_att4": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0041_att4.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0017_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0017_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0049_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0049_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0027_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0027_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0059_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0059_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0034_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0034_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0064_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0064_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0016_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0016_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0022_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0022_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0031_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0031_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0042_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0042_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0005_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0005_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0041_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0041_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0054_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0054_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0030_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0030_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0053_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0053_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0021_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0021_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0003_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0003_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0027_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0027_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0043_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0043_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0036_att3": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0036_att3.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0023_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0023_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0041_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0041_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0006_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0006_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0018_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0018_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0007_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0007_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0060_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0060_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0002_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0002_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0039_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0039_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0058_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0058_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0035_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0035_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0024_att3": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0024_att3.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0010_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0010_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0045_att2": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0045_att2.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0009_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0009_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0012_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0012_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0001_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0001_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0062_att1": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0062_att1.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "csrc_0036_att4": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/attachments/csrc_0036_att4.pdf",
+  "domain": "regulatory",
+  "ext": "pdf"
+ },
+ "strict_v3_016_中国人民银行_国家金融监督管理总局令〔2025〕第2号（银行卡清算机构管理办法）": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/txt/strict_v3_016_中国人民银行_国家金融监督管理总局令〔2025〕第2号（银行卡清算机构管理办法）.txt",
+  "domain": "regulatory",
+  "ext": "txt"
+ },
+ "strict_v3_009_中国人民银行_国家金融监督管理总局_中国证券监督管理委员会令〔2025〕第11号（金融机构客户尽职调查和客户身份资料及交易记录保存管理办法）": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/txt/strict_v3_009_中国人民银行_国家金融监督管理总局_中国证券监督管理委员会令〔2025〕第11号（金融机构客户尽职调查和客户身份资料及交易记录保存管理办法）.txt",
+  "domain": "regulatory",
+  "ext": "txt"
+ },
+ "strict_v3_015_中国人民银行令〔2025〕第3号（中国人民银行业务领域数据安全管理办法）": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/txt/strict_v3_015_中国人民银行令〔2025〕第3号（中国人民银行业务领域数据安全管理办法）.txt",
+  "domain": "regulatory",
+  "ext": "txt"
+ },
+ "strict_v3_017_中华人民共和国反洗钱法": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/txt/strict_v3_017_中华人民共和国反洗钱法.txt",
+  "domain": "regulatory",
+  "ext": "txt"
+ },
+ "strict_v3_018_中国人民银行令〔2024〕第4号（非银行支付机构监督管理条例实施细则）": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/txt/strict_v3_018_中国人民银行令〔2024〕第4号（非银行支付机构监督管理条例实施细则）.txt",
+  "domain": "regulatory",
+  "ext": "txt"
+ },
+ "strict_v3_008_中国人民银行令〔2025〕第12号（金融机构客户受益所有人识别管理办法）": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/txt/strict_v3_008_中国人民银行令〔2025〕第12号（金融机构客户受益所有人识别管理办法）.txt",
+  "domain": "regulatory",
+  "ext": "txt"
+ },
+ "csrc_0066": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0066.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0323": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0323.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0171": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0171.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0270": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0270.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0153": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0153.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0275": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0275.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0239": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0239.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0202": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0202.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0136": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0136.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0206": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0206.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0271": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0271.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0124": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0124.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0158": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0158.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0033": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0033.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0052": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0052.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0244": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0244.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0055": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0055.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0163": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0163.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0079": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0079.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0253": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0253.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0084": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0084.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0119": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0119.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0071": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0071.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0347": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0347.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0245": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0245.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0272": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0272.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0302": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0302.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0025": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0025.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0148": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0148.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0324": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0324.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0248": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0248.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0187": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0187.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0076": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0076.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0249": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0249.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0336": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0336.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0319": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0319.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0126": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0126.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0296": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0296.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0186": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0186.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0114": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0114.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0374": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0374.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0077": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0077.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0096": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0096.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0117": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0117.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0003": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0003.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0128": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0128.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0351": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0351.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0038": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0038.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0339": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0339.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0095": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0095.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0216": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0216.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0252": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0252.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0346": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0346.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0019": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0019.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0189": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0189.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0243": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0243.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0217": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0217.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0225": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0225.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0062": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0062.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0141": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0141.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0091": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0091.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0037": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0037.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0002": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0002.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0258": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0258.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0026": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0026.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0195": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0195.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0014": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0014.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0053": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0053.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0281": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0281.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0060": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0060.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0263": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0263.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0299": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0299.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0361": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0361.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0210": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0210.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0233": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0233.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0127": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0127.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0295": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0295.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0285": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0285.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0166": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0166.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0300": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0300.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0160": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0160.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0174": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0174.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0290": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0290.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0087": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0087.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0032": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0032.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0111": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0111.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0180": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0180.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0219": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0219.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0343": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0343.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0005": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0005.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0327": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0327.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0192": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0192.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0315": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0315.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0188": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0188.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0104": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0104.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0306": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0306.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0254": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0254.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0198": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0198.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0058": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0058.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0273": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0273.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0089": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0089.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0226": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0226.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0362": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0362.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0224": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0224.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0133": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0133.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0177": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0177.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0365": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0365.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0016": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0016.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0372": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0372.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0151": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0151.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0214": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0214.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0103": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0103.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0218": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0218.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0054": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0054.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0359": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0359.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0229": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0229.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0332": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0332.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0358": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0358.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0364": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0364.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0040": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0040.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0154": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0154.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0135": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0135.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0338": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0338.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0236": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0236.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0209": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0209.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0303": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0303.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0298": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0298.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0169": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0169.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0256": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0256.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0377": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0377.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0090": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0090.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0143": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0143.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0086": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0086.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0157": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0157.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0165": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0165.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0122": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0122.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0260": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0260.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0057": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0057.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0125": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0125.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0051": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0051.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0082": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0082.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0222": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0222.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0027": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0027.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0221": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0221.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0203": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0203.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0048": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0048.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0227": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0227.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0344": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0344.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0205": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0205.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0105": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0105.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0015": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0015.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0312": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0312.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0110": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0110.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0009": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0009.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0193": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0193.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0196": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0196.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0007": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0007.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0313": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0313.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0356": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0356.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0182": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0182.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0278": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0278.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0349": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0349.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0083": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0083.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0092": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0092.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0240": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0240.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0116": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0116.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0345": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0345.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0047": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0047.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0230": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0230.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0314": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0314.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0376": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0376.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0039": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0039.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0024": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0024.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0335": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0335.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0044": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0044.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0068": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0068.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0370": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0370.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0046": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0046.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0292": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0292.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0030": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0030.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0156": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0156.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0259": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0259.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0330": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0330.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0342": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0342.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0267": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0267.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0035": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0035.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0181": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0181.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0368": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0368.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0320": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0320.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0167": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0167.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0266": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0266.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0234": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0234.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0140": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0140.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0137": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0137.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0294": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0294.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0042": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0042.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0340": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0340.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0139": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0139.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0265": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0265.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0197": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0197.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0075": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0075.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0276": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0276.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0289": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0289.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0357": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0357.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0164": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0164.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0297": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0297.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0309": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0309.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0190": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0190.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0279": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0279.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0120": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0120.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0011": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0011.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0106": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0106.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0360": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0360.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0268": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0268.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0201": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0201.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0178": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0178.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0112": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0112.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0288": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0288.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0144": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0144.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0304": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0304.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0004": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0004.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0334": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0334.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0070": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0070.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0109": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0109.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0366": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0366.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0118": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0118.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0354": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0354.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0194": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0194.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0132": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0132.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0287": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0287.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0064": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0064.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0049": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0049.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0183": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0183.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0138": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0138.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0146": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0146.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0329": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0329.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0291": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0291.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0175": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0175.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0211": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0211.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0155": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0155.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0235": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0235.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0034": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0034.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0331": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0331.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0017": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0017.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0325": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0325.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0008": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0008.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0185": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0185.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0029": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0029.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0020": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0020.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0041": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0041.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0274": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0274.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0063": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0063.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0088": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0088.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0085": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0085.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0031": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0031.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0333": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0333.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0172": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0172.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0207": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0207.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0078": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0078.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0264": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0264.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0100": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0100.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0161": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0161.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0023": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0023.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0284": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0284.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0352": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0352.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0072": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0072.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0059": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0059.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0184": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0184.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0200": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0200.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0199": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0199.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0006": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0006.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0022": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0022.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0102": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0102.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0231": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0231.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0363": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0363.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0168": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0168.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0317": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0317.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0123": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0123.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0308": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0308.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0113": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0113.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0341": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0341.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0107": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0107.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0293": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0293.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0121": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0121.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0283": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0283.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0170": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0170.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0010": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0010.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0191": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0191.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0371": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0371.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0322": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0322.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0311": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0311.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0065": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0065.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0099": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0099.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0307": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0307.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0028": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0028.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0277": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0277.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0228": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0228.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0012": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0012.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0220": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0220.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0257": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0257.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0353": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0353.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0269": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0269.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0367": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0367.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0056": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0056.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0316": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0316.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0326": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0326.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0250": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0250.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0232": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0232.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0152": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0152.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0247": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0247.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0328": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0328.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0081": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0081.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0073": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0073.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0115": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0115.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0145": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0145.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0208": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0208.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0074": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0074.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0179": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0179.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0223": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0223.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0098": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0098.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0134": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0134.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0101": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0101.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0318": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0318.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0013": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0013.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0241": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0241.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0238": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0238.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0213": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0213.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0108": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0108.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0321": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0321.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0001": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0001.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0130": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0130.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0251": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0251.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0375": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0375.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0142": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0142.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0237": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0237.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0204": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0204.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0261": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0261.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0094": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0094.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0159": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0159.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0215": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0215.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0373": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0373.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0147": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0147.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0036": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0036.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0301": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0301.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0246": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0246.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0176": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0176.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0280": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0280.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0131": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0131.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0286": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0286.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0021": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0021.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0097": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0097.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0369": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0369.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0282": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0282.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0093": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0093.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0067": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0067.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0061": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0061.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0350": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0350.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0242": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0242.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0337": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0337.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0305": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0305.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0212": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0212.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0149": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0149.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0069": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0069.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0129": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0129.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0173": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0173.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0045": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0045.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0355": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0355.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0262": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0262.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0080": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0080.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0348": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0348.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0255": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0255.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0310": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0310.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0050": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0050.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0162": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0162.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0150": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0150.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0018": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0018.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "csrc_0043": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/regulatory/html/csrc_0043.html",
+  "domain": "regulatory",
+  "ext": "html"
+ },
+ "pack2_text18": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text18.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text13": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text13.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text06": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text06.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text08": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text08.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text19": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text19.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text20": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text20.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text14": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text14.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text17": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text17.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text03": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text03.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text10": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text10.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text12": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text12.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text11": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text11.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text15": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text15.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text09": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text09.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text05": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text05.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text01": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text01.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text16": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text16.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text02": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text02.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text04": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text04.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ },
+ "pack2_text07": {
+  "path": "/home/yk/code/AFAC/c4/data/public_dataset_upload/raw/research/pack2_text07.pdf",
+  "domain": "research",
+  "ext": "pdf"
+ }
+}
