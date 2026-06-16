@@ -24,14 +24,28 @@ from evaluate import text_edit_loss, read_order_loss
 
 
 def _call_strips(strips, timeout=240):
-    """并发调用（≤16 路，userId 轮询，走缓存）。"""
+    """并发调用（≤16 路，userId 轮询，走缓存）。
+    失败置空的条带多轮重试(降并发避开限流) → 防内容随机丢失、分数波动。"""
     from config import MAX_CONCURRENCY
-    workers = min(MAX_CONCURRENCY, max(1, len(strips)))
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        return list(ex.map(
-            lambda x: api.call_safe(x[1], timeout=timeout,
-                                    user_id=API_USER_IDS[x[0] % len(API_USER_IDS)]),
-            list(enumerate(strips))))
+
+    def _call_set(items, workers):
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            return list(ex.map(
+                lambda x: api.call_safe(x[1], timeout=timeout,
+                                        user_id=API_USER_IDS[x[0] % len(API_USER_IDS)]),
+                list(enumerate(items))))
+
+    outs = _call_set(strips, min(MAX_CONCURRENCY, max(1, len(strips))))
+    if not getattr(api, "CACHE_ONLY", False):
+        for _round in range(4):
+            idx = [i for i, o in enumerate(outs) if not (o or "").strip()]
+            if not idx:
+                break
+            for i, o in zip(idx, _call_set([strips[i] for i in idx],
+                                           max(1, min(6, len(idx))))):
+                if (o or "").strip():
+                    outs[i] = o
+    return outs
 
 
 def run_smart(im, target_h=5000, timeout=240):
