@@ -57,19 +57,37 @@ def _refine_truncated(tiles, outs, timeout=240):
 
 
 def _call_grid(tiles, timeout=240):
-    """并发调用 2D tiles，保持 [r][c] 结构。None（空白块）不调 API。"""
+    """并发调用 2D tiles，保持 [r][c] 结构。None（空白块）不调 API。
+
+    **失败重试**：非空白 tile 若返回空串（=API 限流/失败被 call_safe 静默置空），
+    会被当成空白块丢内容 → **分数随运行随机波动**(同一图两次跑分不同)。
+    故对"非空白却空"的 tile 做多轮重试(降并发避开限流)，直到拿到内容或轮次用尽，
+    保证结果可复现、不随机丢行。
+    """
     from config import MAX_CONCURRENCY
     flat = [(r, c) for r in range(len(tiles))
             for c in range(len(tiles[r])) if tiles[r][c] is not None]
-    workers = min(MAX_CONCURRENCY, max(1, len(flat)))
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        outs = list(ex.map(
-            lambda x: api.call_safe(tiles[x[1][0]][x[1][1]], timeout=timeout,
-                                    user_id=API_USER_IDS[x[0] % len(API_USER_IDS)]),
-            list(enumerate(flat))))
+
+    def _call_set(items, workers):
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            return list(ex.map(
+                lambda x: api.call_safe(tiles[x[1][0]][x[1][1]], timeout=timeout,
+                                        user_id=API_USER_IDS[x[0] % len(API_USER_IDS)]),
+                list(enumerate(items))))
+
     grid = [[None] * len(tiles[r]) for r in range(len(tiles))]
-    for (r, c), o in zip(flat, outs):
+    for (r, c), o in zip(flat, _call_set(flat, min(MAX_CONCURRENCY, max(1, len(flat))))):
         grid[r][c] = o
+
+    # 重试失败置空的 tile（CACHE_ONLY 离线评测下跳过——空=未缓存,重调也是空）
+    if not getattr(api, "CACHE_ONLY", False):
+        for _round in range(4):
+            empties = [(r, c) for (r, c) in flat if not (grid[r][c] or "").strip()]
+            if not empties:
+                break
+            for (r, c), o in zip(empties, _call_set(empties, max(1, min(6, len(empties))))):
+                if (o or "").strip():
+                    grid[r][c] = o
     return grid
 
 

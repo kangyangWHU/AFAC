@@ -155,7 +155,7 @@ def _find_md_in_obj(obj):
     return None
 
 
-def call(image, *, fmt="PNG", timeout=120, retries=6, use_cache=True,
+def call(image, *, fmt="PNG", timeout=120, retries=8, use_cache=True,
          user_id=None):
     """调用 FinixDoc-VL，返回 markdown 字符串。
 
