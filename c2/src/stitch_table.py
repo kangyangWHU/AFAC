@@ -442,19 +442,24 @@ def _one_table(rows):
     return "\n".join(out)
 
 
-def rows_to_html(rows):
-    """并排多面板 → 拆成 N 个独立 <table>（与 GT 的 N 个 <table> 1:1 对齐）；
-    否则原样输出单表。"""
-    p = _panel_period(rows)
-    if p:
-        K, N = p
-        parts = []
-        for n in range(N):
-            pr = [r[n * K:(n + 1) * K] for r in rows
-                  if len(r) >= (n + 1) * K
-                  and any((c or "").strip() for c in r[n * K:(n + 1) * K])]
-            parts.append(_one_table(pr))
-        return "\n\n".join(parts)
+def rows_to_html(rows, panel_n=1):
+    """左右并排子表 → 按几何中缝数 panel_n 等分成 N 个独立 <table>（与 GT 的 N 个
+    <table> 1:1 对齐）；否则原样输出单表。
+
+    panel_n 来自 slicer 的「横线断裂」几何信号（_panel_seams），取代旧的列类型周期
+    (_panel_period)：后者会把无横线的单表(3fa0851c 6列)按列类型周期误拆成 N 表(0.416)，
+    而横线断裂只在真并排(横线在中缝断开)时触发 → 不误拆。"""
+    if panel_n and panel_n >= 2 and rows:
+        W = Counter(len(r) for r in rows).most_common(1)[0][0]
+        if W >= panel_n and W % panel_n == 0:
+            K = W // panel_n
+            parts = []
+            for n in range(panel_n):
+                pr = [r[n * K:(n + 1) * K] for r in rows
+                      if len(r) >= (n + 1) * K
+                      and any((c or "").strip() for c in r[n * K:(n + 1) * K])]
+                parts.append(_one_table(pr))
+            return "\n\n".join(parts)
     return _one_table(rows)
 
 
@@ -470,6 +475,7 @@ def stitch_multi(tile_outputs, meta):
     row_cuts = meta.get("row_cuts")
     overlap_x = meta.get("overlap_x", 0)
     overlap_y = meta.get("overlap_y", 0)
+    panel_n = meta.get("panel_n", 1)
     split_bands = meta.get("split_bands", set())
     blank = meta.get("blank", [[False] * n_col for _ in range(n_band)])
 
@@ -539,9 +545,9 @@ def stitch_multi(tile_outputs, meta):
                                  overlap_x=overlap_x, overlap_y=overlap_y)
         segs = _split_at_headers(rows)
         if len(segs) >= 2:
-            html = "\n\n".join(rows_to_html(s) for s in segs)
+            html = "\n\n".join(rows_to_html(s, panel_n) for s in segs)
         else:
-            html = rows_to_html(rows)
+            html = rows_to_html(rows, panel_n)
         if first_caption:
             html = first_caption + "\n\n" + html
         return html
@@ -554,8 +560,8 @@ def stitch_multi(tile_outputs, meta):
         if not rows:
             continue
         segs = _split_at_headers(rows)
-        html = ("\n\n".join(rows_to_html(s) for s in segs)
-                if len(segs) >= 2 else rows_to_html(rows))
+        html = ("\n\n".join(rows_to_html(s, panel_n) for s in segs)
+                if len(segs) >= 2 else rows_to_html(rows, panel_n))
         caption = (first_caption if k == 0 else cap)
         parts.append((caption + "\n\n" + html) if caption else html)
     return "\n\n".join(parts)

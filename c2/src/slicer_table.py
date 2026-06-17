@@ -214,6 +214,59 @@ def _group_boundaries(bnd, max_px=TILE_MAX, max_cells=10 ** 9):
     return cuts, cell_counts
 
 
+def _panel_seams(g):
+    """检测「左右并排子表」：横线在某竖直位置**断裂**（横墨跨多栏，但最长连续段只到
+    单栏宽）= N 个带框窄表并排印刷。返回中缝数（并排栏数 = 中缝数 + 1）。
+
+    判据（实测，全 100 张仅命中 8c8c784c/bd843d61 两张真并排、零误拆）：
+      - 先取「横线行」(最长横墨段 ≥0.25W)；无横线行 → borderless，竖线只是列分隔
+        → 不拆（3fa0851c 7竖线6列也判 0）。
+      - 横线行里长段(≥0.1W)覆盖的 x 若**贯穿无缺口** → 单表/纵向堆叠(横向不拆)；
+        若有内部缺口(>0.03W) → 缝处横线断裂 = 并排，缝数即额外栏数。
+    与列类型周期(_panel_period)不同：这是直接的几何结构信号，不会把无横线单表(3fa0851c)
+    误判成并排。纵向堆叠子表横线贯穿全宽 → 此处不拆，交由上下维度处理。"""
+    W = g.shape[1]
+    step = max(1, W // 1500)
+    g2 = g[::step, ::step]
+    Hs, Ws = g2.shape
+    dark = (g2 < 170)
+    thr = 0.25 * Ws
+    minrun = 0.1 * Ws
+    covx = np.zeros(Ws, dtype=bool)
+    found = False
+    for y in range(Hs):
+        row = dark[y]
+        if row.sum() < thr:                  # 横线至少 thr 个墨：快速预筛
+            continue
+        d = np.diff(np.concatenate(([0], row.view(np.int8), [0])))
+        starts = np.where(d == 1)[0]
+        ends = np.where(d == -1)[0]
+        runs = ends - starts
+        if runs.size == 0 or runs.max() < thr:
+            continue
+        found = True
+        for s, e, L in zip(starts, ends, runs):
+            if L >= minrun:
+                covx[s:e] = True
+    if not found:
+        return 0
+    xs = np.where(covx)[0]
+    xlo, xhi = xs[0], xs[-1]
+    seams = 0
+    i = xlo
+    while i <= xhi:
+        if not covx[i]:
+            j = i
+            while j <= xhi and not covx[j]:
+                j += 1
+            if j - i > 0.03 * Ws:
+                seams += 1
+            i = j
+        else:
+            i += 1
+    return seams
+
+
 def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
                 blank_ink=BLANK_INK):
     """密度自适应 + 严格网格线 2D 切分。
@@ -333,10 +386,14 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
                 if vlines_at(row_cuts[r]) < typ * 0.3:   # 该切点竖线骤降=子表缝
                     split_bands.add(r)
 
+    # 左右并排子表：横线断裂中缝数 + 1 = 并排栏数（多数表为 1，不拆）
+    panel_n = _panel_seams(g) + 1
+
     meta = {"row_cuts": row_cuts, "col_cuts": col_cuts,
             "row_cells": row_cells, "col_cells": col_cells,
             "blank": blank, "grid": grid_ok, "split_bands": split_bands,
-            "tile_boxes": tile_boxes, "overlap_x": overlap_x, "overlap_y": overlap_y}
+            "tile_boxes": tile_boxes, "overlap_x": overlap_x, "overlap_y": overlap_y,
+            "panel_n": panel_n}
     return tiles, meta
 
 

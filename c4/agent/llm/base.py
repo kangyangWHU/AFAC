@@ -2,6 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
+import threading
 
 
 @dataclass
@@ -9,15 +10,18 @@ class TokenUsage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     calls: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
 
     def add(self, p: int, c: int):
-        self.prompt_tokens += p
-        self.completion_tokens += c
-        self.calls += 1
+        # 并发跑题时多线程同时调用，+=非原子，必须加锁防漏计 token
+        with self._lock:
+            self.prompt_tokens += p
+            self.completion_tokens += c
+            self.calls += 1
 
     def as_dict(self) -> dict:
         return {"prompt_tokens": self.prompt_tokens,

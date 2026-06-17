@@ -42,16 +42,43 @@ class Pipeline:
 
     def run(self, questions: list[dict], out_dir: str, use_gold_docs: bool = True):
         os.makedirs(out_dir, exist_ok=True)
-        rows, evidence = [], []
-        for i, q in enumerate(questions, 1):
+        n = len(questions)
+        results: list[tuple] = [None] * n  # 按题号定位，保证输出顺序与完成顺序无关
+        evmap: list[dict] = [None] * n
+        workers = int(config.get("run.concurrency", 8))
+
+        def work(i_q):
+            i, q = i_q
             dids = q.get("doc_ids") if use_gold_docs else None
-            ans, evs = self.answer_one(q, dids)
-            rows.append((q["qid"], ans.answer))
-            evidence.append({"qid": q["qid"], "answer": ans.answer,
-                             "evidence_doc_ids": ans.evidence_doc_ids,
-                             "reasoning": ans.reasoning[-800:]})
-            print(f"[{i}/{len(questions)}] {q['qid']} -> {ans.answer}  "
-                  f"(tok={USAGE.total_tokens})")
+            ans, _ = self.answer_one(q, dids)
+            return i, q, ans
+
+        if workers > 1:
+            # 每题独立、瓶颈在等百炼API(I/O)，多线程并发 ~workers 倍提速
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            done = 0
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                futs = [ex.submit(work, (i, q)) for i, q in enumerate(questions)]
+                for fut in as_completed(futs):
+                    i, q, ans = fut.result()
+                    results[i] = (q["qid"], ans.answer)
+                    evmap[i] = {"qid": q["qid"], "answer": ans.answer,
+                                "evidence_doc_ids": ans.evidence_doc_ids,
+                                "reasoning": ans.reasoning[-800:]}
+                    done += 1
+                    print(f"[{done}/{n}] {q['qid']} -> {ans.answer}  "
+                          f"(tok={USAGE.total_tokens})")
+        else:
+            for i, q in enumerate(questions):
+                _, _, ans = work((i, q))
+                results[i] = (q["qid"], ans.answer)
+                evmap[i] = {"qid": q["qid"], "answer": ans.answer,
+                            "evidence_doc_ids": ans.evidence_doc_ids,
+                            "reasoning": ans.reasoning[-800:]}
+                print(f"[{i+1}/{n}] {q['qid']} -> {ans.answer}  "
+                      f"(tok={USAGE.total_tokens})")
+        rows = results
+        evidence = evmap
 
         # answer.csv（含 summary 行）
         cpath = os.path.join(out_dir, "answer.csv")
