@@ -390,7 +390,49 @@ def _trim_trailing_empty_cols(rows):
     return [r[:keep] for r in rows]
 
 
-def rows_to_html(rows):
+def _celltype(s):
+    s = (s or "").strip()
+    if not s:
+        return "e"
+    if re.fullmatch(r"-?\d+", s):
+        return "i"
+    if re.fullmatch(r"-?[\d,]*\.\d+", s):
+        return "f"
+    if re.fullmatch(r"-?[\d,]+\.?\d*", s):
+        return "n"
+    return "t"
+
+
+def _panel_period(rows):
+    """检测「并排多面板」：一张宽表其实是 N 个独立子表**并排印刷**（视觉 N×K 列，
+    而 GT 是 N 个各 K 列的独立 <table>）。把它们当一张宽表输出 → table_teds 只匹配到
+    GT 第 1 个表、其余 GT 表无对应 → 分暴跌（8c8c784c 实测 0.127）。
+
+    签名：列类型以 K 为周期重复，且周期内含**标签/类别列**（整数索引 'i' 或文字 't'）——
+    这正是每个面板重复的「行号列 / 性别列」。返回 (K, N) 或 None。
+    单一宽表的标签列只在第 0 列、不重复 → 周期不成立 → 不误判（实测 945104ed=None）；
+    纯数字宽表无 'i'/'t' 锚 → 也不误判。"""
+    if not rows:
+        return None
+    W = Counter(len(r) for r in rows).most_common(1)[0][0]
+    full = [r for r in rows if len(r) == W]
+    if W < 6 or len(full) < 5:
+        return None
+    sig = []
+    for c in range(W):
+        ts = [_celltype(r[c]) for r in full if (r[c] or "").strip()]
+        sig.append(Counter(ts).most_common(1)[0][0] if ts else "e")
+    for N in (4, 3, 2):
+        if W % N:
+            continue
+        K = W // N
+        if (all(sig[j] == sig[j + K] for j in range(W - K))
+                and any(s in "it" for s in sig[:K])):
+            return K, N
+    return None
+
+
+def _one_table(rows):
     rows = _trim_trailing_empty_cols(rows)
     out = [_GT_TABLE_OPEN]
     for row in rows:
@@ -398,6 +440,22 @@ def rows_to_html(rows):
         out.append("      <tr>%s</tr>" % tds)
     out.append("</table>")
     return "\n".join(out)
+
+
+def rows_to_html(rows):
+    """并排多面板 → 拆成 N 个独立 <table>（与 GT 的 N 个 <table> 1:1 对齐）；
+    否则原样输出单表。"""
+    p = _panel_period(rows)
+    if p:
+        K, N = p
+        parts = []
+        for n in range(N):
+            pr = [r[n * K:(n + 1) * K] for r in rows
+                  if len(r) >= (n + 1) * K
+                  and any((c or "").strip() for c in r[n * K:(n + 1) * K])]
+            parts.append(_one_table(pr))
+        return "\n\n".join(parts)
+    return _one_table(rows)
 
 
 # ---------------------------------------------------------------------------
