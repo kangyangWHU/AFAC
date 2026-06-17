@@ -222,6 +222,18 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
         'grid'                    : 网格线是否可靠
       }
     """
+    # 先裁掉表外 margin（空白边）：否则 TILE_MAX 会在大片空白里硬切出多余空白条带
+    # （有些表只占图高 19~29%，余下全是 margin → 多切好几刀）。裁到内容 bbox 留 8px 边。
+    g0 = np.asarray(im.convert("L"))
+    d0 = (g0 < 128)
+    ys = np.where(d0.mean(axis=1) > 0.002)[0]
+    xs = np.where(d0.mean(axis=0) > 0.002)[0]
+    if len(ys) > 0 and len(xs) > 0:
+        y0 = max(0, ys[0] - 8); y1 = min(g0.shape[0], ys[-1] + 9)
+        x0 = max(0, xs[0] - 8); x1 = min(g0.shape[1], xs[-1] + 9)
+        if (x1 - x0) < g0.shape[1] or (y1 - y0) < g0.shape[0]:
+            im = im.crop((x0, y0, x1, y1))
+
     g = np.asarray(im.convert("L"))
     H, W = g.shape
     dark = (g < 128)
@@ -235,10 +247,12 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
         col_lines = runl_cols                # 有框：墨柱线就是真单元格边界
     else:
         col_lines = gap_cols                 # 无框：白缝
-    # 行：保持原检测（墨柱法不能用于行——一行文字本身就是长“横向”墨段，会把每个文字行
-    # 误判成横线）。暗线优先、退回低墨缝；宽度门必须关，行缝大小相近不可用宽度区分。
-    rgl = _grid_lines(dark.mean(axis=1))
-    row_lines = rgl if len(rgl) > 1 else _gap_lines(dark.mean(axis=1), width_gate=False)
+    # 行：与列对称用墨柱（横向最长墨段）。关键纠正——文字行**不会连成一条线**：
+    # 一行 `8504 8504 …` 的字/格之间有缝，最长横墨段只有一个数字宽(中位~2px)，而横框线
+    # 全宽贯穿(几千px)，120px 阈值有 ~60× 余量，不会把文字行误判成线。横墨柱比密度法更准
+    # （行估对 59→71/100），且连 15px 挤死的行都能救（015bd47c 101%）。无框→回退低墨缝。
+    runl_rows = _runlen_lines(dark180.T, min_run=120)
+    row_lines = runl_rows if len(runl_rows) > 1 else _gap_lines(dark.mean(axis=1), width_gate=False)
     grid_ok = len(col_lines) > 1 and len(row_lines) > 1
 
     col_bnd = _boundaries(col_lines, W)
@@ -257,6 +271,9 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
     max_cols = max((_real_cols(c) for c in range(len(col_cells))), default=1)
     max_rows = max(1, cell_budget // max(1, max_cols))
     row_cuts, row_cells = _group_boundaries(row_bnd, tile_max, max_cells=max_rows)
+    # 安全落刀（行，对称于列）：snap 到横向文字墨最少处，避免把一行文字从中间横切。
+    # _textink_cols 作用在 dark.T 上 = 每原始行的横向短墨段(笔画)占比。
+    row_cuts = _snap_cuts(row_cuts, _textink_cols(dark.T), win=25)
     total_rows = sum(row_cells)
     # overlap 只给多 row-band 的复杂表启用。
     # 小表、少 band 的规则表原本结构稳定，overlap 会引入重复内容。
