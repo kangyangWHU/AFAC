@@ -309,6 +309,20 @@ def _is_numeric_header_row(row, min_run=5):
     return best >= min_run
 
 
+def _label_col(rows, thr=0.5):
+    """标签列 = 自左起第一个填充率 ≥thr 的列。跳过『合并单元格只在段顶填值』的稀疏前导
+    列（如险种/性别），否则逐行 _first_cell 会在空行漂移到右侧数据列、把数据行误判成
+    『数字运行→文本』的子表边界（3fa0851c：前3列稀疏 → 误拆 → 0.456）。"""
+    if not rows:
+        return 0
+    W = max(len(r) for r in rows)
+    n = len(rows)
+    for c in range(W):
+        if sum(1 for r in rows if len(r) > c and (r[c] or "").strip()) / n >= thr:
+            return c
+    return 0
+
+
 def _split_at_headers(rows, min_seg=3, sim_hi=0.85, max_frac=0.4):
     """在"子表边界行"处把行序列切成多个子表段（边界行归入其下方子表）。
 
@@ -330,8 +344,10 @@ def _split_at_headers(rows, min_seg=3, sim_hi=0.85, max_frac=0.4):
     header = rows[0]
     bnds = set()
 
-    # B. 首列 数字运行(≥2,忽略开局文本) → 文本/数字序列表头 = 边界（主力）
-    fc = [_first_cell(r) for r in rows]
+    # B. 标签列 数字运行(≥2,忽略开局文本) → 文本/数字序列表头 = 边界（主力）。
+    # 用固定标签列(跳过稀疏合并列)而非逐行 _first_cell，避免空行漂移到数据列致误判。
+    lc = _label_col(rows)
+    fc = [(r[lc].strip() if len(r) > lc and r[lc] else "") for r in rows]
     run = 0
     for i in range(1, n):
         cur = fc[i]
