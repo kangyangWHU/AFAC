@@ -82,17 +82,102 @@ def _mode(vals):
     return Counter(vals).most_common(1)[0][0] if vals else 0
 
 
+def _seq_sim(a, b):
+    sa = "|".join((x or "").strip() for x in a)
+    sb = "|".join((x or "").strip() for x in b)
+    m = max(len(sa), len(sb))
+    return 1.0 if m == 0 else 1.0 - _Lev.distance(sa, sb) / m
+
+
+def _append_cells_dedup(row, cells, max_overlap=8, sim_thresh=0.82):
+    """横向 overlap 去重：当前行尾部与新 tile 行头部相似时丢掉重复前缀。"""
+    cells = list(cells)
+    best_k, best_s = 0, 0.0
+    kmax = min(max_overlap, len(row), len(cells))
+    for k in range(kmax, 1, -1):
+        s = _seq_sim(row[-k:], cells[:k])
+        if s > best_s:
+            best_k, best_s = k, s
+    if best_k and best_s >= sim_thresh:
+        cells = cells[best_k:]
+    row.extend(cells)
+
+
+def _row_sim_cells(a, b):
+    return _seq_sim(a, b)
+
+
+def _extend_rows_dedup(all_rows, band, max_overlap=4, sim_thresh=0.86):
+    """纵向 overlap 去重：上一 band 尾行与下一 band 头行相似时丢掉重复行。"""
+    if not all_rows or not band:
+        all_rows.extend(band)
+        return
+    best_k, best_s = 0, 0.0
+    kmax = min(max_overlap, len(all_rows), len(band))
+    for k in range(kmax, 0, -1):
+        sims = [_row_sim_cells(a, b) for a, b in zip(all_rows[-k:], band[:k])]
+        s = sum(sims) / len(sims)
+        if s > best_s:
+            best_k, best_s = k, s
+    if best_k and best_s >= sim_thresh:
+        band = band[best_k:]
+    all_rows.extend(band)
+
+
 # ---------------------------------------------------------------------------
 # 单表 2D 重组（全局列宽一致 W_c）—— 原 stitch_table 逻辑，重构成可复用
 # ---------------------------------------------------------------------------
-def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4):
+def _width_segments(parsed, n_col):
+    """检测「不同宽度子表上下堆叠」：某 tile-column 的众数列宽在某 band 突变
+    （如 945104ed 的 t2：上半子表=9 列、下半子表=27 列），说明两个不同宽度的子表叠在
+    一起。返回按该突变 band 切的 band 分段 [(b0,b1),...]。
+
+    必须分段重组的原因：W_c 取全 band 众数时，会被占多数 band 的子表主导
+    （t2 众数=9 → 下半子表的 t2 从 27 被压到 9 → 列数 77→61，TEDS 0.758 而非 0.865）。
+    分段后每段各取自己的 W_c。单一宽度（绝大多数表）→ 返回单段，行为完全不变、零回归。
+    """
+    n_band = len(parsed)
+    bw = [[(_mode_width(g) if g else 0)
+           for g in (parsed[r] + [None] * n_col)[:n_col]] for r in range(n_band)]
+    cuts = []
+    for c in range(n_col):
+        seq = [(r, bw[r][c]) for r in range(n_band) if bw[r][c] > 0]
+        if len(seq) < 6:                            # 太短不足以判双峰
+            continue
+        ws = [w for _, w in seq]
+        if max(ws) / max(1, min(ws)) < 1.6:         # 非双峰 → 该列无 regime 变化
+            continue
+        mid = (max(ws) + min(ws)) / 2
+        hi = [w >= mid for w in ws]                 # 高/低簇标记
+        for i in range(2, len(seq) - 1):            # 找一处**干净翻转**（两侧各≥2 band 一致）
+            if (hi[i] != hi[i - 1]
+                    and hi[i - 2] == hi[i - 1] and hi[i + 1] == hi[i]):
+                cuts.append(seq[i][0])              # 排除单点尾噪(如近空 tile 的 width=1)
+                break
+    cuts = [b for b in cuts if 1 < b < n_band - 1]   # 边界 band 不算
+    if not cuts:
+        return [(0, n_band)]
+    b = Counter(cuts).most_common(1)[0][0]          # 多列共同突变的 band = 子表边界
+    return [(0, b), (b, n_band)]
+
+
+def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4,
+                      overlap_x=0, overlap_y=0):
     """parsed[r][c] = 单元格网格 或 None。返回 rows（list[list[str]]）。
 
     空列块（API 无读数）的列宽不再用过检测的 col_cells（会膨胀），而是按
     **已读列块的列密度（列/像素）× 该空块像素宽** 估计，避免列爆炸。
+    不同宽度子表上下叠时（`_width_segments` 检出），按子表分段、各取自己的 W_c。
     """
-    n_band = len(parsed)
     n_col = max((len(row) for row in parsed), default=0)
+    segs = _width_segments(parsed, n_col)
+    if len(segs) > 1:                               # 多宽度子表 → 逐段递归(各自 W_c)
+        out = []
+        for b0, b1 in segs:
+            out.extend(_reconstruct_grid(parsed[b0:b1], col_cells, col_cuts,
+                                         deg_hi, deg_lo, overlap_x, overlap_y))
+        return out
+    n_band = len(parsed)
 
     # 第一遍：每个 tile-column 的规范列宽 W_c
     col_widths = [[] for _ in range(n_col)]
@@ -144,8 +229,14 @@ def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4):
             for i in range(nrows):
                 cells = list(g[i]) if (g and i < len(g)) else []
                 cells = (cells + [""] * wc)[:wc]
-                band[i].extend(cells)
-        all_rows.extend(band)
+                if overlap_x:
+                    _append_cells_dedup(band[i], cells)
+                else:
+                    band[i].extend(cells)
+        if overlap_y:
+            _extend_rows_dedup(all_rows, band)
+        else:
+            all_rows.extend(band)
     return all_rows
 
 
@@ -194,6 +285,30 @@ def _first_cell(row):
     return ""
 
 
+def _to_int(s):
+    s = (s or "").replace(",", "").strip()
+    return int(s) if re.fullmatch(r"-?\d+", s) else None
+
+
+def _is_numeric_header_row(row, min_run=5):
+    """识别年龄/年度这类纯数字连续表头行，如 0,1,2... 或 33,34,35...。
+
+    数据行通常是首列为 1/2/3，后面跟大额重复数值，不会形成连续小整数序列。
+    """
+    vals = [_to_int(c) for c in row if (c or "").strip()]
+    vals = [v for v in vals if v is not None]
+    if len(vals) < min_run:
+        return False
+    best = run = 1
+    for a, b in zip(vals, vals[1:]):
+        if b == a + 1:
+            run += 1
+            best = max(best, run)
+        else:
+            run = 1
+    return best >= min_run
+
+
 def _split_at_headers(rows, min_seg=3, sim_hi=0.85, max_frac=0.4):
     """在"子表边界行"处把行序列切成多个子表段（边界行归入其下方子表）。
 
@@ -215,7 +330,7 @@ def _split_at_headers(rows, min_seg=3, sim_hi=0.85, max_frac=0.4):
     header = rows[0]
     bnds = set()
 
-    # B. 首列 数字运行(≥2,忽略开局文本) → 文本 = 边界（主力）
+    # B. 首列 数字运行(≥2,忽略开局文本) → 文本/数字序列表头 = 边界（主力）
     fc = [_first_cell(r) for r in rows]
     run = 0
     for i in range(1, n):
@@ -223,6 +338,10 @@ def _split_at_headers(rows, min_seg=3, sim_hi=0.85, max_frac=0.4):
         if not cur:
             continue
         if _is_num(cur):
+            if run >= 5 and _is_numeric_header_row(rows[i]):
+                bnds.add(i)                    # 新子表表头是 33,34,35... 这类数字序列
+                run = 0
+                continue
             run += 1                          # 数据行,累积数字运行
         else:
             if run >= 2:                      # 已建立数字运行 → 该文本行是子表边界
@@ -291,6 +410,8 @@ def stitch_multi(tile_outputs, meta):
     col_cells = meta.get("col_cells", [])
     col_cuts = meta.get("col_cuts")
     row_cuts = meta.get("row_cuts")
+    overlap_x = meta.get("overlap_x", 0)
+    overlap_y = meta.get("overlap_y", 0)
     split_bands = meta.get("split_bands", set())
     blank = meta.get("blank", [[False] * n_col for _ in range(n_band)])
 
@@ -356,7 +477,8 @@ def stitch_multi(tile_outputs, meta):
 
     # 单表：API 未自带拆分。再用"纯文字表头行"做一次泛化拆分（多子表被合并的兜底）
     if len(subtables) <= 1:
-        rows = _reconstruct_grid(cur_bands if subtables else [], col_cells, col_cuts)
+        rows = _reconstruct_grid(cur_bands if subtables else [], col_cells, col_cuts,
+                                 overlap_x=overlap_x, overlap_y=overlap_y)
         segs = _split_at_headers(rows)
         if len(segs) >= 2:
             html = "\n\n".join(rows_to_html(s) for s in segs)
@@ -369,7 +491,8 @@ def stitch_multi(tile_outputs, meta):
     # 多子表：逐个重建 + 拼标题。每个 API 子表再用"纯文字表头行"递归拆（重复表头=内部边界）
     parts = []
     for k, (cap, bands) in enumerate(subtables):
-        rows = _reconstruct_grid(bands, col_cells, col_cuts)
+        rows = _reconstruct_grid(bands, col_cells, col_cuts,
+                                 overlap_x=overlap_x, overlap_y=overlap_y)
         if not rows:
             continue
         segs = _split_at_headers(rows)
