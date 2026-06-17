@@ -17,8 +17,13 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
 TILE_MAX = 1500             # tile 像素硬上限
-OVERLAP_X = 180             # 列方向重叠，需覆盖 >1 个窄单元格，供横向拼接去重
-OVERLAP_Y = 60              # 行方向轻重叠；过大易把整行重复读进下一块
+# overlap 关闭（实测净负）：重叠让每个 tile 多读邻块一条，靠 stitch 去重还原。但在密集
+# 表(18px 行、数字列)上，① overlap_x 的逐行 _append_cells_dedup 每行删掉的格数不一致 →
+# 列数被打乱成 58/66/74/84(非均匀)；② overlap_y 的行去重在数字行上 sim 匹配失败 → 行翻倍。
+# 945104ed 实测:开 overlap TEDS=0.230(326行/列乱)、关 overlap TEDS=0.758(196行/列均匀)。
+# 无 overlap 时 _reconstruct_grid 走 extend 路径,每行强制对齐 W[c] → 结构均匀。
+OVERLAP_X = 0
+OVERLAP_Y = 0
 MIN_COL_PX = 40             # 真实表格列的最小像素宽。无框表回退到空白缝检测时，会把
 # 单元格内的字间空隙(中位~14px)误判成列线→列数虚高数倍(实测某表 468 列 vs 真实 109)→
 # max_cols 虚高→每 tile 行预算被压到 3→tile 数爆炸(1843)。用"1500px 内最多容纳
