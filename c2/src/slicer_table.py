@@ -17,6 +17,8 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
 TILE_MAX = 1500             # tile 像素硬上限
+OVERLAP_X = 180             # 列方向重叠，需覆盖 >1 个窄单元格，供横向拼接去重
+OVERLAP_Y = 60              # 行方向轻重叠；过大易把整行重复读进下一块
 MIN_COL_PX = 40             # 真实表格列的最小像素宽。无框表回退到空白缝检测时，会把
 # 单元格内的字间空隙(中位~14px)误判成列线→列数虚高数倍(实测某表 468 列 vs 真实 109)→
 # max_cols 虚高→每 tile 行预算被压到 3→tile 数爆炸(1843)。用"1500px 内最多容纳
@@ -45,20 +47,130 @@ def _grid_lines(dark_frac, hi=0.6):
     return lines
 
 
-def _gap_lines(dark_frac, lo=0.02):
-    """无边框回退：低墨位置（单元格间空白）作为候选切点。"""
+def _otsu_split(widths):
+    """对一组缝宽做 Otsu 双峰分离，返回阈值：宽度 ≥ 阈值 = 列缝。
+
+    原理（关键）：**同一张表内，文字内缝(字/位间隙)永远比列缝窄**——所以缝宽分布
+    是双峰：窄峰=文字白河、宽峰=列缝，中间有谷。在本表自己的宽度直方图上找这个谷
+    （Otsu 最大化类间方差），就能逐表自适应地把两者切开，无需任何固定/相对常数。
+    宽度跨度可达数百倍，故在 log2 空间做。近似单峰（无明显窄/宽之分）→ 返回 0（全留）。
+    """
+    ws = np.asarray(widths, dtype=float)
+    if len(ws) < 3 or ws.max() / max(1.0, ws.min()) < 2.0:
+        return 0.0
+    lw = np.log2(ws)
+    edges = np.linspace(lw.min(), lw.max(), 50)
+    hist, _ = np.histogram(lw, bins=edges)
+    ctr = (edges[:-1] + edges[1:]) / 2
+    cum = np.cumsum(hist)
+    cumv = np.cumsum(hist * ctr)
+    tot, totv = cum[-1], cumv[-1]
+    best_t, best_var = 0.0, -1.0
+    for i in range(1, len(hist)):
+        w0 = cum[i - 1]
+        w1 = tot - w0
+        if w0 == 0 or w1 == 0:
+            continue
+        m0 = cumv[i - 1] / w0
+        m1 = (totv - cumv[i - 1]) / w1
+        v = w0 * w1 * (m0 - m1) ** 2          # 类间方差
+        if v > best_var:
+            best_var, best_t = v, edges[i]
+    return 2.0 ** best_t
+
+
+def _gap_lines(dark_frac, lo=0.02, floor=3, width_gate=False):
+    """无边框回退：单元格间的低墨"白缝"作为候选切点。
+
+    `width_gate`（**仅列方向开**）：右对齐数字各位之间会形成**全高、近零墨的"白河"**
+    ——与真列缝在墨量上完全无法区分（卡到 0 也分不开），导致 `lo` 阈值单用时列数虚高
+    数倍（100 张列检出中位 411%、最高 846%、49/100 严重过分割）。唯一可区分量是**缝宽**，
+    故按 `_otsu_split` 逐表分离窄(文字)/宽(列缝)两峰只留宽峰，逐表自适应、无固定常数。
+    **行方向必须关**：行缝大小相近，Otsu 会把窄行缝当文字、只留分节大缝 → 行塌成几条
+    （实测行检出 102%→13%）。colspan/JPEG 杂点用 lo 容差兜（不要求严格 ==0，否则跨列
+    表头处真缝被删）。floor 先滤 1~2px 抗锯齿噪点。
+    """
     idx = np.where(dark_frac < lo)[0]
     if len(idx) == 0:
         return []
-    lines, run = [], [idx[0]]
+    runs, run = [], [idx[0]]                 # 先聚成连续低墨段（缝），段内允许 ≤2px 断点
     for x in idx[1:]:
         if x - run[-1] <= 2:
             run.append(x)
         else:
-            lines.append(int(np.mean(run)))
+            runs.append(run)
             run = [x]
-    lines.append(int(np.mean(run)))
+    runs.append(run)
+    if not width_gate:                       # 行方向：原样返回每段中心，不做宽度过滤
+        return [int(np.mean(r)) for r in runs]
+    runs = [r for r in runs if r[-1] - r[0] + 1 >= floor] or runs
+    thr = _otsu_split([r[-1] - r[0] + 1 for r in runs])
+    keep = [r for r in runs if (r[-1] - r[0] + 1) >= thr] or runs
+    return [int(np.mean(r)) for r in keep]
+
+
+def _runlen_lines(dark, min_run=120):
+    """墨柱法：竖直方向**最长连续墨段 ≥ min_run** 的列 = 框线。
+
+    关键（实测）：框线 vs 文字的真正区分量不是墨深、不是跳变次数，而是**竖直连续墨段
+    长度**——框线是长墨柱(几百 px)，文字是碎段(中位 1px、最长 ~10px)，分离度 ~880×，
+    且不依赖墨色深浅（浅灰线只要成段就远超文字）。
+    用**绝对阈值而非 0.3×全高**：① 文字竖段最长 ~10px，120px 有 12× 余量，不会误判；
+    ② 一次性解决 margin（表只占图高 19~29% → 相对阈值过不了）和子表堆叠（线只贯穿子表
+    那一段）两个问题，无需先裁 bbox 或分子表（实测 9 张漏检表救回 7 张）。
+    输入 dark 建议用较松二值化(g<180)，把抗锯齿的浅框线也算进来。
+    """
+    H, W = dark.shape
+    run = np.zeros(W, dtype=np.int32)
+    best = np.zeros(W, dtype=np.int32)
+    for y in range(H):
+        run = (run + 1) * dark[y]
+        best = np.maximum(best, run)
+    isl = best >= min_run
+    lines, i = [], 0
+    while i < W:
+        if isl[i]:
+            j = i
+            while j < W and isl[j]:
+                j += 1
+            lines.append((i + j) // 2)
+            i = j
+        else:
+            i += 1
     return lines
+
+
+def _textink_cols(dark, frac=0.15):
+    """每列**文字墨占比**：只数属于短竖段(run < frac×H = 笔画)的墨，排除长墨柱(框线)。
+    用作落刀安全分——切线 snap 到此剖面的局部最小点，就避开了文字、且不怕切在框线上。
+    """
+    H, W = dark.shape
+    thr = frac * H
+    runlen = np.zeros((H, W), np.int32)
+    c = np.zeros(W, np.int32)
+    for y in range(H):
+        c = (c + 1) * dark[y]
+        runlen[y] = c
+    total = np.zeros((H, W), np.int32)
+    last = np.zeros(W, np.int32)
+    for y in range(H - 1, -1, -1):
+        last = np.where(dark[y], np.maximum(last, runlen[y]), 0)
+        total[y] = last
+    return (dark & (total < thr)).mean(axis=0)
+
+
+def _snap_cuts(cuts, textink, win=25):
+    """把每个内部切点 snap 到 ±win 内**文字墨最少**的 x：避免把单元格/数字从中间切开。
+    实测无框白缝切点的字间割裂随之趋零、有框墨柱误检的文字列切割从 16.6%→0.4%。
+    端点(0/总宽)不动。"""
+    W = len(textink)
+    out = [cuts[0]]
+    for x in cuts[1:-1]:
+        a, b = max(0, x - win), min(W, x + win + 1)
+        out.append(a + int(np.argmin(textink[a:b])))
+    out.append(cuts[-1])
+    # snap 后可能撞重/乱序 → 去重保序
+    return sorted(set(out))
 
 
 def _boundaries(lines, total):
@@ -113,8 +225,20 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
     g = np.asarray(im.convert("L"))
     H, W = g.shape
     dark = (g < 128)
-    col_lines = _grid_lines(dark.mean(axis=0)) or _gap_lines(dark.mean(axis=0))
-    row_lines = _grid_lines(dark.mean(axis=1)) or _gap_lines(dark.mean(axis=1))
+    dark180 = (g < 180)                       # 较松二值化，专给框线检测（救浅灰线）
+
+    # 列分流：先用墨柱(绝对≥120px)找框线；找够了=有框→切在线上；不够→无框→白缝。
+    # 墨柱对 margin/子表/浅线都稳，文字又冒充不了长墨柱；白缝旁的 Otsu 宽度门杀数字白河。
+    runl_cols = _runlen_lines(dark180, min_run=120)
+    gap_cols = _gap_lines(dark.mean(axis=0), width_gate=True)
+    if len(runl_cols) > 1 and len(runl_cols) >= 0.5 * len(gap_cols):
+        col_lines = runl_cols                # 有框：墨柱线就是真单元格边界
+    else:
+        col_lines = gap_cols                 # 无框：白缝
+    # 行：保持原检测（墨柱法不能用于行——一行文字本身就是长“横向”墨段，会把每个文字行
+    # 误判成横线）。暗线优先、退回低墨缝；宽度门必须关，行缝大小相近不可用宽度区分。
+    rgl = _grid_lines(dark.mean(axis=1))
+    row_lines = rgl if len(rgl) > 1 else _gap_lines(dark.mean(axis=1), width_gate=False)
     grid_ok = len(col_lines) > 1 and len(row_lines) > 1
 
     col_bnd = _boundaries(col_lines, W)
@@ -122,6 +246,10 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
 
     # 先按像素分列组，得到每组最大列数 → 据此限制每 tile 行数，使 cell ≤ budget
     col_cuts, col_cells = _group_boundaries(col_bnd, tile_max)
+    # 安全落刀：把每个 tile 列切点 snap 到 ±25px 内文字墨最少处，避免把单元格/数字从中间
+    # 切开（白缝字间割裂趋零；墨柱误检文字列的切割 16.6%→0.4%）。±25px 不改变骨架列数。
+    textink = _textink_cols(dark)
+    col_cuts = _snap_cuts(col_cuts, textink, win=25)
     # 每列带的真实列数受物理上限约束：带宽/最小列宽。剔除字间幻影列，避免行预算虚低。
     def _real_cols(c):
         w = (col_cuts[c + 1] - col_cuts[c]) if c + 1 < len(col_cuts) else tile_max
@@ -129,6 +257,12 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
     max_cols = max((_real_cols(c) for c in range(len(col_cells))), default=1)
     max_rows = max(1, cell_budget // max(1, max_cols))
     row_cuts, row_cells = _group_boundaries(row_bnd, tile_max, max_cells=max_rows)
+    total_rows = sum(row_cells)
+    # overlap 只给多 row-band 的复杂表启用。
+    # 小表、少 band 的规则表原本结构稳定，overlap 会引入重复内容。
+    use_overlap = total_rows >= 20 and len(row_cells) >= 8
+    overlap_x = OVERLAP_X if use_overlap else 0
+    overlap_y = OVERLAP_Y if use_overlap else 0
 
     # 整数二维积分图，快速算任意 tile 的墨量（判空白）
     integ = np.zeros((H + 1, W + 1), dtype=np.int64)
@@ -139,16 +273,22 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
         area = max(1, (x1 - x0) * (y1 - y0))
         return s / area
 
-    tiles, blank = [], []
+    tiles, blank, tile_boxes = [], [], []
     for r in range(len(row_cuts) - 1):
-        row_imgs, row_blank = [], []
+        row_imgs, row_blank, row_boxes = [], [], []
         for c in range(len(col_cuts) - 1):
             x0, y0, x1, y1 = col_cuts[c], row_cuts[r], col_cuts[c + 1], row_cuts[r + 1]
             is_blank = ink_frac(x0, y0, x1, y1) < blank_ink
+            ex0 = max(0, x0 - (overlap_x if c > 0 else 0))
+            ex1 = min(W, x1 + (overlap_x if c + 1 < len(col_cuts) - 1 else 0))
+            ey0 = max(0, y0 - (overlap_y if r > 0 else 0))
+            ey1 = min(H, y1 + (overlap_y if r + 1 < len(row_cuts) - 1 else 0))
             row_blank.append(is_blank)
-            row_imgs.append(None if is_blank else im.crop((x0, y0, x1, y1)))
+            row_boxes.append((ex0, ey0, ex1, ey1))
+            row_imgs.append(None if is_blank else im.crop((ex0, ey0, ex1, ey1)))
         tiles.append(row_imgs)
         blank.append(row_blank)
+        tile_boxes.append(row_boxes)
 
     # 有框表：识别"子表分界"的 row_cut——该处竖线消失（两个带框子表之间的缝）。
     # 正常行切点处竖线贯穿(数量多)，子表缝处竖线≈0。据此标记需强制拆分的 band。
@@ -169,7 +309,8 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
 
     meta = {"row_cuts": row_cuts, "col_cuts": col_cuts,
             "row_cells": row_cells, "col_cells": col_cells,
-            "blank": blank, "grid": grid_ok, "split_bands": split_bands}
+            "blank": blank, "grid": grid_ok, "split_bands": split_bands,
+            "tile_boxes": tile_boxes, "overlap_x": overlap_x, "overlap_y": overlap_y}
     return tiles, meta
 
 
