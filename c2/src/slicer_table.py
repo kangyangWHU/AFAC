@@ -252,7 +252,11 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
     # 全宽贯穿(几千px)，120px 阈值有 ~60× 余量，不会把文字行误判成线。横墨柱比密度法更准
     # （行估对 59→71/100），且连 15px 挤死的行都能救（015bd47c 101%）。无框→回退低墨缝。
     runl_rows = _runlen_lines(dark180.T, min_run=120)
-    row_lines = runl_rows if len(runl_rows) > 1 else _gap_lines(dark.mean(axis=1), width_gate=False)
+    gap_rows = _gap_lines(dark.mean(axis=1), width_gate=False)
+    if len(runl_rows) > 1 and len(runl_rows) >= 0.5 * len(gap_rows):
+        row_lines = runl_rows                # 有横框线：切在线上
+    else:
+        row_lines = gap_rows                 # 只有边框/残横线时不被劫持 → 回退横白缝
     grid_ok = len(col_lines) > 1 and len(row_lines) > 1
 
     col_bnd = _boundaries(col_lines, W)
