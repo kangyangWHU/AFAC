@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from .. import config
 from ..index.base import Retriever, Hit
+from ..index.synonyms import expand_query
 from .filters import low_value
 
 
@@ -38,6 +39,12 @@ class EvidenceRetriever:
         self.metric_per_doc = r.get("metric_per_doc", 3)
         self.per_option_per_doc = r.get("per_option_per_doc", False)
         self.per_option_doc_k = r.get("per_option_doc_k", 3)
+        self.expand_syn = r.get("expand_synonyms", False)  # query同义词扩展(治词法不匹配漏召)
+        # 财报结构化摘要（主要会计数据），财报题保底注入
+        import os
+        import json as _json
+        fp = os.path.join(config.path("index_dir"), "fin_summaries.json")
+        self.fin_summaries = _json.load(open(fp, encoding="utf-8")) if os.path.exists(fp) else {}
 
     def retrieve(self, question: str, options: dict[str, str],
                  doc_ids: list[str] | None = None,
@@ -47,6 +54,9 @@ class EvidenceRetriever:
         queries = [question]
         if self.per_option:
             queries += list(options.values())
+        if self.expand_syn:
+            # 选项/题干用词可能与文档不同(保单贷款vs借款)，补同义词命中被漏召的支撑块
+            queries = [expand_query(q) for q in queries]
 
         best: dict[str, Hit] = {}        # chunk_id -> best Hit
         reserved: set[str] = set()       # 指标定向/保底块，免遭 max_chunks 截断
@@ -135,7 +145,15 @@ class EvidenceRetriever:
         ranked = list(selected.values())
         # 同文档内按 seq 排序，证据更连贯
         ranked.sort(key=lambda x: (x.doc_id, x.meta.get("seq") or 0))
-        return [Evidence(chunk_id=h.chunk_id, doc_id=h.doc_id, text=h.text,
-                         score=h.score, article_no=h.meta.get("article_no"),
-                         page=h.meta.get("page"), type=h.meta.get("type") or "text")
-                for h in ranked]
+        out = [Evidence(chunk_id=h.chunk_id, doc_id=h.doc_id, text=h.text,
+                        score=h.score, article_no=h.meta.get("article_no"),
+                        page=h.meta.get("page"), type=h.meta.get("type") or "text")
+               for h in ranked]
+        # 财报题：保底注入"主要会计数据"结构化摘要（放最前，作权威数值来源）
+        if domain == "financial_reports" and doc_ids:
+            inj = [Evidence(chunk_id=f"{d}::fin_summary", doc_id=d,
+                            text=self.fin_summaries[d], score=1e9,
+                            article_no=None, page=None, type="fin_summary")
+                   for d in doc_ids if d in self.fin_summaries]
+            out = inj + out
+        return out

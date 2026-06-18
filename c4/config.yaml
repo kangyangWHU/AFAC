@@ -20,9 +20,8 @@ llm:
   api_key: file:.bailian_key
   model: qwen3-235b-a22b    # 校准版(百炼) — 更强MoE,diff 27b定位真错题
   temperature: 0.0
-  max_tokens: 3072          # 本地模型, 留足空间写"答案:"行
-                            # 平均仅~400 tok/call(prompt要求简洁)，提高上限只救少数长推理题，成本低
-  enable_thinking: false    # 显式关闭(client每次调用都传, 不依赖API默认)
+  max_tokens: 3072          # 非thinking ~400/call用不满, 留空间写"答案:"行
+  enable_thinking: false    # 实测全量thinking 79% vs 无thinking 80%, 在噪声带内无收益, 关
   timeout: 120
   retries: 2
 
@@ -53,10 +52,11 @@ bm25:
 retrieval:
   per_option_query: true     # multi/tf 对每个选项单独检索
   per_option_per_doc: true   # 每个选项在【每个候选文档内】单独检索(治大文档错段/某年值漏召回)
-  per_option_doc_k: 3        # 每个(选项×文档)取前 k
+  per_option_doc_k: 8        # 每个(选项×文档)取前 k (3->8: 治欠选,对的块常排top-3外)
+  expand_synonyms: true      # query同义词扩展(保单贷款↔借款等), 治词法不匹配致欠选
   dedup: true
   min_per_doc: 2             # 每个候选文档至少保底召回块数（多文档题防漏）
-  max_chunks: 14             # 实测降到8掉6分(模型用上下文,不止判别事实); 准确率主导,不压块数
+  max_chunks: 22             # 14->22: 配合doc_k救欠选(多文档题每篇多留证据); token仍在预算内
   per_query_k: 4             # 单条 query 取前 k
   backfill_parent: true      # 命中块回填前后兄弟块(small-to-big)
   filter_low_value: true     # 过滤目录页/空壳表/碎片块
@@ -91,7 +91,7 @@ router:
 
 # 推理
 reasoner:
-  max_evidence_chars: 12000  # 喂给模型的证据上限（控 token）
+  max_evidence_chars: 18000  # 12k->18k: 防已召回的关键块被格式化截断(财报/多文档证据长)
   verify_multi: false        # 关闭：实测+72%token/0增益,且"促选入"与235b过度选择弱点相反(73.46最优版即关闭)
 
 # 伪表清洗（解析过度检测的版面表）
