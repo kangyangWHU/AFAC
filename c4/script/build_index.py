@@ -45,6 +45,18 @@ def main():
     SignatureIndex(sigs).save(spath)
     print(f"signatures -> {spath} ({len(sigs)} docs)")
 
+    # 财报"主要会计数据"结构化摘要（优先 MinerU 干净表），供检索保底注入
+    from agent.parser.fin_summary import extract_summary  # noqa: E402
+    fin_sum = {}
+    for f in glob.glob(os.path.join(proc, "financial_reports", "*.json")):
+        d = json.load(open(f, encoding="utf-8"))
+        s = extract_summary(d, root=ROOT)
+        if s:
+            fin_sum[d["doc_id"]] = s
+    fpath = os.path.join(index_dir, "fin_summaries.json")
+    json.dump(fin_sum, open(fpath, "w"), ensure_ascii=False, indent=1)
+    print(f"fin_summaries -> {fpath} ({len(fin_sum)}/10 财报)")
+
     # 统计
     import collections
     by_dom = collections.Counter(c["domain"] for c in all_chunks)

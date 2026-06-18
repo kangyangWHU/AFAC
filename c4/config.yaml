@@ -18,7 +18,7 @@ run:
 llm:
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   api_key: file:.bailian_key
-  model: qwen3-235b-a22b    # 校准版(百炼) — 更强MoE,diff 27b定位真错题
+  model: qwen3-235b-a22b    # 可靠基准(官方73.46). campaign直接编辑235b答案文件,不重跑
   temperature: 0.0
   max_tokens: 3072          # 非thinking ~400/call用不满, 留空间写"答案:"行
   enable_thinking: false    # 实测全量thinking 79% vs 无thinking 80%, 在噪声带内无收益, 关
