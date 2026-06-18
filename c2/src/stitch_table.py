@@ -533,8 +533,15 @@ def stitch_multi(tile_outputs, meta):
             seg_cap = ""
             for c in range(n_col):
                 sc = segs[r][c] if c < len(segs[r]) else []
-                if j < len(sc):
-                    cap, grid = sc[j]
+                # 段索引对齐:稀疏列(段数<max_seg)在三角形列分段宽表里缺的是**靠前**的
+                # 子表段——右列段(大保单年度末)对大投保年龄无数据,只在靠后子表才出现。
+                # 故按 max_seg 末端对齐(idx=j-(max_seg-len(sc))),而非一律取第 j 段;
+                # 否则后段的右列表头会被错配进前段、被 _is_numeric_header_row 误判成
+                # 表头而过切(2358594b GT4→7、3c3f1666 GT3→5 的根因)。max_seg=1 时
+                # offset=0,行为不变,不影响普通单段 band。
+                idx = j - (max_seg - len(sc))
+                if 0 <= idx < len(sc):
+                    cap, grid = sc[idx]
                     band_row.append(grid)
                     if cap and not seg_cap and _is_caption_like(cap):
                         seg_cap = cap               # 该段前的"标题样"文字
