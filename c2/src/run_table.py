@@ -25,34 +25,128 @@ def _is_truncated(o):
     return bool(o) and "<table" in o.lower() and "</table>" not in o.lower()
 
 
-def _split_call_merge(img, timeout, depth=0):
-    """把（截断的）tile 竖切两半各自重读，合并行；半块仍截断则递归（≤2 层）。"""
+def _merge_side_by_side(left_rows, right_rows):
+    """左右半块按行号拼接；行数不等时短侧补空行。"""
+    n = max(len(left_rows), len(right_rows))
+    out = []
+    for i in range(n):
+        row = []
+        if i < len(left_rows):
+            row.extend(left_rows[i])
+        if i < len(right_rows):
+            row.extend(right_rows[i])
+        out.append(row)
+    return out
+
+
+def _split_call_merge(img, timeout, depth=0, axis="h"):
+    """把坏 tile 裁剪成两半重读后合并。
+
+    axis="h": 上/下拆，适合截断、少行(row_under)。
+    axis="v": 左/右拆，适合超宽展平(1 行 x 几百列)。
+    """
     w, h = img.size
-    top = img.crop((0, 0, w, h // 2))
-    bot = img.crop((0, h // 2, w, h))
-    ot = api.call_safe(top, timeout=timeout)
-    ob = api.call_safe(bot, timeout=timeout)
-    if depth < 2 and _is_truncated(ot) and h // 2 > 200:
-        ot = _split_call_merge(top, timeout, depth + 1)
-    if depth < 2 and _is_truncated(ob) and h // 2 > 200:
-        ob = _split_call_merge(bot, timeout, depth + 1)
-    merged = parse_tile(ot) + parse_tile(ob)      # 上半行 + 下半行
-    return rows_to_html(merged) if merged else (ot or ob)
+    if axis == "v":
+        first = img.crop((0, 0, w // 2, h))
+        second = img.crop((w // 2, 0, w, h))
+    else:
+        first = img.crop((0, 0, w, h // 2))
+        second = img.crop((0, h // 2, w, h))
+
+    out1 = api.call_safe(first, timeout=timeout)
+    out2 = api.call_safe(second, timeout=timeout)
+    if depth < 2 and _is_truncated(out1) and min(first.size) > 200:
+        out1 = _split_call_merge(first, timeout, depth + 1, axis=axis)
+    if depth < 2 and _is_truncated(out2) and min(second.size) > 200:
+        out2 = _split_call_merge(second, timeout, depth + 1, axis=axis)
+
+    rows1, rows2 = parse_tile(out1), parse_tile(out2)
+    if axis == "v":
+        merged = _merge_side_by_side(rows1, rows2)
+    else:
+        merged = rows1 + rows2
+    return rows_to_html(merged) if merged else (out1 or out2)
 
 
-def _refine_truncated(tiles, outs, timeout=240):
-    """对截断的 tile 竖切重读，恢复被截掉的底部行（row_under 主因）。并发处理。"""
+def _tile_shape(html):
+    rows = parse_tile(html)
+    if not rows:
+        return 0, 0, 0
+    widths = [len(r) for r in rows]
+    return len(rows), max(widths), sorted(widths)[len(widths) // 2]
+
+
+def _bad_tile_reason(img, html, expected_rows=None):
+    """识别后处理难以挽救的 tile。
+
+    返回 None 表示可用；返回字符串表示建议重读。这里刻意只抓高置信坏块，
+    避免把稀疏表/短表误判后引入更多 API 调用。
+    """
+    nrows, maxw, medw = _tile_shape(html)
+    w, h = img.size
+    # 典型展平幻觉：1~2 行、几百列；或者超过像素物理上限。
+    if nrows <= 2 and maxw >= 80:
+        return "flat"
+    if maxw > max(80, w // 6):
+        return "too_wide"
+    if _is_truncated(html):
+        return "truncated"
+    if nrows == 0:
+        return None
+    if expected_rows and expected_rows >= 8 and nrows < expected_rows * 0.45:
+        # tile 很高却只读出极少行，通常是漏读或折叠；短/稀疏块不走这条。
+        return "row_under"
+    return None
+
+
+def _repair_bad_tile(img, html, reason, timeout, expected_rows=None):
+    """按坏块类型裁剪重读；若仍坏则尝试另一方向，最后保留原输出。"""
+    if reason in ("flat", "too_wide"):
+        fixed = _split_call_merge(img, timeout, axis="v")
+        if _bad_tile_reason(img, fixed, expected_rows) is None:
+            return fixed
+        fixed2 = _split_call_merge(img, timeout, axis="h")
+        return fixed2 if _bad_tile_reason(img, fixed2, expected_rows) is None else html
+    if reason in ("truncated", "row_under"):
+        fixed = _split_call_merge(img, timeout, axis="h")
+        if _bad_tile_reason(img, fixed, expected_rows) is None:
+            return fixed
+        fixed2 = _split_call_merge(img, timeout, axis="v")
+        return fixed2 if _bad_tile_reason(img, fixed2, expected_rows) is None else html
+    return html
+
+
+def _refine_bad_tiles(tiles, outs, meta, timeout=240):
+    """对所有高置信坏 tile 局部裁剪重读。"""
     from config import MAX_CONCURRENCY
-    todo = [(r, c) for r in range(len(outs)) for c in range(len(outs[r]))
-            if tiles[r][c] is not None and _is_truncated(outs[r][c])]
+    row_cells = meta.get("row_cells", []) if meta else []
+    todo = []
+    for r in range(len(outs)):
+        for c in range(len(outs[r])):
+            if tiles[r][c] is None:
+                continue
+            expected = row_cells[r] if r < len(row_cells) else None
+            reason = _bad_tile_reason(tiles[r][c], outs[r][c], expected)
+            if reason:
+                todo.append((r, c, reason))
     if not todo:
         return outs
+    priority = {"flat": 0, "too_wide": 1, "truncated": 2, "row_under": 3}
+    todo = sorted(todo, key=lambda x: priority.get(x[2], 9))
     workers = min(MAX_CONCURRENCY, max(1, len(todo)))
     with ThreadPoolExecutor(max_workers=workers) as ex:
         fixed = list(ex.map(
-            lambda rc: _split_call_merge(tiles[rc[0]][rc[1]], timeout), todo))
-    for (r, c), o in zip(todo, fixed):
+            lambda item: _repair_bad_tile(
+                tiles[item[0]][item[1]], outs[item[0]][item[1]], item[2],
+                timeout, row_cells[item[0]] if item[0] < len(row_cells) else None),
+            todo))
+    for (r, c, _reason), o in zip(todo, fixed):
         outs[r][c] = o
+        # 修复成功的**完整**结果回写缓存：截断 tile 此前未落盘（api 不缓存截断），
+        # 这里把拆分重读合并的完整结果写回原 tile key，下次直接命中、不再拆分。
+        exp = row_cells[r] if r < len(row_cells) else None
+        if o and _bad_tile_reason(tiles[r][c], o, exp) is None:
+            api.write_cache(tiles[r][c], o)
     return outs
 
 
@@ -94,7 +188,8 @@ def _call_grid(tiles, timeout=240):
 def run_one(im, timeout=240):
     tiles, meta = slice_table(im)
     outs = _call_grid(tiles, timeout)
-    # 注：截断块重读(_refine_truncated)实测过慢(分裂×慢API→~3h/全集)，违背预算，已停用。
+    if not getattr(api, "CACHE_ONLY", False):
+        outs = _refine_bad_tiles(tiles, outs, meta, timeout)
     pred = stitch_table(outs, meta)
     ncalls = sum(1 for row in tiles for t in row if t is not None)
     return pred, ncalls, meta

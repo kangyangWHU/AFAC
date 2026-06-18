@@ -116,6 +116,24 @@ def _looks_like_error(md):
     return False
 
 
+def _is_truncated(md):
+    """tile 输出被 ~12k 字符上限截断：有 <table 却无闭合 </table>。
+    截断是 200 成功内容、错误信封识别不出，必须单独拦下：**不写缓存**，
+    由上层 _split_call_merge 拆小重读后用 write_cache 回填完整结果。"""
+    if not md:
+        return False
+    low = md.lower()
+    return "<table" in low and "</table>" not in low
+
+
+def write_cache(image, md, *, fmt="PNG"):
+    """把上层修复后的**完整** tile 结果回写缓存，覆盖此前因截断而未落盘的 key。
+    使下次（含 CACHE_ONLY 离线评测）直接命中完整结果、无需再拆分重读。"""
+    raw_bytes, _ = _img_bytes(image, fmt)
+    with open(_cache_path(raw_bytes), "w", encoding="utf-8") as f:
+        f.write(md)
+
+
 def _parse_response(resp):
     """从 HTTP 响应中抽取 markdown 字符串。返回 (markdown, raw_text)。"""
     raw = resp.text
@@ -172,7 +190,8 @@ def call(image, *, fmt="PNG", timeout=120, retries=8, use_cache=True,
     if use_cache and os.path.exists(cpath):
         with open(cpath, encoding="utf-8") as f:
             cached = f.read()
-        if not _looks_like_error(cached):        # 旧缓存里若是错误信封则忽略，重调
+        # 错误信封 / 旧的截断半截结果 → 视为未命中，重调（截断会触发拆分修复）
+        if not _looks_like_error(cached) and not _is_truncated(cached):
             return cached
 
     if CACHE_ONLY:                               # 离线评测：未命中缓存直接置空，不调 API
@@ -197,7 +216,9 @@ def call(image, *, fmt="PNG", timeout=120, retries=8, use_cache=True,
                 last_err = md.strip()[:160]
                 time.sleep(min(2 ** attempt, 30) + random.uniform(0, 2))
                 continue
-            if use_cache:
+            # 截断（输出超 ~12k 上限）**不写缓存**：避免半截结果污染缓存，交由
+            # 上层 _split_call_merge 拆小重读、再 write_cache 回填完整结果。
+            if use_cache and not _is_truncated(md):
                 with open(cpath, "w", encoding="utf-8") as f:
                     f.write(md)
             return md

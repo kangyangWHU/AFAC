@@ -40,8 +40,9 @@ API_USER_IDS = [                                       # 5 个白名单 userId�
 LONG_ASPECT_MIN = 5.0        # 长宽比 ≥ 5 判为 LONG（面条图）
 
 # ---- 并发：共享 apiKey 在高并发下会限流（API Key 校验异常/Request Timeout）----
-# 实测 16 路偶发限流，调低以换稳定；可按线上表现回调。
-MAX_CONCURRENCY = 16
+# 限流返回 HTTP 错误/错误信封 → 重试退避、**不写缓存**（不污染），最坏只是变慢。
+# 故可上调换吞吐；16 路偶发限流，取 12 折中。
+MAX_CONCURRENCY = 12
 
 # ---- 评测：表格块识别 ----
 # GT 中表格以 HTML <table> 标签出现；据此把文档拆成 文本块 / 表格块
