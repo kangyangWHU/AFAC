@@ -17,6 +17,8 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
 TILE_MAX = 1500             # tile 像素硬上限
+UP_EDGE = 40                # cell 边长(√像素/cell) < 此值 = 密集小字 → 上采样重读
+UP_TARGET = 75             # 上采样目标 cell 边长(放大到 API 读得清的密度)
 # overlap 关闭（实测净负）：重叠让每个 tile 多读邻块一条，靠 stitch 去重还原。但在密集
 # 表(18px 行、数字列)上，① overlap_x 的逐行 _append_cells_dedup 每行删掉的格数不一致 →
 # 列数被打乱成 58/66/74/84(非均匀)；② overlap_y 的行去重在数字行上 sim 匹配失败 → 行翻倍。
@@ -389,11 +391,19 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
     # 左右并排子表：横线断裂中缝数 + 1 = 并排栏数（多数表为 1，不拆）
     panel_n = _panel_seams(g) + 1
 
+    # 密集判据：每 cell 平均像素的边长 = √(去margin面积 / (行数×列数))。
+    # 边长小 = 小字密集 → API 在原分辨率会读崩(行幻觉/列漂移)。用二维(行×列)而非
+    # 一维列间距：能抓"列稀但行密"(945104ed)。<UP_EDGE 则上采样到目标 UP_TARGET。
+    # slicer 行列估计实测误差仅 2~4%(密集表亦然)，故此判据可信。
+    nrow = sum(row_cells); ncol = sum(col_cells)
+    edge = (H * W / max(1, nrow * ncol)) ** 0.5
+    upsample = round(min(3.0, UP_TARGET / edge), 2) if edge < UP_EDGE else 1.0
+
     meta = {"row_cuts": row_cuts, "col_cuts": col_cuts,
             "row_cells": row_cells, "col_cells": col_cells,
             "blank": blank, "grid": grid_ok, "split_bands": split_bands,
             "tile_boxes": tile_boxes, "overlap_x": overlap_x, "overlap_y": overlap_y,
-            "panel_n": panel_n}
+            "panel_n": panel_n, "cell_edge": round(edge, 1), "upsample": upsample}
     return tiles, meta
 
 

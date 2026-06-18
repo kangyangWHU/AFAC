@@ -20,6 +20,14 @@ from stitch_table import stitch_table, parse_tile, rows_to_html
 from evaluate import table_teds, text_edit_loss
 
 
+def _up(t, factor):
+    """密集小字 tile 上采样：放大 factor 倍让 API 读得清(修行幻觉/列漂移)。
+    factor≤1 或 None → 原样返回。"""
+    if t is not None and factor and factor > 1:
+        return t.resize((round(t.width * factor), round(t.height * factor)), Image.LANCZOS)
+    return t
+
+
 def _is_truncated(o):
     """tile 输出被 ~12k 上限截断：有 <table 却无 </table>。"""
     return bool(o) and "<table" in o.lower() and "</table>" not in o.lower()
@@ -39,7 +47,7 @@ def _merge_side_by_side(left_rows, right_rows):
     return out
 
 
-def _split_call_merge(img, timeout, depth=0, axis="h"):
+def _split_call_merge(img, timeout, depth=0, axis="h", cache_dir=None):
     """把坏 tile 裁剪成两半重读后合并。
 
     axis="h": 上/下拆，适合截断、少行(row_under)。
@@ -53,12 +61,12 @@ def _split_call_merge(img, timeout, depth=0, axis="h"):
         first = img.crop((0, 0, w, h // 2))
         second = img.crop((0, h // 2, w, h))
 
-    out1 = api.call_safe(first, timeout=timeout)
-    out2 = api.call_safe(second, timeout=timeout)
+    out1 = api.call_safe(first, timeout=timeout, cache_dir=cache_dir)
+    out2 = api.call_safe(second, timeout=timeout, cache_dir=cache_dir)
     if depth < 2 and _is_truncated(out1) and min(first.size) > 200:
-        out1 = _split_call_merge(first, timeout, depth + 1, axis=axis)
+        out1 = _split_call_merge(first, timeout, depth + 1, axis=axis, cache_dir=cache_dir)
     if depth < 2 and _is_truncated(out2) and min(second.size) > 200:
-        out2 = _split_call_merge(second, timeout, depth + 1, axis=axis)
+        out2 = _split_call_merge(second, timeout, depth + 1, axis=axis, cache_dir=cache_dir)
 
     rows1, rows2 = parse_tile(out1), parse_tile(out2)
     if axis == "v":
@@ -99,25 +107,26 @@ def _bad_tile_reason(img, html, expected_rows=None):
     return None
 
 
-def _repair_bad_tile(img, html, reason, timeout, expected_rows=None):
+def _repair_bad_tile(img, html, reason, timeout, expected_rows=None, cache_dir=None):
     """按坏块类型裁剪重读；若仍坏则尝试另一方向，最后保留原输出。"""
     if reason in ("flat", "too_wide"):
-        fixed = _split_call_merge(img, timeout, axis="v")
+        fixed = _split_call_merge(img, timeout, axis="v", cache_dir=cache_dir)
         if _bad_tile_reason(img, fixed, expected_rows) is None:
             return fixed
-        fixed2 = _split_call_merge(img, timeout, axis="h")
+        fixed2 = _split_call_merge(img, timeout, axis="h", cache_dir=cache_dir)
         return fixed2 if _bad_tile_reason(img, fixed2, expected_rows) is None else html
     if reason in ("truncated", "row_under"):
-        fixed = _split_call_merge(img, timeout, axis="h")
+        fixed = _split_call_merge(img, timeout, axis="h", cache_dir=cache_dir)
         if _bad_tile_reason(img, fixed, expected_rows) is None:
             return fixed
-        fixed2 = _split_call_merge(img, timeout, axis="v")
+        fixed2 = _split_call_merge(img, timeout, axis="v", cache_dir=cache_dir)
         return fixed2 if _bad_tile_reason(img, fixed2, expected_rows) is None else html
     return html
 
 
-def _refine_bad_tiles(tiles, outs, meta, timeout=240):
-    """对所有高置信坏 tile 局部裁剪重读。"""
+def _refine_bad_tiles(tiles, outs, meta, timeout=240, upsample=1, cache_dir=None):
+    """对所有高置信坏 tile 局部裁剪重读。upsample>1 时坏块按上采样后的图重读、
+    回写进 cache_dir(与原始缓存分离)。"""
     from config import MAX_CONCURRENCY
     row_cells = meta.get("row_cells", []) if meta else []
     todo = []
@@ -137,21 +146,24 @@ def _refine_bad_tiles(tiles, outs, meta, timeout=240):
     with ThreadPoolExecutor(max_workers=workers) as ex:
         fixed = list(ex.map(
             lambda item: _repair_bad_tile(
-                tiles[item[0]][item[1]], outs[item[0]][item[1]], item[2],
-                timeout, row_cells[item[0]] if item[0] < len(row_cells) else None),
+                _up(tiles[item[0]][item[1]], upsample), outs[item[0]][item[1]], item[2],
+                timeout, row_cells[item[0]] if item[0] < len(row_cells) else None,
+                cache_dir=cache_dir),
             todo))
     for (r, c, _reason), o in zip(todo, fixed):
         outs[r][c] = o
         # 修复成功的**完整**结果回写缓存：截断 tile 此前未落盘（api 不缓存截断），
         # 这里把拆分重读合并的完整结果写回原 tile key，下次直接命中、不再拆分。
         exp = row_cells[r] if r < len(row_cells) else None
-        if o and _bad_tile_reason(tiles[r][c], o, exp) is None:
-            api.write_cache(tiles[r][c], o)
+        up_img = _up(tiles[r][c], upsample)
+        if o and _bad_tile_reason(up_img, o, exp) is None:
+            api.write_cache(up_img, o, cache_dir=cache_dir)
     return outs
 
 
-def _call_grid(tiles, timeout=240):
+def _call_grid(tiles, timeout=240, upsample=1, cache_dir=None):
     """并发调用 2D tiles，保持 [r][c] 结构。None（空白块）不调 API。
+    upsample>1 时每个 tile 先放大再调（修密集小字读崩），缓存进 cache_dir(分离)。
 
     **失败重试**：非空白 tile 若返回空串（=API 限流/失败被 call_safe 静默置空），
     会被当成空白块丢内容 → **分数随运行随机波动**(同一图两次跑分不同)。
@@ -165,8 +177,9 @@ def _call_grid(tiles, timeout=240):
     def _call_set(items, workers):
         with ThreadPoolExecutor(max_workers=workers) as ex:
             return list(ex.map(
-                lambda x: api.call_safe(tiles[x[1][0]][x[1][1]], timeout=timeout,
-                                        user_id=API_USER_IDS[x[0] % len(API_USER_IDS)]),
+                lambda x: api.call_safe(_up(tiles[x[1][0]][x[1][1]], upsample), timeout=timeout,
+                                        user_id=API_USER_IDS[x[0] % len(API_USER_IDS)],
+                                        cache_dir=cache_dir),
                 list(enumerate(items))))
 
     grid = [[None] * len(tiles[r]) for r in range(len(tiles))]
@@ -187,9 +200,11 @@ def _call_grid(tiles, timeout=240):
 
 def run_one(im, timeout=240):
     tiles, meta = slice_table(im)
-    outs = _call_grid(tiles, timeout)
+    up = meta.get("upsample", 1)
+    cdir = api.CACHE_UP_DIR if up > 1 else None      # 上采样 tile 缓存与原始分离
+    outs = _call_grid(tiles, timeout, upsample=up, cache_dir=cdir)
     if not getattr(api, "CACHE_ONLY", False):
-        outs = _refine_bad_tiles(tiles, outs, meta, timeout)
+        outs = _refine_bad_tiles(tiles, outs, meta, timeout, upsample=up, cache_dir=cdir)
     pred = stitch_table(outs, meta)
     ncalls = sum(1 for row in tiles for t in row if t is not None)
     return pred, ncalls, meta

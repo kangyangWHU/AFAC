@@ -24,6 +24,7 @@ from PIL import Image
 from config import API_URL, API_KEY, API_USER_IDS, CACHE_DIR
 
 Image.MAX_IMAGE_PIXELS = None        # 解除 PIL 超大图保护（赛题图可达 3.8 亿像素）
+CACHE_UP_DIR = os.path.join(os.path.dirname(CACHE_DIR), "cache_up")  # 上采样 tile 缓存(分离)
 
 # markdown 可能出现的返回字段名（按经验罗列，命中即用）
 _MD_KEYS = ["markdown", "md", "result", "data", "content", "text", "output"]
@@ -54,9 +55,12 @@ def _img_bytes(image, fmt="PNG"):
     raise TypeError("image 必须是 路径/PIL.Image/bytes")
 
 
-def _cache_path(raw):
+def _cache_path(raw, cache_dir=None):
     h = hashlib.sha1(raw).hexdigest()
-    return os.path.join(CACHE_DIR, h + ".md")
+    d = cache_dir or CACHE_DIR
+    if d is not CACHE_DIR:
+        os.makedirs(d, exist_ok=True)
+    return os.path.join(d, h + ".md")
 
 
 def _strip_fences(s):
@@ -126,11 +130,11 @@ def _is_truncated(md):
     return "<table" in low and "</table>" not in low
 
 
-def write_cache(image, md, *, fmt="PNG"):
+def write_cache(image, md, *, fmt="PNG", cache_dir=None):
     """把上层修复后的**完整** tile 结果回写缓存，覆盖此前因截断而未落盘的 key。
     使下次（含 CACHE_ONLY 离线评测）直接命中完整结果、无需再拆分重读。"""
     raw_bytes, _ = _img_bytes(image, fmt)
-    with open(_cache_path(raw_bytes), "w", encoding="utf-8") as f:
+    with open(_cache_path(raw_bytes, cache_dir), "w", encoding="utf-8") as f:
         f.write(md)
 
 
@@ -174,7 +178,7 @@ def _find_md_in_obj(obj):
 
 
 def call(image, *, fmt="PNG", timeout=120, retries=8, use_cache=True,
-         user_id=None):
+         user_id=None, cache_dir=None):
     """调用 FinixDoc-VL，返回 markdown 字符串。
 
     image     : 图片路径 / PIL.Image / bytes
@@ -183,10 +187,11 @@ def call(image, *, fmt="PNG", timeout=120, retries=8, use_cache=True,
     retries   : 失败重试次数（指数退避）
     use_cache : 命中内容哈希缓存则直接返回
     user_id   : 指定 userId，None 则轮询
+    cache_dir : 缓存目录（默认 CACHE_DIR；上采样 tile 用 cache_up/ 分离，便于对比/回退）
     """
     raw_bytes, fname = _img_bytes(image, fmt)
 
-    cpath = _cache_path(raw_bytes)
+    cpath = _cache_path(raw_bytes, cache_dir)
     if use_cache and os.path.exists(cpath):
         with open(cpath, encoding="utf-8") as f:
             cached = f.read()
