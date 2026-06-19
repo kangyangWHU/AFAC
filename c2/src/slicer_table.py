@@ -39,21 +39,6 @@ CELL_BUDGET = 300           # 单 tile 最大单元格数（防输出截断）�
 BLANK_INK = 0.0015          # tile 平均墨量低于此 → 判为空白块（仅跳真正空白；0.003 的faint表头不再误跳）
 
 
-def _grid_lines(dark_frac, hi=0.6):
-    """暗占比剖面里找网格线位置（贯穿线占比高）。合并相邻。"""
-    idx = np.where(dark_frac > hi)[0]
-    if len(idx) == 0:
-        return []
-    lines, s, p = [], idx[0], idx[0]
-    for x in idx[1:]:
-        if x - p > 3:
-            lines.append((s + p) // 2)
-            s = x
-        p = x
-    lines.append((s + p) // 2)
-    return lines
-
-
 def _otsu_split(widths):
     """对一组缝宽做 Otsu 双峰分离，返回阈值：宽度 ≥ 阈值 = 列缝。
 
