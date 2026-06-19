@@ -272,25 +272,6 @@ def _to_int(s):
     return int(s) if re.fullmatch(r"-?\d+", s) else None
 
 
-def _is_numeric_header_row(row, min_run=5):
-    """识别年龄/年度这类纯数字连续表头行，如 0,1,2... 或 33,34,35...。
-
-    数据行通常是首列为 1/2/3，后面跟大额重复数值，不会形成连续小整数序列。
-    """
-    vals = [_to_int(c) for c in row if (c or "").strip()]
-    vals = [v for v in vals if v is not None]
-    if len(vals) < min_run:
-        return False
-    best = run = 1
-    for a, b in zip(vals, vals[1:]):
-        if b == a + 1:
-            run += 1
-            best = max(best, run)
-        else:
-            run = 1
-    return best >= min_run
-
-
 def _label_col(rows, thr=0.5):
     """标签列 = 自左起第一个填充率 ≥thr 的列。跳过『合并单元格只在段顶填值』的稀疏前导
     列（如险种/性别），否则逐行 _first_cell 会在空行漂移到右侧数据列、把数据行误判成
@@ -339,10 +320,6 @@ def _split_at_headers(rows, min_seg=3, sim_hi=0.95, max_frac=0.4):
         if not cur:
             continue
         if _is_num(cur):
-            if run >= 5 and _is_numeric_header_row(rows[i]):
-                bnds.add(i)                    # 新子表表头是 33,34,35... 这类数字序列
-                run = 0
-                continue
             run += 1                          # 数据行,累积数字运行
         else:
             if run >= 2:                      # 已建立数字运行 → 该文本行是子表边界
