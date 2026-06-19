@@ -356,23 +356,6 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
         blank.append(row_blank)
         tile_boxes.append(row_boxes)
 
-    # 有框表：识别"子表分界"的 row_cut——该处竖线消失（两个带框子表之间的缝）。
-    # 正常行切点处竖线贯穿(数量多)，子表缝处竖线≈0。据此标记需强制拆分的 band。
-    split_bands = set()
-    bordered = col_frac.max() > 0.4 if (col_frac := dark.mean(axis=0)) is not None else False
-    if bordered and len(row_cuts) > 2:
-        def vlines_at(y, half=14):
-            seg = dark[max(0, y - half):min(H, y + half)].mean(axis=0)
-            idx = np.where(seg > 0.5)[0]
-            return 0 if len(idx) == 0 else 1 + int((np.diff(idx) > 3).sum())
-        band_vl = [vlines_at((row_cuts[r] + row_cuts[r + 1]) // 2)
-                   for r in range(len(row_cuts) - 1)]
-        typ = np.median([v for v in band_vl if v > 3]) if any(v > 3 for v in band_vl) else 0
-        if typ > 3:
-            for r in range(1, len(row_cuts) - 1):
-                if vlines_at(row_cuts[r]) < typ * 0.3:   # 该切点竖线骤降=子表缝
-                    split_bands.add(r)
-
     # 左右并排子表：横线断裂中缝数 + 1 = 并排栏数（多数表为 1，不拆）
     panel_n = _panel_seams(g) + 1
 
@@ -386,7 +369,7 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
 
     meta = {"row_cuts": row_cuts, "col_cuts": col_cuts,
             "row_cells": row_cells, "col_cells": col_cells,
-            "blank": blank, "grid": grid_ok, "split_bands": split_bands,
+            "blank": blank, "grid": grid_ok,
             "tile_boxes": tile_boxes, "overlap_x": overlap_x, "overlap_y": overlap_y,
             "panel_n": panel_n, "cell_edge": round(edge, 1), "upsample": upsample}
     return tiles, meta

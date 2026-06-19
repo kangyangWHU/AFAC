@@ -435,7 +435,6 @@ def stitch_multi(tile_outputs, meta):
     overlap_x = meta.get("overlap_x", 0)
     overlap_y = meta.get("overlap_y", 0)
     panel_n = meta.get("panel_n", 1)
-    split_bands = meta.get("split_bands", set())
     blank = meta.get("blank", [[False] * n_col for _ in range(n_band)])
 
     # 每个 tile → 分段，并**丢弃展平幻觉段**（行数 > 像素高/最小行高，不可能真实）
