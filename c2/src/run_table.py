@@ -5,6 +5,7 @@
 所有 API 调用走缓存。
 """
 import os
+import re
 import glob
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -198,6 +199,33 @@ def _call_grid(tiles, timeout=240, upsample=1, cache_dir=None):
     return grid
 
 
+def _strip_html(s):
+    """表外文字块按纯文本拼回：剥掉模型可能裹上的 HTML 标签，折叠空白。"""
+    return " ".join(re.sub(r"<[^>]+>", " ", s or "").split())
+
+
+def _call_text_blocks(im, blocks, timeout):
+    """表外孤立文字块(页眉/页脚/水印/页码)单独识别，按位置返回拼到表格前/后的文本。
+    放在主表之后调(query 最后)；CACHE_ONLY 离线评测下未缓存→空，不影响既有评测。"""
+    if not blocks:
+        return "", ""
+    from config import MAX_CONCURRENCY
+    pad = 6
+    imgs = [im.crop((max(0, x0 - pad), max(0, y0 - pad),
+                     min(im.width, x1 + pad), min(im.height, y1 + pad)))
+            for _where, (x0, y0, x1, y1) in blocks]
+    with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENCY, max(1, len(imgs)))) as ex:
+        outs = list(ex.map(lambda t: api.call_safe(t, timeout=timeout), imgs))
+    before, after = [], []
+    for (where, _box), o in zip(blocks, outs):
+        txt = _strip_html(o)
+        if txt:
+            (before if where == "before" else after).append(txt)
+    b = ("\n".join(before) + "\n") if before else ""
+    a = ("\n" + "\n".join(after)) if after else ""
+    return b, a
+
+
 def run_one(im, timeout=240):
     tiles, meta = slice_table(im)
     up = meta.get("upsample", 1)
@@ -206,7 +234,10 @@ def run_one(im, timeout=240):
     if not getattr(api, "CACHE_ONLY", False):
         outs = _refine_bad_tiles(tiles, outs, meta, timeout, upsample=up, cache_dir=cdir)
     pred = stitch_table(outs, meta)
-    ncalls = sum(1 for row in tiles for t in row if t is not None)
+    # 表外文字块：单独识别后按位置拼回表格前/后(query 放最后)
+    before, after = _call_text_blocks(im, meta.get("text_blocks", []), timeout)
+    pred = before + pred + after
+    ncalls = sum(1 for row in tiles for t in row if t is not None) + len(meta.get("text_blocks", []))
     return pred, ncalls, meta
 
 

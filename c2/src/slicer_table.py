@@ -254,6 +254,49 @@ def _panel_seams(g):
     return seams
 
 
+def _content_segs(proj, gap, thr=0.002):
+    """投影 proj 上按 >thr 的连续内容分段，相邻段间隔 ≤gap 合并。返回 [(s,e),...]。"""
+    idx = np.where(proj > thr)[0]
+    if len(idx) == 0:
+        return []
+    out, s, p = [], idx[0], idx[0]
+    for x in idx[1:]:
+        if x - p <= gap:
+            p = x
+        else:
+            out.append((s, p)); s, p = x, x
+    out.append((s, p))
+    return out
+
+
+def split_table_texts(im, hi_frac=0.05, wd_frac=0.40):
+    """从图里分出主表 bbox 与表外孤立文字块（页眉/页脚/水印/页码）。
+
+    判据：表外文字块 = **矮**(高<图高 hi_frac) + **窄**(宽<图宽 wd_frac) + 非最大墨块。
+    三角形表底部稀疏段虽矮但**宽**(横跨表列)→不满足"窄"→留在主表，不会被误拆；
+    页脚/水印/页码又矮又窄→分出来单独识别。无文字块时主表 bbox=内容 bbox。
+
+    返回 (主表bbox(x0,y0,x1,y1) 或 None, [文字块bbox,...])，坐标均为传入 im 像素。
+    """
+    g = np.asarray(im.convert("L"))
+    dark = (g < 128)
+    H, W = g.shape
+    blks = []
+    for (y0, y1) in _content_segs(dark.mean(axis=1), int(H * 0.025)):
+        for (x0, x1) in _content_segs(dark[y0:y1 + 1].mean(axis=0), int(W * 0.02)):
+            blks.append((x0, y0, x1, y1, int(dark[y0:y1 + 1, x0:x1 + 1].sum())))
+    if not blks:
+        return None, []
+    big = max(b[4] for b in blks)
+    texts = [b for b in blks
+             if (b[3] - b[1]) < H * hi_frac and (b[2] - b[0]) < W * wd_frac and b[4] < big]
+    tab = [b for b in blks if b not in texts]
+    tb = (min(b[0] for b in tab), min(b[1] for b in tab),
+          max(b[2] for b in tab), max(b[3] for b in tab))
+    texts.sort(key=lambda b: (b[1], b[0]))      # 先上后下、同行左到右
+    return tb, [b[:4] for b in texts]
+
+
 def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
                 blank_ink=BLANK_INK):
     """密度自适应 + 严格网格线 2D 切分。
@@ -267,17 +310,20 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
         'grid'                    : 网格线是否可靠
       }
     """
-    # 先裁掉表外 margin（空白边）：否则 TILE_MAX 会在大片空白里硬切出多余空白条带
-    # （有些表只占图高 19~29%，余下全是 margin → 多切好几刀）。裁到内容 bbox 留 8px 边。
-    g0 = np.asarray(im.convert("L"))
-    d0 = (g0 < 128)
-    ys = np.where(d0.mean(axis=1) > 0.002)[0]
-    xs = np.where(d0.mean(axis=0) > 0.002)[0]
-    if len(ys) > 0 and len(xs) > 0:
-        y0 = max(0, ys[0] - 8); y1 = min(g0.shape[0], ys[-1] + 9)
-        x0 = max(0, xs[0] - 8); x1 = min(g0.shape[1], xs[-1] + 9)
-        if (x1 - x0) < g0.shape[1] or (y1 - y0) < g0.shape[0]:
-            im = im.crop((x0, y0, x1, y1))
+    # 先切出主表、剥离表外孤立文字块（页眉/页脚/水印/页码）：否则它们会被当成多出来的
+    # 列/行污染网格（实测列虚增，整图 slice 比真值多 3 列）。文字块坐标记进 meta，由 runner
+    # 单独识别后按位置拼回表格前/后。无文字块时等价于裁到内容 bbox（兼顾原 margin 裁剪职责）。
+    tb, _texts = split_table_texts(im)
+    text_blocks = []
+    if tb is not None:
+        x0, y0, x1, y1 = tb
+        for (bx0, by0, bx1, by1) in _texts:
+            where = "before" if by1 <= y0 else "after"   # 表上方=前，下方=后
+            text_blocks.append((where, (bx0, by0, bx1, by1)))
+        cx0 = max(0, x0 - 8); cy0 = max(0, y0 - 8)
+        cx1 = min(im.width, x1 + 9); cy1 = min(im.height, y1 + 9)
+        if (cx1 - cx0) < im.width or (cy1 - cy0) < im.height:
+            im = im.crop((cx0, cy0, cx1, cy1))
 
     g = np.asarray(im.convert("L"))
     H, W = g.shape
@@ -371,7 +417,8 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
             "row_cells": row_cells, "col_cells": col_cells,
             "blank": blank, "grid": grid_ok,
             "tile_boxes": tile_boxes, "overlap_x": overlap_x, "overlap_y": overlap_y,
-            "panel_n": panel_n, "cell_edge": round(edge, 1), "upsample": upsample}
+            "panel_n": panel_n, "cell_edge": round(edge, 1), "upsample": upsample,
+            "text_blocks": text_blocks}
     return tiles, meta
 
 
