@@ -11,10 +11,14 @@
 tile 受两条约束：像素 ≤TILE_MAX（防内部降采样糊字）、单元格数 ≤CELL_BUDGET
 （防 API ~12k 字符输出截断）。
 """
+import os
 import numpy as np
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
+MAX_TILE_COLS = int(os.environ.get("C2_MTC", "1000000000"))   # 单 tile 最大列数(默认不限)。
+# 实验：≤8 让 b326dfb6 0.791→0.996(宽表读全列)、窄表(6列)不受影响，但只测了 4 张、8 偏激进
+# (怕切碎本该一起的列)，且 b326 提升是否真是列(而非上采样)待查 → 暂不固化，用 C2_MTC 实验。
 
 TILE_MAX = 1500             # tile 像素硬上限
 UP_EDGE = 40                # cell 边长(√像素/cell) < 此值 = 密集小字 → 上采样重读
@@ -36,6 +40,9 @@ CELL_BUDGET = 300           # 单 tile 最大单元格数（防输出截断）�
 # 含表 tile 每格约 16 字符(p99=25)。CELL_BUDGET=600 时 10.1% 的 tile 截断、大表 TEDS 被拖低。
 # 截断从 ~431 cell 起；400 已 0 截断。取 300 留余量(300×16≈4.8k,300×25≈7.5k)确保不截断。
 # 之前不敢降是怕 tile 变多触发共享 key 限流——该约束已解除(改用限流重试)。
+MAX_TILE_ROWS = 25          # 单 tile 最大行数（独立于 CELL_BUDGET）。列少的窄表 max_rows=
+# CELL_BUDGET/max_cols 会很大(7列→42)，切出 39行×7列 的"高瘦"tile，API 在高密集 tile 上
+# 漏行(090853cd 骨架78→读出46)。绝对行上限逼高表多切几刀，单 tile 更小、API 读得全。
 BLANK_INK = 0.0015          # tile 平均墨量低于此 → 判为空白块（仅跳真正空白；0.003 的faint表头不再误跳）
 
 
@@ -354,7 +361,7 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
     row_bnd = _boundaries(row_lines, H)
 
     # 先按像素分列组，得到每组最大列数 → 据此限制每 tile 行数，使 cell ≤ budget
-    col_cuts, col_cells = _group_boundaries(col_bnd, tile_max)
+    col_cuts, col_cells = _group_boundaries(col_bnd, tile_max, max_cells=MAX_TILE_COLS)
     # 安全落刀：把每个 tile 列切点 snap 到 ±25px 内文字墨最少处，避免把单元格/数字从中间
     # 切开（白缝字间割裂趋零；墨柱误检文字列的切割 16.6%→0.4%）。±25px 不改变骨架列数。
     textink = _textink_cols(dark)
@@ -364,7 +371,7 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
         w = (col_cuts[c + 1] - col_cuts[c]) if c + 1 < len(col_cuts) else tile_max
         return min(col_cells[c], max(1, w // MIN_COL_PX))
     max_cols = max((_real_cols(c) for c in range(len(col_cells))), default=1)
-    max_rows = max(1, cell_budget // max(1, max_cols))
+    max_rows = min(max(1, cell_budget // max(1, max_cols)), MAX_TILE_ROWS)
     row_cuts, row_cells = _group_boundaries(row_bnd, tile_max, max_cells=max_rows)
     # 安全落刀（行，对称于列）：snap 到横向文字墨最少处，避免把一行文字从中间横切。
     # _textink_cols 作用在 dark.T 上 = 每原始行的横向短墨段(笔画)占比。

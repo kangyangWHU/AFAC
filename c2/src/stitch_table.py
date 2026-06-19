@@ -47,6 +47,12 @@ def parse_tile_segments(html):
         return []
     starts = [m.start() for m in re.finditer(r"<table", html, re.I)]
     if not starts:
+        # 纯文本兜底：稀疏表底部"只有一列数据(行号)、其余全空"的 tile 会被 API 读成纯文本
+        # (如 '70\n71\n…\n106')而非 <table>。这些是真内容(年度号),不能丢。多行→当单列 grid
+        # (每行一个 cell)，由下游按骨架列数补空 td；单行→当表外文字(caption)。
+        lines = [ln.strip() for ln in html.splitlines() if ln.strip()]
+        if len(lines) >= 2:
+            return [("", [[ln] for ln in lines])]
         return []
     captions = [_clean_caption(html[:starts[0]])]
     segs = []
