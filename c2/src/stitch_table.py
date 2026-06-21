@@ -146,7 +146,11 @@ def _width_segments(parsed, n_col):
            for g in (parsed[r] + [None] * n_col)[:n_col]] for r in range(n_band)]
     cuts = []
     for c in range(n_col):
-        seq = [(r, bw[r][c]) for r in range(n_band) if bw[r][c] > 0]
+        # 排除 ≤2 列的 band：纯文本兜底(只读出年度号单列)、近空 tile 会产生"1列"，
+        # 那是 OCR 没读出数据的**假**宽度突变，不是真的窄子表。若不排除，连续多个兜底
+        # band 会被误判成"不同宽度子表"、分段后独立重组成 1 列、不补齐(090853cd 行切小后
+        # 底部稀疏区 47 行只剩 1 列、TEDS 0.997→0.69)。真子表最少也 2-3 列,排除 ≤2 安全。
+        seq = [(r, bw[r][c]) for r in range(n_band) if bw[r][c] > 2]
         if len(seq) < 6:                            # 太短不足以判双峰
             continue
         ws = [w for _, w in seq]
@@ -167,7 +171,7 @@ def _width_segments(parsed, n_col):
 
 
 def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4,
-                      overlap_x=0, overlap_y=0):
+                      overlap_x=0, overlap_y=0, framed=False):
     """parsed[r][c] = 单元格网格 或 None。返回 rows（list[list[str]]）。
 
     空列块（API 无读数）的列宽不再用过检测的 col_cells（会膨胀），而是按
@@ -180,7 +184,7 @@ def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4,
         out = []
         for b0, b1 in segs:
             out.extend(_reconstruct_grid(parsed[b0:b1], col_cells, col_cuts,
-                                         deg_hi, deg_lo, overlap_x, overlap_y))
+                                         deg_hi, deg_lo, overlap_x, overlap_y, framed))
         return out
     n_band = len(parsed)
 
@@ -207,11 +211,16 @@ def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4,
     W = []
     for c in range(n_col):
         if col_widths[c]:
-            W.append(max(1, _mode(col_widths[c])))
+            w = max(1, _mode(col_widths[c]))
+            if framed and c < len(col_cells):
+                # 有框:含空列的 tile 里 OCR 只读了有数据的列,把漏读的空列补到框线列数
+                # (00332 表1 OCR读33列/框线67、19a15357 读9列/框线69 —— GT 把空列都标了 td)
+                w = max(w, col_cells[c])
+            W.append(w)
         else:
             cc = col_cells[c] if c < len(col_cells) else 1
-            if density > 0 and pix_w(c) > 0:
-                cc = min(cc, round(density * pix_w(c)))   # 用密度估封顶 col_cells，防爆炸
+            if not framed and density > 0 and pix_w(c) > 0:
+                cc = min(cc, round(density * pix_w(c)))   # 无框才用密度封顶防列爆炸;有框直接用框线列数
             W.append(max(1, cc))
 
     # 第二遍：按 W_c 重组。band 行数取「最密集列的行数」= max(各列行数)。
@@ -418,6 +427,7 @@ def stitch_multi(tile_outputs, meta):
     overlap_x = meta.get("overlap_x", 0)
     overlap_y = meta.get("overlap_y", 0)
     panel_n = meta.get("panel_n", 1)
+    framed = meta.get("col_framed", False)
     blank = meta.get("blank", [[False] * n_col for _ in range(n_band)])
 
     # 每个 tile → 分段，并**丢弃展平幻觉段**（行数 > 像素高/最小行高，不可能真实）
@@ -490,7 +500,7 @@ def stitch_multi(tile_outputs, meta):
     # 单表：API 未自带拆分。再用"纯文字表头行"做一次泛化拆分（多子表被合并的兜底）
     if len(subtables) <= 1:
         rows = _reconstruct_grid(cur_bands if subtables else [], col_cells, col_cuts,
-                                 overlap_x=overlap_x, overlap_y=overlap_y)
+                                 overlap_x=overlap_x, overlap_y=overlap_y, framed=framed)
         segs = _split_at_headers(rows)
         if len(segs) >= 2:
             html = "\n\n".join(rows_to_html(s, panel_n) for s in segs)
@@ -504,7 +514,7 @@ def stitch_multi(tile_outputs, meta):
     parts = []
     for k, (cap, bands) in enumerate(subtables):
         rows = _reconstruct_grid(bands, col_cells, col_cuts,
-                                 overlap_x=overlap_x, overlap_y=overlap_y)
+                                 overlap_x=overlap_x, overlap_y=overlap_y, framed=framed)
         if not rows:
             continue
         segs = _split_at_headers(rows)

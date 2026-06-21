@@ -356,23 +356,28 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
     else:
         row_lines = gap_rows                 # 只有边框/残横线时不被劫持 → 回退横白缝
     grid_ok = len(col_lines) > 1 and len(row_lines) > 1
+    col_framed = col_lines is runl_cols   # 列用墨柱框线(非白缝)=有框→空列也在框格里、GT会标
 
     col_bnd = _boundaries(col_lines, W)
     row_bnd = _boundaries(row_lines, H)
 
-    # 先按像素分列组，得到每组最大列数 → 据此限制每 tile 行数，使 cell ≤ budget
-    col_cuts, col_cells = _group_boundaries(col_bnd, tile_max, max_cells=MAX_TILE_COLS)
-    # 安全落刀：把每个 tile 列切点 snap 到 ±25px 内文字墨最少处，避免把单元格/数字从中间
-    # 切开（白缝字间割裂趋零；墨柱误检文字列的切割 16.6%→0.4%）。±25px 不改变骨架列数。
     textink = _textink_cols(dark)
-    col_cuts = _snap_cuts(col_cuts, textink, win=25)
     # 每列带的真实列数受物理上限约束：带宽/最小列宽。剔除字间幻影列，避免行预算虚低。
-    def _real_cols(c):
-        w = (col_cuts[c + 1] - col_cuts[c]) if c + 1 < len(col_cuts) else tile_max
-        return min(col_cells[c], max(1, w // MIN_COL_PX))
-    max_cols = max((_real_cols(c) for c in range(len(col_cells))), default=1)
+    def _real_cols(cuts, cells, c):
+        w = (cuts[c + 1] - cuts[c]) if c + 1 < len(cuts) else tile_max
+        return min(cells[c], max(1, w // MIN_COL_PX))
+    # max_rows(行带划分基准)用「不限列上限」的真实列数算——**不能让列上限经 max_cols→
+    # max_rows→行带数 间接挪动表头行所在 tile、破坏 _split_at_headers 子表切分**
+    # (00332e7f 列20→行带 15 变 10→丢 1 个'年度/年龄'表头→3 表切成 2 表崩成 7 分)。
+    cc0_cuts, cc0_cells = _group_boundaries(col_bnd, tile_max)
+    cc0_cuts = _snap_cuts(cc0_cuts, textink, win=25)
+    max_cols = max((_real_cols(cc0_cuts, cc0_cells, c) for c in range(len(cc0_cells))), default=1)
     max_rows = min(max(1, cell_budget // max(1, max_cols)), MAX_TILE_ROWS)
     row_cuts, row_cells = _group_boundaries(row_bnd, tile_max, max_cells=max_rows)
+    # 列 tile 切分单独用列上限（仅切列，不影响上面已定的行带划分）。
+    # 安全落刀：列切点 snap 到 ±25px 内文字墨最少处，避免把单元格/数字从中间切开。
+    col_cuts, col_cells = _group_boundaries(col_bnd, tile_max, max_cells=MAX_TILE_COLS)
+    col_cuts = _snap_cuts(col_cuts, textink, win=25)
     # 安全落刀（行，对称于列）：snap 到横向文字墨最少处，避免把一行文字从中间横切。
     # _textink_cols 作用在 dark.T 上 = 每原始行的横向短墨段(笔画)占比。
     row_cuts = _snap_cuts(row_cuts, _textink_cols(dark.T), win=25)
@@ -418,11 +423,12 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
     # slicer 行列估计实测误差仅 2~4%(密集表亦然)，故此判据可信。
     nrow = sum(row_cells); ncol = sum(col_cells)
     edge = (H * W / max(1, nrow * ncol)) ** 0.5
-    upsample = round(min(3.0, UP_TARGET / edge), 2) if edge < UP_EDGE else 1.0
+    _upcap = float(os.environ.get("C2_UPCAP", "3.0"))   # 上采样倍数上限(实验:降低可减轻超宽tile漏列)
+    upsample = round(min(_upcap, UP_TARGET / edge), 2) if edge < UP_EDGE else 1.0
 
     meta = {"row_cuts": row_cuts, "col_cuts": col_cuts,
             "row_cells": row_cells, "col_cells": col_cells,
-            "blank": blank, "grid": grid_ok,
+            "blank": blank, "grid": grid_ok, "col_framed": col_framed,
             "tile_boxes": tile_boxes, "overlap_x": overlap_x, "overlap_y": overlap_y,
             "panel_n": panel_n, "cell_edge": round(edge, 1), "upsample": upsample,
             "text_blocks": text_blocks}
