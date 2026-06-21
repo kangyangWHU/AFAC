@@ -5,24 +5,34 @@
 - 硬上限: max_iter 轮、batch 块/轮、requery 次数。每步留 trace 供审计。
 """
 from __future__ import annotations
+import os
 import json
 import re
+import threading
 from dataclasses import dataclass, field
 from ..llm.base import LLMClient
 from ..index.bm25 import BM25Index
 from .. import config
 
-_GEN_SYS = """你为 BM25 检索生成查询词。给定一个子问题，只输出最能命中相关【条款/规则/指标】的中文关键词（2-6 个，空格分隔）。不要写数字、不要整句、不要解释。只输出关键词一行。"""
+_GEN_SYS = """你为 BM25 检索生成查询词。从给定文本里抽取最适合在文档中定位证据的【实体/专有名词/关键数字/年份/金额/比例/领域术语】，2-6 个，空格分隔。
+- 关键数字要保留（如 8894.3 7日 30个工作日 2500亿 56%），它们往往是命中点。
+- 忽略"选项/是否/成立/正确/主张/下列/说法"等设问套话。
+- 忽略指代文档的词（第一份/第二份/前者/后者/两份/该文档/两文档）——它们不会出现在原文里，只保留被比较的【指标本身】（如"发行金额""主体信用评级"）。
+只输出关键词一行，不要解释。"""
 
 _JUDGE_SYS = """你在判断检索块能否回答一个子问题。子问题已自带所有数字，块只需提供【计算规则/条款/事实】。
 - 若某块含所需规则/事实：用它 + 子问题里的数字算出答案，输出 JSON：{"found":true,"value":"<带单位的最终值，如 144万>","source":<块号整数>}
 - 若这批块都不含：输出 JSON：{"found":false,"requery":"<更可能命中的检索词，没有则空字符串>"}
 可先用一句话算一步，最后一行只输出该 JSON。"""
 
-_VERIFY_SYS = """你在核验一条【主张】是否与文档一致。主张已含所有数字，检索块提供事实/条款。
-- 若块足以判定：输出 JSON：{"found":true,"verdict":<true 或 false>,"source":<块号整数>}（verdict=该主张是否成立）
-- 若块信息不足以判定：输出 JSON：{"found":false,"requery":"<更可能命中的检索词，没有则空字符串>"}
-判定要严格：主张里的数字/主体/条件都要与块一致才算 true，有一处对不上即 false。可先核对一句，最后一行只输出该 JSON。"""
+_VERIFY_SYS = """你在核验一条【主张】是否与文档一致。主张已含所有数字，检索块提供事实/条款。两步判断：
+(1) 这批块里有没有与主张【同一主题/事项】的条款或事实？
+    - 完全没有相关内容 → 输出 {"found":false,"requery":"<更可能命中的检索词，没有则空字符串>"}
+    - 有相关块 → 必须进入(2)给出 verdict，不要因为措辞不同或不完全确定就说没找到。
+(2) 对照该相关块判断主张成立与否：数字/主体/时限/条件实质一致即 verdict=true（措辞不同、表述更宽泛但意思一致也算 true）；有实质冲突才 verdict=false。
+    若主张是【跨文档比较】（如"第二份低于第一份""两份均为AAA"），必须在块里分别找出每一份对应的值再比较，不要只看一份就下结论。
+    输出 {"found":true,"verdict":<true 或 false>,"source":<块号整数>}
+可先核对一句，最后一行只输出该 JSON。"""
 
 
 @dataclass
@@ -57,14 +67,19 @@ class SubQLoop:
         self.batch = a.get("loop_batch", 4)
         self.requery_budget = a.get("loop_requery", 1)
         self.search_mult = a.get("loop_search_mult", 3)
-        self.chunk_chars = a.get("loop_chunk_chars", 420)
-        self.backfill_window = a.get("loop_backfill_window", 0)
+        self.window_chars = a.get("loop_window_chars", 500)   # 喂 judge 的窗口大小(以命中为中心)
         self.narrow = a.get("loop_narrow", True)
         self.narrow_k = a.get("loop_narrow_k", 20)
         self.narrow_ratio = a.get("loop_narrow_ratio", 1.5)
         self.genquery_max_tokens = a.get("loop_genquery_max_tokens", 40)
         self.judge_max_tokens = a.get("loop_judge_max_tokens", 400)
         self.evidence_chars = a.get("loop_evidence_chars", 240)
+        # 检索词缓存：同一(子问题,已试词)复用上次生成的检索词 → 跨运行可复现 + 省 token
+        self.cache_query = a.get("loop_cache_query", True)
+        self._qpath = os.path.join(config.path("index_dir"), "query_cache.json")
+        self._qlock = threading.Lock()
+        self._qcache = (json.load(open(self._qpath, encoding="utf-8"))
+                        if self.cache_query and os.path.exists(self._qpath) else {})
 
     def _narrow_docs(self, entity: str, doc_ids: list[str]) -> list[str]:
         """value_compare 多文档: 按实体名(产品/公司)缩到最相关的文档, 去跨产品污染。
@@ -83,28 +98,61 @@ class SubQLoop:
             return [top]
         return doc_ids
 
-    def _expand(self, hit) -> str:
-        """small-to-big: 拼接 seq 相邻块, 重连被切散的条文(如跨块的 1.1.6 身故金规则)。"""
-        seq = hit.meta.get("seq")
-        if not self.backfill_window or seq is None:
-            return hit.text[:self.chunk_chars]
-        parts = [{"seq": seq, "text": hit.text}]
-        parts += self.index.neighbors(hit.doc_id, seq, self.backfill_window)
-        parts = sorted({p["seq"]: p for p in parts}.values(), key=lambda x: x["seq"])
-        return "\n".join(p["text"] for p in parts)[:self.chunk_chars * 2]
+    def _window(self, text: str, terms: str) -> str:
+        """以 BM25 命中为中心截窗口喂 judge：命中可能在块顶/块底，从头截会错过。
+        选包含【最多不同检索词】的窗口，避免被某个高频词带偏。"""
+        W = self.window_chars
+        if len(text) <= W:
+            return text
+        toks = [t for t in dict.fromkeys(terms.split()) if len(t) >= 2]
+        pos = {t: [m.start() for m in re.finditer(re.escape(t), text)] for t in toks}
+        anchors = sorted(p for ps in pos.values() for p in ps)
+        if not anchors:
+            return text[:W]
+        best_start, best_cov = 0, -1
+        for a in anchors:                       # 以每个命中为中心试窗, 取覆盖词种最多者
+            start = max(0, min(a - W // 2, len(text) - W))
+            cov = sum(1 for ps in pos.values() if any(start <= p < start + W for p in ps))
+            if cov > best_cov:
+                best_cov, best_start = cov, start
+        pre = "…" if best_start > 0 else ""
+        return pre + text[best_start:best_start + W]
+
+    def _retrieve(self, terms: str, doc_ids: list[str]) -> list:
+        """按 query 排序的候选块。多文档时每篇轮询取(round-robin)，
+        保证每篇都有代表，不被单篇高分块挤占(治"搜两篇却全召回一篇")。"""
+        if len(doc_ids) <= 1:
+            return self.index.search(terms, k=self.batch * self.search_mult, doc_ids=doc_ids)
+        pools = [self.index.search(terms, k=self.batch * self.search_mult, doc_ids=[d])
+                 for d in doc_ids]
+        merged, i = [], 0
+        while any(i < len(p) for p in pools):
+            for p in pools:
+                if i < len(p):
+                    merged.append(p[i])
+            i += 1
+        return merged
 
     def _gen_query(self, sq: str, tried: list[str]) -> str:
+        key = f"{sq}||{'/'.join(tried)}"
+        if self.cache_query and key in self._qcache:
+            return self._qcache[key]
         user = sq if not tried else f"{sq}\n\n已试过无效的检索词: {' / '.join(tried)}\n换一组更可能命中的词。"
         out = self.llm.complete([{"role": "system", "content": _GEN_SYS},
                                  {"role": "user", "content": user}],
                                 max_tokens=self.genquery_max_tokens, enable_thinking=False)
-        return out.strip().splitlines()[0][:60] if out.strip() else sq
+        terms = out.strip().splitlines()[0][:60] if out.strip() else sq
+        if self.cache_query:
+            with self._qlock:
+                self._qcache[key] = terms
+                json.dump(self._qcache, open(self._qpath, "w", encoding="utf-8"), ensure_ascii=False)
+        return terms
 
-    def _judge(self, sq: str, hits: list, shape: str) -> dict:
+    def _judge(self, sq: str, hits: list, shape: str, terms: str) -> dict:
         blocks = []
         for i, h in enumerate(hits):
             bc = h.meta.get("breadcrumb") or h.meta.get("article_no") or ""
-            blocks.append(f"[块{i}] {bc}\n{self._expand(h)}")
+            blocks.append(f"[块{i}] {bc}\n{self._window(h.text, terms)}")
         sys = _VERIFY_SYS if shape == "verify" else _JUDGE_SYS
         label = "主张" if shape == "verify" else "子问题"
         user = f"【{label}】{sq}\n\n【候选块】\n" + "\n\n".join(blocks)
@@ -127,7 +175,7 @@ class SubQLoop:
         tried_terms.append(terms)
 
         for _ in range(self.max_iter):
-            ranked = self.index.search(terms, k=self.batch * self.search_mult, doc_ids=doc_ids)
+            ranked = self._retrieve(terms, doc_ids)
             hits = [h for h in ranked if h.chunk_id not in seen][:self.batch]
             if not hits:
                 if requery_left:
@@ -138,7 +186,7 @@ class SubQLoop:
                     continue
                 break
             seen |= {h.chunk_id for h in hits}
-            v = self._judge(sq, hits, shape)
+            v = self._judge(sq, hits, shape, terms)
             n_calls += 1
             trace.append({"terms": terms, "chunks": [h.chunk_id for h in hits],
                           "verdict": v})

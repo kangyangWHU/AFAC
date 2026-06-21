@@ -14,6 +14,7 @@ class QwenClient(LLMClient):
         self.temperature = c.get("temperature", 0.0)
         self.max_tokens = c.get("max_tokens", 1024)
         self.enable_thinking = c.get("enable_thinking", False)
+        self.seed = c.get("seed", 42)            # 固定 seed → 百炼输出确定可复现(temp0 仍有微随机)
         self.retries = c.get("retries", 2)
         self.base_url = c["base_url"]
         self._is_bailian = "dashscope" in self.base_url
@@ -34,7 +35,7 @@ class QwenClient(LLMClient):
                     model=self.model, messages=messages,  # type: ignore
                     temperature=kw.get("temperature", self.temperature),
                     max_tokens=max_tokens or self.max_tokens,
-                    extra_body=extra)
+                    seed=self.seed, extra_body=extra)
                 u = r.usage
                 if u:
                     self.usage.add(u.prompt_tokens, u.completion_tokens)

@@ -22,6 +22,7 @@ llm:
   temperature: 0.0
   max_tokens: 3072          # 非thinking ~400/call用不满, 留空间写"答案:"行
   enable_thinking: false    # 实测全量thinking 79% vs 无thinking 80%, 在噪声带内无收益, 关
+  seed: 42                  # 固定 seed → 百炼输出确定可复现(实测 temp0 仍有微随机, 加seed后逐字一致)
   timeout: 120
   retries: 2
 
@@ -93,8 +94,8 @@ agentic:
   loop_batch: 4               # 每轮判块数(3-5; 摊薄固定 prompt 开销)
   loop_requery: 1             # loop 内重出检索词次数上限
   loop_search_mult: 3         # 每轮 BM25 取 batch*此值, 去重后取前 batch(分页用)
-  loop_chunk_chars: 420       # 判块时每块文本截断(规则通常很短)
-  loop_backfill_window: 0     # small-to-big回填: 0=关(实测净负: 2x token且命中83→75%, 失败是解析丢失非切散)
+  loop_window_chars: 500      # 喂 judge 的窗口大小: 以 BM25 命中为中心截窗(块可大, 命中在顶/底都不漏)
+  loop_cache_query: true      # 检索词缓存(index/query_cache.json): 同子问题复用 → 跨运行可复现+省token
   loop_narrow: true           # value_compare 多文档时先按实体名缩到对应文档, 去跨产品污染
   loop_narrow_k: 20           # 实体名缩文档时的文档级检索深度
   loop_narrow_ratio: 1.5      # top 文档需领先次高的倍数才缩(否则保留全部更安全)

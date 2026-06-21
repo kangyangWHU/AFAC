@@ -46,21 +46,25 @@ class AgenticSolver:
         self.loop = SubQLoop(self.llm, idx)
         self.synth_max_tokens = config.load().get("agentic", {}).get("synth_max_tokens", 600)
 
-    def _run_subqs(self, d: dict, doc_ids) -> list[dict]:
+    def _run_subqs(self, q: dict, d: dict, doc_ids) -> list[dict]:
         """跑每个子问题的 loop，收集结论 + 证据。value_compare 用 compute、其余用 verify。"""
         shape_default = "compute" if d["archetype"] in ("value_compare", "single_fact") else "verify"
         sub = []
         for s in d["sub_questions"]:
             shape = s.get("shape") or shape_default
             ent = str(s.get("entity") or "")
+            # option_verdict: 用选项原文当主张, 不靠 decomposer 复制(它有时只写"C选项是否成立")
+            claim = q["options"].get(ent, "")
+            sq = (claim if d["archetype"] == "option_verdict" and len(claim) > 4
+                  and claim not in ("正确", "错误") else s["sq"])
             narrow_ent = ent if d["archetype"] == "value_compare" else ""
             dids = [s["doc_hint"]] if s.get("doc_hint") else list(doc_ids)
-            r = self.loop.solve(s["sq"], dids, entity=narrow_ent, shape=shape)
+            r = self.loop.solve(sq, dids, entity=narrow_ent, shape=shape)
             if shape == "verify":
                 concl = ("成立" if r.verdict else "不成立") if r.found else "未检索到证据"
             else:
                 concl = r.value if r.found else "未检索到证据"
-            sub.append({"sq": s["sq"], "entity": ent, "conclusion": concl,
+            sub.append({"sq": sq, "entity": ent, "conclusion": concl,
                         "found": r.found, "src": r.source_chunk_id,
                         "evidence": r.source_text})
         return sub
@@ -84,6 +88,6 @@ class AgenticSolver:
 
     def answer(self, q: dict, doc_ids) -> AgenticAnswer:
         d = self.decomposer.decompose(q, doc_ids)
-        sub = self._run_subqs(d, doc_ids)
+        sub = self._run_subqs(q, d, doc_ids)
         ans = self._synthesize(q, d["archetype"], sub)
         return AgenticAnswer(q["qid"], ans, "synth", d["archetype"], sub)
