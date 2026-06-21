@@ -8,17 +8,18 @@
     由 stitch 端按已知行列数填空 `<td></td>`，既免幻觉又省调用。
   - 暴露每个 tile 的**已知行列数**作为重组骨架，让 stitch 不必猜测 API 的行分割。
 
-tile 受两条约束：像素 ≤TILE_MAX（防内部降采样糊字）、单元格数 ≤CELL_BUDGET
-（防 API ~12k 字符输出截断）。
+tile 规模由 ≤MAX_TILE_ROWS 行 × ≤MAX_TILE_COLS 列 + 像素 ≤TILE_MAX 直接限定
+（本是图片 OCR API、无 token 截断，不需 CELL_BUDGET 格数中介）。
 """
 import os
 import numpy as np
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
-MAX_TILE_COLS = int(os.environ.get("C2_MTC", "1000000000"))   # 单 tile 最大列数(默认不限)。
-# 实验：≤8 让 b326dfb6 0.791→0.996(宽表读全列)、窄表(6列)不受影响，但只测了 4 张、8 偏激进
-# (怕切碎本该一起的列)，且 b326 提升是否真是列(而非上采样)待查 → 暂不固化，用 C2_MTC 实验。
+MAX_TILE_COLS = int(os.environ.get("C2_MTC", "15"))   # 单 tile 最大列数 = 15。
+# OCR 在"宽 tile × 长数字"上会漏列(b326 26列/tile 读不全),限 15 列后 015bd47c +16、
+# b326dfb6 +15、密集表零退化。靠解耦(max_rows 用不限列的真实列数算,列上限只切列、不挪
+# 行带切点)避免误伤子表表头检测(00332 列上限耦合行带→丢表头→崩的根因)。C2_MTC 可调。
 
 TILE_MAX = 1500             # tile 像素硬上限
 UP_EDGE = 40                # cell 边长(√像素/cell) < 此值 = 密集小字 → 上采样重读
@@ -35,14 +36,9 @@ MIN_COL_PX = 40             # 真实表格列的最小像素宽。无框表回�
 # max_cols 虚高→每 tile 行预算被压到 3→tile 数爆炸(1843)。用"1500px 内最多容纳
 # TILE_MAX/MIN_COL_PX 个真实列"作物理上限：≥40px 的真列不会被误删(物理放不下更多),
 # 只剔除 <40px 的字间幻影列。仅用于行预算估计，不改变实际切列与重建。
-CELL_BUDGET = 300           # 单 tile 最大单元格数（防输出截断）。
-# 实测：API 输出受 token 预算限制，输出超 ~7100 字符即截断(未闭合<table>、丢行)。
-# 含表 tile 每格约 16 字符(p99=25)。CELL_BUDGET=600 时 10.1% 的 tile 截断、大表 TEDS 被拖低。
-# 截断从 ~431 cell 起；400 已 0 截断。取 300 留余量(300×16≈4.8k,300×25≈7.5k)确保不截断。
-# 之前不敢降是怕 tile 变多触发共享 key 限流——该约束已解除(改用限流重试)。
-MAX_TILE_ROWS = 25          # 单 tile 最大行数（独立于 CELL_BUDGET）。列少的窄表 max_rows=
-# CELL_BUDGET/max_cols 会很大(7列→42)，切出 39行×7列 的"高瘦"tile，API 在高密集 tile 上
-# 漏行(090853cd 骨架78→读出46)。绝对行上限逼高表多切几刀，单 tile 更小、API 读得全。
+MAX_TILE_ROWS = 20          # 单 tile 最大行数。与 MAX_TILE_COLS=15 一起直接限定 tile 规模
+# (≤20行 × ≤15列)。本是图片 OCR API、无 token 截断,故移除了 CELL_BUDGET(格数中介):tile 太大
+# OCR 会漏行/漏列(090853cd 高瘦 tile 骨架78→读46),改由行列上限直接控、且 max_rows 固定不挪行带。
 BLANK_INK = 0.0015          # tile 平均墨量低于此 → 判为空白块（仅跳真正空白；0.003 的faint表头不再误跳）
 
 
@@ -304,8 +300,7 @@ def split_table_texts(im, hi_frac=0.05, wd_frac=0.40):
     return tb, [b[:4] for b in texts]
 
 
-def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
-                blank_ink=BLANK_INK):
+def slice_table(im, tile_max=TILE_MAX, blank_ink=BLANK_INK):
     """密度自适应 + 严格网格线 2D 切分。
 
     返回:
@@ -362,18 +357,10 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
     row_bnd = _boundaries(row_lines, H)
 
     textink = _textink_cols(dark)
-    # 每列带的真实列数受物理上限约束：带宽/最小列宽。剔除字间幻影列，避免行预算虚低。
-    def _real_cols(cuts, cells, c):
-        w = (cuts[c + 1] - cuts[c]) if c + 1 < len(cuts) else tile_max
-        return min(cells[c], max(1, w // MIN_COL_PX))
-    # max_rows(行带划分基准)用「不限列上限」的真实列数算——**不能让列上限经 max_cols→
-    # max_rows→行带数 间接挪动表头行所在 tile、破坏 _split_at_headers 子表切分**
-    # (00332e7f 列20→行带 15 变 10→丢 1 个'年度/年龄'表头→3 表切成 2 表崩成 7 分)。
-    cc0_cuts, cc0_cells = _group_boundaries(col_bnd, tile_max)
-    cc0_cuts = _snap_cuts(cc0_cuts, textink, win=25)
-    max_cols = max((_real_cols(cc0_cuts, cc0_cells, c) for c in range(len(cc0_cells))), default=1)
-    max_rows = min(max(1, cell_budget // max(1, max_cols)), MAX_TILE_ROWS)
-    row_cuts, row_cells = _group_boundaries(row_bnd, tile_max, max_cells=max_rows)
+    # tile 直接限行列：每 tile ≤MAX_TILE_ROWS 行 × ≤MAX_TILE_COLS 列。不再用 CELL_BUDGET 中介
+    # (本是图片 OCR API、无 token 截断,格数由行列上限直接限定);max_rows 固定也天然不受列上限
+    # 影响 → 不会经"行带挪动"破坏 _split_at_headers 子表切分(00332 列上限耦合丢表头的旧根因)。
+    row_cuts, row_cells = _group_boundaries(row_bnd, tile_max, max_cells=MAX_TILE_ROWS)
     # 列 tile 切分单独用列上限（仅切列，不影响上面已定的行带划分）。
     # 安全落刀：列切点 snap 到 ±25px 内文字墨最少处，避免把单元格/数字从中间切开。
     col_cuts, col_cells = _group_boundaries(col_bnd, tile_max, max_cells=MAX_TILE_COLS)
@@ -423,7 +410,8 @@ def slice_table(im, tile_max=TILE_MAX, cell_budget=CELL_BUDGET,
     # slicer 行列估计实测误差仅 2~4%(密集表亦然)，故此判据可信。
     nrow = sum(row_cells); ncol = sum(col_cells)
     edge = (H * W / max(1, nrow * ncol)) ** 0.5
-    _upcap = float(os.environ.get("C2_UPCAP", "3.0"))   # 上采样倍数上限(实验:降低可减轻超宽tile漏列)
+    _upcap = float(os.environ.get("C2_UPCAP", "2.0"))   # 上采样倍数上限=2:再高的放大把 tile 撑得过宽
+    # 反而让 OCR 漏列(015bd47c cap2 减漏列)，且 2 倍已够密集小字读清;C2_UPCAP 可调。
     upsample = round(min(_upcap, UP_TARGET / edge), 2) if edge < UP_EDGE else 1.0
 
     meta = {"row_cuts": row_cuts, "col_cuts": col_cuts,
