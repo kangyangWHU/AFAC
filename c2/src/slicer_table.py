@@ -36,9 +36,10 @@ MIN_COL_PX = 40             # 真实表格列的最小像素宽。无框表回�
 # max_cols 虚高→每 tile 行预算被压到 3→tile 数爆炸(1843)。用"1500px 内最多容纳
 # TILE_MAX/MIN_COL_PX 个真实列"作物理上限：≥40px 的真列不会被误删(物理放不下更多),
 # 只剔除 <40px 的字间幻影列。仅用于行预算估计，不改变实际切列与重建。
-MAX_TILE_ROWS = 20          # 单 tile 最大行数。与 MAX_TILE_COLS=15 一起直接限定 tile 规模
-# (≤20行 × ≤15列)。本是图片 OCR API、无 token 截断,故移除了 CELL_BUDGET(格数中介):tile 太大
-# OCR 会漏行/漏列(090853cd 高瘦 tile 骨架78→读46),改由行列上限直接控、且 max_rows 固定不挪行带。
+MAX_TILE_ROWS = 25          # 单 tile 最大行数。与 MAX_TILE_COLS=15 一起直接限定 tile 规模
+# (≤25行 × ≤15列)。本是图片 OCR API、无 token 截断,故移除了 CELL_BUDGET(格数中介)。
+# 行25 优于行20:行20 切得太碎、表头行易被 OCR 漏读→子表切分错(1674392a +52、583ac07b +41、
+# a1aaef73 +18、015bd47c +7),而行20 不救任何表(090/b326 持平)。隔离实验定论:行25。
 BLANK_INK = 0.0015          # tile 平均墨量低于此 → 判为空白块（仅跳真正空白；0.003 的faint表头不再误跳）
 
 
