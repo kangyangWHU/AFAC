@@ -188,7 +188,13 @@ $PY -m eval.accuracy out/B_routed/answer.csv          # 对 silver 标签评分
   ⑤ query 缓存(`index/query_cache.json`)+`llm.seed:42` → 检索跨运行可复现
   **结果: 子问题命中证据 84%→97%**(分层20题, 确定性验证 3 个硬 case 全召回)。
   **关于随机性(用户质疑)**: 查明非代码 bug——百炼 MoE 即便 temp0+seed 也 best-effort, 边界判定跨时间会翻; loop 多次 LLM 调用级联放大。query 缓存把检索这层固定了, 残留噪声在 judge。
-- ⬜ **下一步: judge 判真质量**(瓶颈已从检索转移到此): 准确率仍~65%, 错题=多选漏选, 集中在【跨文档比较】主张(如"第二份<第一份"需比两篇值, judge 单边锚定)。这是与检索独立的问题。
+- ✅ **原子事实重构（用户设计）**：分解时按【单篇文档+单个事实】拆，取值不判真；比较/排序/判真全留到最后 synthesize 整体推理。
+  - decompose 输出 `facts:[{ask,doc_hint}]`，跨文档比较拆成每篇各一条（"第二份<第一份"→ text01发行额 + text02发行额）；问"值是什么"不问"是不是X"；拿不准 doc 填 null(全搜)。
+  - loop judge 泛化为"取事实的值"(数值/名称/评级/日期/规则)。
+  - solver: 跑所有 fact(全 compute) → synthesize 拿到所有事实**逐选项整体比对**出答案。
+  - **效果(分层20题)**: **fc 33%→100%**(跨文档比较根治, fc_a_001 ABD 已确定性验证), 整体 **59%→76.5%**。
+  - 残留错题集中在: research(无名 doc 绑定错/解析) + value_compare 解析缺口(doc1 智盈) + 财报跨年。
+- ⬜ **下一步**: ① research 无名 doc 的 doc_hint 绑定(补 outline 主题词) ② decompose 鲁棒性(偶发 fallback/archetype 标错) ③ 上游解析(doc1)。
 
 ---
 

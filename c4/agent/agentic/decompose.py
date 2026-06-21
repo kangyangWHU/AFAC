@@ -12,23 +12,24 @@ from .. import config
 
 ARCHETYPES = {"value_compare", "option_verdict", "single_fact", "fallback"}
 
-SYS = """你是金融长文档问答的"问题分解器"。把题目拆成若干可独立检索作答的子问题。只输出 JSON，不要任何解释。
+SYS = """你是金融文档问答的"原子事实分解器"。把题目拆成若干【单篇文档 + 单个事实】的取值查询。只输出 JSON，不要解释。
 
-archetype（四选一）：
-- value_compare：选项在比较/排序多个实体的某指标数值（如各保险产品身故金排序）。按【实体】拆；每个子问题必须把题干给出的全部相关数字写进 sq，答案是一个具体数值。shape=compute。
-- option_verdict：多选题，每个选项是一句可独立判真假的主张（"下列哪些正确"）。按【选项 A/B/C/D】各拆一个；每个子问题问"该主张是否成立"。shape=verify。
-- single_fact：取一个事实即可定答案。1 个子问题。shape=compute。
-- fallback：不宜拆解，整体作答。sub_questions 置为空数组。
+铁律：
+1. 每条 fact 只在【一篇】文档里取【一个】值/事实。doc_hint 填那一篇 doc_id；【无法确定是哪篇就填 null】（检索时在所有候选里找，比瞎猜一篇强）。
+2. 问【值是什么】，不要问【是不是等于X】——比较/判真一律留到最后做：
+   ✗ "发行人是否为广晟"   ✓ "发行人名称"
+   ✗ "评级是否为AAA"      ✓ "主体信用评级"
+3. 【跨文档比较 / 两份均为X】必须拆成每篇各一条：
+   "第二份发行额低于第一份" → {"ask":"本期债券发行金额","doc_hint":"text01"} 和 {"ask":"本期债券发行金额","doc_hint":"text02"}
+4. 算值排序题：每个实体一条，ask 把题干给的数字全写进去。
+5. 不同选项依赖同一事实 → 合并成一条（去重）。
 
-每个子问题字段：
-- id："sq1","sq2"...
-- sq：自包含的子问题文本。value_compare 要把题干数字写进去；option_verdict 直接复述该选项主张并问是否成立。
-- shape："compute" 或 "verify"
-- entity：实体名 或 选项字母（A/B/C/D），便于合并对齐
-- doc_hint：该子问题最该查的 doc_id（只能从候选文档里选）；不确定就填 null
+archetype（供最后推理用，不影响拆法）：value_compare | option_verdict | single_fact | fallback
+
+每条 fact 字段：id；ask（单篇单值的取值查询）；doc_hint（单篇 doc_id，或 null）
 
 只输出这个 JSON（不要 markdown 代码块）：
-{"archetype":"...","sub_questions":[{"id":"sq1","sq":"...","shape":"...","entity":"...","doc_hint":"2"}]}"""
+{"archetype":"...","facts":[{"id":"f1","ask":"...","doc_hint":"text01"}]}"""
 
 
 def _fmt_docs(outlines: dict, doc_ids: list[str]) -> str:
@@ -78,22 +79,21 @@ class Decomposer:
                 return self._norm(obj, doc_ids)
             msgs = msgs + [{"role": "assistant", "content": out[:600]},
                            {"role": "user", "content": "上面不是合法 JSON。只输出符合规定格式的 JSON。"}]
-        return {"archetype": "fallback", "sub_questions": [], "raw": out[:300]}
+        return {"archetype": "fallback", "facts": [], "raw": out[:300]}
 
     @staticmethod
     def _valid(obj: dict | None) -> bool:
         if not isinstance(obj, dict) or obj.get("archetype") not in ARCHETYPES:
             return False
-        sqs = obj.get("sub_questions")
-        if not isinstance(sqs, list):
+        facts = obj.get("facts")
+        if not isinstance(facts, list):
             return False
-        return all(isinstance(s, dict) and "sq" in s for s in sqs)
+        return all(isinstance(s, dict) and "ask" in s for s in facts)
 
     def _norm(self, obj: dict, doc_ids: list[str]) -> dict:
         dset = set(map(str, doc_ids))
-        for i, s in enumerate(obj["sub_questions"]):
-            s.setdefault("id", f"sq{i+1}")
+        for i, s in enumerate(obj["facts"]):
+            s.setdefault("id", f"f{i+1}")
             dh = s.get("doc_hint")
             s["doc_hint"] = str(dh) if (dh is not None and str(dh) in dset) else None
-            s["shape"] = s.get("shape") or ("verify" if obj["archetype"] == "option_verdict" else "compute")
         return obj
