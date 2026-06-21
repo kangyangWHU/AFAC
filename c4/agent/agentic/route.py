@@ -24,6 +24,11 @@ def route(index: BM25Index, ask: str, candidate_docs: list[str]) -> list[str]:
     for pat, i in _ORDINALS:
         if pat.search(ask) and i < len(cands):
             return [cands[i]]
+    # 年份引用 → 导向 doc_id 含该年份的那篇(财报命名带年份: annual_xxx_2024_report)
+    for y in re.findall(r"20\d{2}", ask):
+        hit = [d for d in cands if y in d]
+        if len(hit) == 1:
+            return hit
     a = config.load().get("agentic", {})
     chunk_k = a.get("route_chunk_k", 30)        # 每篇取多少 chunk 聚合打分
     min_lead = a.get("route_min_lead", 1.3)     # top 领先次高的倍数阈值, 够大才缩到1篇
