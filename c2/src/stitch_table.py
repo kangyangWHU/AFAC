@@ -212,10 +212,11 @@ def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4,
     for c in range(n_col):
         if col_widths[c]:
             w = max(1, _mode(col_widths[c]))
-            if framed and c < len(col_cells):
-                # 有框:含空列的 tile 里 OCR 只读了有数据的列,把漏读的空列补到框线列数
-                # (00332 表1 OCR读33列/框线67、19a15357 读9列/框线69 —— GT 把空列都标了 td)
-                w = max(w, col_cells[c])
+            if framed and c < len(col_cells) and w < 0.7 * col_cells[c]:
+                # 有框且 OCR 读出明显少于框线列数(漏列):把漏读的空列补到框线列数
+                # (00332 表1 读33/框线67=49%、19a15357 读9/框线69 —— GT 把空列都标了 td)。
+                # 阈值 0.7:OCR 读出接近框线时不补,免过补(3fa0851c 读6/框线7=86% 不补)。
+                w = col_cells[c]
             W.append(w)
         else:
             cc = col_cells[c] if c < len(col_cells) else 1
@@ -427,7 +428,8 @@ def stitch_multi(tile_outputs, meta):
     overlap_x = meta.get("overlap_x", 0)
     overlap_y = meta.get("overlap_y", 0)
     panel_n = meta.get("panel_n", 1)
-    framed = meta.get("col_framed", False)
+    # 有框补空列只对单表:panel(左右并排)的列含中间缝、补空列会破坏 panel_n 拆分(8c8c784c 1.0→0.23)
+    framed = meta.get("col_framed", False) and panel_n < 2
     blank = meta.get("blank", [[False] * n_col for _ in range(n_band)])
 
     # 每个 tile → 分段，并**丢弃展平幻觉段**（行数 > 像素高/最小行高，不可能真实）
