@@ -19,7 +19,8 @@ class Answer:
 def _format_evidence(evs: list[Evidence], max_chars: int) -> str:
     parts, total = [], 0
     for e in evs:
-        tag = e.article_no or (f"p{e.page}" if e.page else e.type)
+        bc = getattr(e, "breadcrumb", "")
+        tag = bc or e.article_no or (f"p{e.page}" if e.page else e.type)
         block = f"[{e.doc_id} | {tag}] {e.text}"
         if total + len(block) > max_chars:
             break

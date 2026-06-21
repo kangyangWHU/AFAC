@@ -57,6 +57,13 @@ def main():
     json.dump(fin_sum, open(fpath, "w"), ensure_ascii=False, indent=1)
     print(f"fin_summaries -> {fpath} ({len(fin_sum)}/10 财报)")
 
+    # per-doc 大纲（文档名+条文目录），供 v4 分解器；纯规则零模型
+    from agent.agentic.outline import build_all as build_outlines  # noqa: E402
+    outlines = build_outlines(proc)
+    opath = os.path.join(index_dir, "outlines.json")
+    json.dump(outlines, open(opath, "w"), ensure_ascii=False, indent=1)
+    print(f"outlines -> {opath} ({len(outlines)} docs)")
+
     # 统计
     import collections
     by_dom = collections.Counter(c["domain"] for c in all_chunks)

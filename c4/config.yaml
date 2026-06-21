@@ -39,6 +39,7 @@ chunker:
   table_as_chunk: true       # 表格独立成块（不与正文混切）
   parent_window: 1           # small-to-big：检索命中后回填前后 N 个兄弟块
   drop_low_value: true       # 建索引时丢弃目录/空壳表/碎片块
+  breadcrumb: true           # 每块加 [文档名›章节›第X条] 定位(仅展示/审核, 不进BM25索引, 检索零回归)
 
 # BM25 词法检索
 bm25:
@@ -70,19 +71,6 @@ retrieval:
   adaptive_on_empty: true
   adaptive_min_per_doc: 5
 
-# Qwen embedding（合规）。供 B 榜语义路由。
-# backend=local: 本地 Qwen3-Embedding(零API token,无需key) ; backend=bailian: text-embedding-v4(需key)
-embed:
-  backend: local
-  device: cpu
-  local_model: Qwen/Qwen3-Embedding-0.6B
-  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-  api_key: env:BAILIAN
-  model: text-embedding-v4
-  dim: 1024
-  batch: 32
-  enabled: true
-
 # B 榜文档路由
 router:
   chunk_k: 30                # 每条 query 在域内取前 k chunk 做 doc 聚合
@@ -93,6 +81,34 @@ router:
 reasoner:
   max_evidence_chars: 18000  # 12k->18k: 防已召回的关键块被格式化截断(财报/多文档证据长)
   verify_multi: false        # 关闭：实测+72%token/0增益,且"促选入"与235b过度选择弱点相反(73.46最优版即关闭)
+
+# v4 Agentic RAG（见 plan.md §v4）。所有可调数值集中在此，代码不留魔法数。
+agentic:
+  # 分解器：题 -> 子问题
+  decompose_max_tokens: 1000
+  decompose_retries: 1         # JSON 不合法时的重试次数
+
+  # 子问题 loop：检索 + judge（读块吐值/判真）
+  loop_max_iter: 3             # 单子问题最多迭代轮数(每轮一次 judge)
+  loop_batch: 4               # 每轮判块数(3-5; 摊薄固定 prompt 开销)
+  loop_requery: 1             # loop 内重出检索词次数上限
+  loop_search_mult: 3         # 每轮 BM25 取 batch*此值, 去重后取前 batch(分页用)
+  loop_chunk_chars: 420       # 判块时每块文本截断(规则通常很短)
+  loop_backfill_window: 0     # small-to-big回填: 0=关(实测净负: 2x token且命中83→75%, 失败是解析丢失非切散)
+  loop_narrow: true           # value_compare 多文档时先按实体名缩到对应文档, 去跨产品污染
+  loop_narrow_k: 20           # 实体名缩文档时的文档级检索深度
+  loop_narrow_ratio: 1.5      # top 文档需领先次高的倍数才缩(否则保留全部更安全)
+  loop_genquery_max_tokens: 40
+  loop_judge_max_tokens: 400
+  loop_evidence_chars: 240    # 命中块喂 synthesize 的证据片段长度
+
+  # synthesize：原题 + 子问题结论 -> 最终答案(1 次 LLM, 不降级)
+  synth_max_tokens: 600
+
+  # outline 文档名抽取（建索引时, outline.py）
+  outline_scan_blocks: 3      # 只在最前几块找标题(深入会抓到条标题)
+  outline_name_minlen: 6      # ≥此长度才算名(滤掉"养老年金"等泛词碎片)
+  outline_name_maxlen: 36
 
 # 伪表清洗（解析过度检测的版面表）
 table_clean:

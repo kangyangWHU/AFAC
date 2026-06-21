@@ -22,6 +22,7 @@ class Evidence:
     article_no: str | None
     page: int | None
     type: str
+    breadcrumb: str = ""
 
 
 class EvidenceRetriever:
@@ -121,7 +122,8 @@ class EvidenceRetriever:
                         chunk_id=nb["chunk_id"], doc_id=nb["doc_id"],
                         score=h.score * 0.5, text=nb["text"],
                         meta={"type": nb.get("type"), "article_no": nb.get("article_no"),
-                              "page": nb.get("page"), "seq": nb.get("seq")}))
+                              "page": nb.get("page"), "seq": nb.get("seq"),
+                              "breadcrumb": nb.get("breadcrumb", "")}))
 
         # 最终选择：先为每个候选文档预留 min_per_doc 高分块（防被高分文档挤掉），
         # 再用剩余预算按分数补满，保证多文档题不漏 doc。
@@ -147,7 +149,8 @@ class EvidenceRetriever:
         ranked.sort(key=lambda x: (x.doc_id, x.meta.get("seq") or 0))
         out = [Evidence(chunk_id=h.chunk_id, doc_id=h.doc_id, text=h.text,
                         score=h.score, article_no=h.meta.get("article_no"),
-                        page=h.meta.get("page"), type=h.meta.get("type") or "text")
+                        page=h.meta.get("page"), type=h.meta.get("type") or "text",
+                        breadcrumb=h.meta.get("breadcrumb", ""))
                for h in ranked]
         # 财报题：保底注入"主要会计数据"结构化摘要（放最前，作权威数值来源）
         if domain == "financial_reports" and doc_ids:

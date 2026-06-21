@@ -22,9 +22,26 @@ class Chunk:
     section_path: list[str] = field(default_factory=list)
     article_no: str | None = None
     page: int | None = None
+    breadcrumb: str = ""           # [文档名 › 章节 › 第X条] 仅供展示/审核, 不进 BM25 索引
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def _breadcrumb(name: str, sp: list[str] | None, art: str | None) -> str:
+    """块定位面包屑：文档名 › 章节路径 › 条号。去重、去空。"""
+    parts: list[str] = []
+    if name:
+        parts.append(name)
+    seen = set(parts)
+    for s in (sp or []):
+        s = (s or "").strip()
+        if s and s not in seen:
+            parts.append(s)
+            seen.add(s)
+    if art and art not in seen:
+        parts.append(art)
+    return " › ".join(parts)
 
 
 def chunk_doc(doc: dict) -> list[Chunk]:
@@ -39,6 +56,11 @@ def chunk_doc(doc: dict) -> list[Chunk]:
 
     doc_id = doc["doc_id"]
     domain = doc["domain"]
+    bc_on = c.get("breadcrumb", True)
+    doc_name = ""
+    if bc_on:
+        from ..agentic.outline import clean_doc_name
+        doc_name = clean_doc_name(doc)
     chunks: list[Chunk] = []
     seq = 0
 
@@ -62,7 +84,8 @@ def chunk_doc(doc: dict) -> list[Chunk]:
                 continue
             chunks.append(Chunk(chunk_id=f"{doc_id}::c{seq:04d}", doc_id=doc_id,
                                 domain=domain, text=piece, seq=seq, type=typ,
-                                section_path=sp or [], article_no=art, page=page))
+                                section_path=sp or [], article_no=art, page=page,
+                                breadcrumb=_breadcrumb(doc_name, sp, art) if bc_on else ""))
             seq += 1
 
     buf: list[str] = []

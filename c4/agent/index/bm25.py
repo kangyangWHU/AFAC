@@ -74,7 +74,7 @@ class BM25Index(Retriever):
                            score=float(scores[i]), text=c["text"],
                            meta={"type": c.get("type"), "section_path": c.get("section_path"),
                                  "article_no": c.get("article_no"), "page": c.get("page"),
-                                 "seq": c.get("seq")}))
+                                 "seq": c.get("seq"), "breadcrumb": c.get("breadcrumb", "")}))
         return out
 
     def neighbors(self, doc_id: str, seq: int, window: int = 1) -> list[dict]:

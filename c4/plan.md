@@ -150,3 +150,135 @@ $PY -m eval.accuracy out/B_routed/answer.csv          # 对 silver 标签评分
 - 少量 tf 判断题判反；财报个别"两年两值"仍偶有缺。
 - 路由 全@5=74%→可加文档标题信号 / 章节级路由提升多 doc 题召回。
 - 真实 B 榜需用官方在线提交校准（silver 标签非官方答案）。
+
+---
+
+# v4 重构：Agentic RAG（规划 + 进度）
+
+## 进度（2026-06-20）
+- ✅ **阶段1 面包屑+outline**：`Chunk.breadcrumb`(只进展示不进索引)、`agentic/outline.py`、`index/outlines.json`(573篇)。
+  重建后 BM25 token md5 字节一致 → **检索零回归**(基线准确率不受影响, 无需重跑LLM确证)。
+  例: ins_a_001 的 160% 块展示从 `[2|第五条]` → `[2|国寿增益宝终身寿险(万能型)(2025版)条款›第五条]`。
+  名字覆盖: insurance 12/16、regulatory 483/513 好; contracts/research/fin报表多为空(安全回退定位)。
+- ✅ **阶段2 分解器**：`agentic/decompose.py` + `eval/decompose_eval.py`。100题离线评测:
+  archetype 分布合理(option_verdict 91 / value_compare 4 / single_fact 5, **fallback 0/空 0**);
+  多选覆盖 **76/76=100%**(每选项一子问题); value_compare 正确按实体拆(ins_a_001=4实体);
+  doc_hint 绑定率 **57%**(受 outline 名字覆盖限制, None=安全全搜); token 721/题。
+  **待改进**: outline 名字空的 doc(research/保险阅读指引/财报)→ doc_hint 绑不上, 不阻塞但浪费检索范围。
+- ✅ **阶段3 子问题 agentic loop**（先 value_compare）：`agentic/loop.py`（无状态: genQuery→BM25→judge读块吐值/否, 换词不退出, 上限3轮）。
+  ins 4 题 12 子问题: **命中 10/12=83%, ~1835 token/子问题**(与旧管线/题相当)。
+  **实测决策**: ① backfill 回填**关**(净负: 2x token 且命中 83→75%, 失败是解析丢失非切散); ② 实体名 doc 缩窄**开**(去跨产品污染)。
+  **关键发现**: loop 是"诊断器"——干净条文块(增益宝/鑫享/众安/e生保)近乎全中且省token; 失败集中在 **doc1 智盈金生**(墙文本阅读指引, 无条号结构, 解析丢规则), 跨 ins_a_001/002 系统性复现; doc16 富鸿身故金条款解析丢失。旧管线靠"塞22块+LLM跨产品泛化公式"蒙对, agentic 精确读块反而暴露上游解析缺口 → 这些子问题 found=false, 按设计降级旧 reasoner(阶段4)。
+  **上游待修**: doc1 类阅读指引墙文本的条文切分; 部分险种身故金条款解析丢失(疑表格/版面)。
+- ✅ **阶段4 合并+降级**：`agentic/merge.py`(value_compare 排序比对 + option_verdict 收真/add-only) + `agentic/solver.py`(编排+降级)。
+  merge 单测: 喂 gold 值→ ins_a_001=B✅ ins_a_002=A✅ defective→None降级✅。ins 4 题端到端 4/4(1 走 agentic, 3 降级)。
+  **成本发现**: 降级"双付费"(先跑 agentic 再退旧 reasoner) → value_compare 4 题 ~2.6× 旧 token; 准确率没提(旧本就对); **唯一赢=可审计**。
+- ✅ **阶段5(打通) option_verdict + 端到端入口**：`loop.solve(shape=verify)` + `script/run_agentic.py`(answer.csv + agentic_audit.json 可回放)。
+  **分层 20 题端到端**: high-conf **15/17=88.2%**(旧 89%, 持平无回归); 路径 agentic 9/降级 11; token ~11.4k/题(≈2.3×旧)。
+  错题 3 全是 option_verdict 验证: 跨文档主张单边锚定(fc_a_001 判 C"两文档均AAA"为真只看了一篇) / 过选漏选。
+- ✅ **架构简化（用户决定）**：砍掉确定性 merge + 降级旧管线，改 `solver._synthesize`(原题+题型+子问题结论/证据 → 1 次 LLM 给答案)；子问题无证据则标注并强行让 LLM 续答。
+  分层 20 题: token **227k→158k(-30%, 双付费消除)**; 准确率 **88.2%→76.5%**。
+  **诊断**: 掉分 100% 是【子问题检索失败(无证据)】非 synthesize——loop 找到证据时 synthesize 判得对(res_a_001 A/C/D 全对); 错的全是 verify 返回"无证据"的选项(reg_a_004 四选项全无证据/res_a_002 BCD 无证据)。
+  旧 88.2% 是【降级用暴力旧 reasoner 掩盖了弱检索】; 去掉掩盖后 76.5% 是真实检索能力。
+- ⬜ **优化子问题检索（下一步, 这是提分主轴）**: ①verify 查询词生成 ②doc_hint 绑定(research 无名doc 补主题信号) ③verify judge 过严(信息不足误判) ④迭代轮数/批量 ⑤跨文档 verify(fc_a_001)。目标: 把"无证据"率从 16% 压下去 → 准确率随之回升。
+
+---
+
+## (原规划) 动机与设计
+
+> 动机：现 §4 是"一次性把 top-N 块塞进单次 reasoner 调用"的传统 RAG，两个痛点：
+> ① **检索块对人极不友好**——块无定位信息，人工审核困难（ins_a_001 的 160% 比例表埋在长条款里，肉眼难定位）；
+> ② **evidence.json 把 reasoning 截到 `[-800:]`**，关键推导丢失（144 万的算法被截掉，见复盘）。
+> 目标：换成模拟人类的 **Agentic RAG**——拆子问题 → 每子问题独立的无状态检索 loop → 确定性合并。**更可审计、且预期更省 token**。
+
+## v4.0 核心共识（已与用户对齐，逐条锁定）
+
+1. **拆"自带答案的子问题"，不是拆"块相不相关"。**
+   子问题要自包含、答案确定。ins_a_001 拆成 4 个：每个携带题干全部数字，块只需提供**规则/条款**，LLM 套规则直接吐值。
+   - 反例（不要）："这块含不含增益宝身故金计算规则？"
+   - 正例（要）："已交100万/现价80万, 增益宝(40岁)基本保额90万/账户85万, 身故金=?" → `144万`
+
+2. **省 token 的杠杆是 `(调用次数)×P`，不是块大小。**
+   `总输入 ≈ K×C + 调用次数×P`（K=看过的块数, C=块大小, P=每次重发的题干+指令）。
+   - 无状态、不累积上下文（用户拍板）→ 避免 O(K²)。
+   - 判块**小批量打包**（3-5 块/次）摊薄 P；判块 prompt 只发**分解后的子问题**，不发原题。
+
+3. **判块和答子问题合一**：块有规则就吐值，没有就"否→下一块"。不要单独的"这块相关吗"调用。
+
+4. **检索词在 loop 内生成（不在分解时一次性给）。**
+   理由：换词/换索引应是 loop 内部动作，零退出成本。jieba 直切原句不行（题干数字是噪声），由 LLM 出检索词，只针对"规则"，低质则 loop 内重出词重搜（有上限）。
+
+5. **合并是按题型写死的确定性代码，不是第二次 LLM 推理。**
+   算术/排序永远留在合并层，绝不折进 LLM。
+
+6. **任一子问题没找到规则块 → 降级回旧 reasoner**（缺证据不硬合并）。
+
+## v4.1 题型 → 子问题形状 → 合并（最终定版）
+
+| 题型 | 子问题形状 | 合并逻辑（确定性代码） |
+|---|---|---|
+| `value_compare`（含 "A的fact > B的fact"） | **开放算值**：每实体一个 "=?" | 排序 N 个值 → 逐选项比对其陈述的排序 → 命中字母 |
+| `option_verdict`（"下列哪些正确"） | **判真**：每选项 "对吗?" → 是/否 | 收集判真选项 + **add-only 偏置**（榜上 06/07_addonly 最高） |
+| `single_fact`（财报取数） | 开放算值，1 个 | 哪个选项 = 它 |
+| `fallback`（不可拆） | —— | 交旧 `reasoner.answer` |
+
+- **value_compare 一律开放算值**（4 子问题），不做"候选值去重验证"（那会变 ~7 子问题、更费 token，已砍）。
+- "判真验证"形状只归 `option_verdict`（选项本就是要判真假的主张）。
+- ⚠️ **关系/排序不折进验证**：选项 A "智盈(90)>增益宝(144)" 里每个值都对、错在排序；若整句验证会被对得上的数字带跑误判真。值的真伪归验证层，排序归合并层。
+
+## v4.2 单题流程
+
+```
+分解(1次LLM,全局) → 认题型 + 列子问题
+  ↓ 每子问题并行, 各自无状态 loop:
+    [loop内] 生成BM25检索词(LLM,只输出几个词)
+      → BM25Index.search(doc_ids=本子问题文档)   # 复用现成子集检索
+      → 读 top-k(小批量3-5块/次) → LLM: 含规则吐值 / 否
+      → 否: 换下一批; 连续低质: loop内重出检索词重搜
+      → 命中/触顶退出, 返回 {value 或 verdict, 依据chunk_id, found}
+  ↓
+确定性合并(按题型写死) → 字母
+  ↓ 任一子问题 found=false → 降级旧 reasoner
+```
+
+## v4.3 分阶段实现（每阶段独立可测、对拍 89-对基线）
+
+总原则：新增 `agent/agentic/` 子包，**旧管线（`pipeline.py`→`reasoner.py`）原样保留**，config 加 `mode: legacy|agentic` 开关。复用 `BM25Index.search(doc_ids=)`、`processed/*/*.json`(已有 `section_path/article_no/page/table.caption`)、`QwenClient.complete`、`USAGE`、`eval/accuracy.py`。**每阶段写完整结构化 trace（不再截断）**。
+
+**阶段 1 · 面包屑 + per-doc outline**（低风险，先让块可读）
+- `chunker/chunker.py`：块文本前置 `[{title} › {section_path} › {article_no}标题]`。
+- 新增 `agentic/outline.py`：扫 processed → 每篇 `{doc_id,title,toc,headings}` → `index/outlines.json`；表格条目用 `table.caption`。
+- 重建 BM25 → 跑旧管线**对拍基线，准确率不得低于基线**（只加信息）。
+- 测：抽 5 篇人工看面包屑；准确率对拍。
+
+**阶段 2 · 分解器**（1 次 LLM，先离线验证，不接管线）
+- 新增 `agentic/decompose.py`：题 → JSON `[{sq, type, shape, entity/option, doc_hint}]` + 题型，强制校验。
+- 测（**纯离线 0 风险**）：拿 `relabel_opus/*.md` 当 gold（Opus 已标"答案在 doc2 第五条"）。评 ①题型认对率 ②子问题覆盖所有实体/选项 ③doc_hint 命中正确文档。认题型错就回炉。
+
+**阶段 3 · 单子问题 agentic loop**（无状态，先只跑 value_compare）
+- 新增 `agentic/loop.py`：检索词生成在 loop 内 / 小批量判块 / 换词不退出 / 硬上限 / 每步 trace。
+- 测：仅 insurance·value_compare 子集。三件套一起报：①子答案正确率 ②**检索召回**(依据块是否真含规则, 对 relabel gold) ③**每题 token**。对拍旧管线同子集。
+
+**阶段 4 · 确定性合并 + 降级兜底**
+- 新增 `agentic/merge.py`：按 §v4.1 写死；任一 `found=false` → 降级 `reasoner.answer`。
+- 测：value_compare 端到端 vs 基线；看降级触发率（过高=分解/检索没做好）。
+
+**阶段 5 · 全题型 + 全量对拍**
+- option_verdict / single_fact 接入，全 100 题。
+- `eval/accuracy.py` 加 token 列；画 **准确率 × token 帕累托** vs `16_best89`。
+- 替换条件：准确率≥基线 且 token≤基线，或明确帕累托占优。否则保留旧管线。
+
+## v4.4 先定的数（阶段 1 前确认）
+
+| 项 | 值 | 理由 |
+|---|---|---|
+| 每子问题 token 预算 | 6k，超即降级 | 防 loop 跑飞 |
+| loop 最大迭代 | 3 | 上限 |
+| 判块批量 | 3-5 块/次 | 摊薄固定开销 P |
+| 旧管线 | 全程保留 | 永远能对拍 + 降级 |
+
+## v4.5 测试资产（已就位，无需新标）
+
+- **检索召回 gold**：`relabel_opus/*.md` 内 Opus 已标证据定位（"doc2 第五条"），直接转 `问题→答案所在块` gold 集，脱离 LLM 单独测 recall@k。
+- **端到端**：`dev_labels.json`（silver 有偏，勿单看；务必带 token 一起报）。
+- **审计产物**：新 evidence trace = 子问题 / 发出的检索词 / 读过哪些块 / 每步判定 / 依据 chunk_id，可逐步回放——即本次重构的初心交付物。
