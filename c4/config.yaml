@@ -103,6 +103,11 @@ agentic:
   loop_judge_max_tokens: 400
   loop_evidence_chars: 240    # 命中块喂 synthesize 的证据片段长度
 
+  # 事实 -> 文档路由(route.py): 给定 ask, 在候选 doc_ids 里选篇(分解器不再猜 doc)
+  route_chunk_k: 30           # 每篇取多少 chunk 聚合打分
+  route_min_lead: 1.3         # top 篇领先次高的倍数, 够大才缩到 1 篇(否则返回前 route_top_k)
+  route_top_k: 2
+
   # synthesize：原题 + 子问题结论 -> 最终答案(1 次 LLM, 不降级)
   synth_max_tokens: 600
 

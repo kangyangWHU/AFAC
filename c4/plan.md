@@ -194,7 +194,11 @@ $PY -m eval.accuracy out/B_routed/answer.csv          # 对 silver 标签评分
   - solver: 跑所有 fact(全 compute) → synthesize 拿到所有事实**逐选项整体比对**出答案。
   - **效果(分层20题)**: **fc 33%→100%**(跨文档比较根治, fc_a_001 ABD 已确定性验证), 整体 **59%→76.5%**。
   - 残留错题集中在: research(无名 doc 绑定错/解析) + value_compare 解析缺口(doc1 智盈) + 财报跨年。
-- ⬜ **下一步**: ① research 无名 doc 的 doc_hint 绑定(补 outline 主题词) ② decompose 鲁棒性(偶发 fallback/archetype 标错) ③ 上游解析(doc1)。
+- ✅ **独立路由模块（用户指出: doc 绑定该独立于分解器, 就是 B 榜路由逻辑）**：`agentic/route.py`，分解器只产 ask、不再猜 doc：
+  - **混合路由**：① ask 含"第N份"序数 → 按候选顺序映射（同类文档如两份募集书, 内容分不出, 靠序数）；② 否则 BM25 内容路由（研报按主题: 芯原→text09、金融信创→text17）。
+  - decompose 兜底（LLM 给空/fallback → 每选项一条 fact）防 0 事实。
+  - 效果(分层20题): **命中证据 98%**, fc 3/3、res 3/4(研报绑定修好), 整体 70.6%(噪声带内, 结构改进是真的)。
+- ⬜ **下一步**: ① 多级标题解析(研报正文有 "2.1 需求基础/2.2 供给替代" 但解析糊成 table 块, 抽出来=主题信号+路由依据) ② 财报跨年(fin)/reg 判定 ③ 上游解析(doc1 智盈)。
 
 ---
 
