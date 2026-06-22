@@ -91,7 +91,7 @@ agentic:
 
   # 子问题 loop：检索 + judge（读块吐值/判真）
   loop_max_iter: 3             # 单子问题最多迭代轮数(每轮一次 judge)
-  loop_batch: 4               # 每轮判块数(3-5; 摊薄固定 prompt 开销)
+  loop_batch: 8               # 每轮判块数; 饱和词(如"发行人"159块全含)排名平, 答案常落第5名, batch=8 才进判题集
   loop_requery: 1             # loop 内重出检索词次数上限
   loop_search_mult: 3         # 每轮 BM25 取 batch*此值, 去重后取前 batch(分页用)
   loop_window_chars: 500      # 喂 judge 的窗口大小: 以 BM25 命中为中心截窗(块可大, 命中在顶/底都不漏)

@@ -14,18 +14,15 @@ from ..llm.base import LLMClient
 from ..index.bm25 import BM25Index
 from .. import config
 
-_GEN_SYS = """你为 BM25 检索生成查询词：检索的目的是去文档里定位【规则/条款/公式/事实】。从子问题里只抽取能定位它的实词——指标名/条款名/实体/专有名词/规则参数/领域术语。
-- 规则参数数字要保留（如 56% 30个工作日 8894.3）。
-- 忽略设问套话（选项/是否/成立/正确/主张/下列/说法）。
-- 去掉纯类目词（名称/类型/情况/信息/数据）——它们是设问的范畴而非定位锚点，且是表头遍地的噪声：
-  「发行人名称」→ 检索词只要「发行人」；「文件类型」→「文件」。
-- 【案例数据不是检索词】：子问题里的案例人名（王某/李某）和案例给定的钱数（维修费8000元/门诊2000元）文档里根本没有——它们是题目给的【计算输入】，留给判题时代入算账，检索词里【绝不要】。
-  「家财险对王某水管爆裂维修费8000元的赔付金额」→ 检索词只要「家财险 水管爆裂 赔付 免赔额」（取规则：产品名+场景类型+规则名），不要「王某 8000元」。
-2-6 个词，空格分隔，只输出一行，不要解释。
-（注：检索按候选文档重算 IDF，公司名/年份等篇内遍地的词会自动降权，无需你特意去掉。）"""
-
-# 纯类目词：是设问的"问哪个范畴"，不是内容锚点；作为表头(子公司名称/债务人名称…)遍地出现 → BM25 噪声。
-_GENERIC_LABEL = ("名称", "类型", "情况", "信息")
+_GEN_SYS = """你为 BM25 检索生成查询词。BM25 是【字面匹配】：一个词有用 ⟺ 它【会出现在答案所在那段正文里】且【能把那段顶上来】——要的是【能判别答案块的内容词】。
+1. 保留子问题里【描述要找什么的内容词】：实体(公司/产品/条款名)、指标/科目、年份/期间、条件/场景、规则参数数字——关键词一个别漏，漏了就查不到。
+2. 去掉【不进答案块、或会带偏的词】：
+   - 设问套话(是否/正确/成立/下列/说法/主张)；
+   - 题目自带的案例数据(人名"王某/李某"、给定金额"维修费8000元/门诊2000元"——在题面不在文档，留给判题代入算)；
+   - 纯属性/类目标签(名称/类型/情况)——它只说"问哪个属性"，本身不是判别词；更糟的是"名称/类型"是大量表头(子公司名称/债务人名称…)的词，会把无关表顶上来、把真答案挤出批次。要找的是【这个属性的值在文档里怎么写】：「发行人名称」→「发行人 公司全称 简称」(释义/封面写"发行人 指 X")，绝不要「名称」。
+3. 同一事物文档可能换种正式写法 → 补全：把你知道的几种正式名都写上(扩展不替换)，如「归母净利润」→「归母净利润 归属于母公司股东的净利润 归属于上市公司股东的净利润」。
+   铁律：只扩【同一事物】的不同写法，绝不扩成别的科目或别的实体——净利润≠归母净利润、营业收入≠营业总收入(混了取错值)；产品名/公司名一字不改(✗ 众安白血病医疗险→众安百万医疗险)。
+空格分隔，一行输出，不解释。"""
 
 _JUDGE_SYS = """你从检索块里给出子问题要的【值】。分三类：
 A. 直接取值：块里有现成的事实（数值/名称/评级/日期/时限/金额/比例），直接抽出。
@@ -115,35 +112,20 @@ class SubQLoop:
             i += 1
         return merged
 
-    @staticmethod
-    def _clean_terms(terms: str) -> str:
-        """剥掉纯类目词(名称/类型…): 独立成词的丢, 黏在词尾的削(发行人名称→发行人)。
-        LLM 不一定听话(缓存里仍见"发行人名称"), 这里确定性兜底。绝不清空。"""
-        out = []
-        for t in terms.split():
-            for g in _GENERIC_LABEL:
-                if t == g:
-                    t = ""
-                elif t.endswith(g) and len(t) > len(g):
-                    t = t[:-len(g)]
-            if t:
-                out.append(t)
-        return " ".join(out) or terms
-
     def _gen_query(self, sq: str, tried: list[str]) -> str:
         key = f"{sq}||{'/'.join(tried)}"
         if self.cache_query and key in self._qcache:
-            return self._clean_terms(self._qcache[key])
+            return self._qcache[key]
         user = sq if not tried else f"{sq}\n\n已试过无效的检索词: {' / '.join(tried)}\n换一组更可能命中的词。"
         out = self.llm.complete([{"role": "system", "content": _GEN_SYS},
                                  {"role": "user", "content": user}],
                                 max_tokens=self.genquery_max_tokens, enable_thinking=False)
-        terms = out.strip().splitlines()[0][:60] if out.strip() else sq
+        terms = out.strip().splitlines()[0][:120] if out.strip() else sq   # 同义扩展后查询更长, 放宽截断
         if self.cache_query:
             with self._qlock:
                 self._qcache[key] = terms
                 json.dump(self._qcache, open(self._qpath, "w", encoding="utf-8"), ensure_ascii=False)
-        return self._clean_terms(terms)
+        return terms
 
     def _judge(self, sq: str, hits: list, terms: str) -> dict:
         blocks = []
