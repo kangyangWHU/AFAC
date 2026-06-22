@@ -5,10 +5,41 @@
 - small-to-big：每块记录在文档内的序号，便于父块回填
 """
 from __future__ import annotations
+import re
 from dataclasses import dataclass, field, asdict
 from .. import config
 from .base import normalize
 from ..retriever.filters import clean_pseudo_table, low_value
+
+
+def _table_to_rows(text: str) -> list[str] | None:
+    """规整 key-value 表 → 每行一个自含块（表头 + 拼好的整行 markdown）。
+    每个指标(行标签)成为小块的主内容 → query 直接命中、IDF 高；表头年份留在块内 → 判题能取对期。
+    PyMuPDF 常把长标签折行(整行只有文字、无数字) → 拼回上一行标签。
+    非规整(无清晰表头/数据行不是"文字标签+数字值"结构)返回 None，走原"整表/按max切"逻辑。"""
+    cells = lambda l: [x.strip() for x in l.strip().strip("|").split("|")]
+    is_sep = lambda l: set(l.replace("|", "").replace("-", "").strip()) == set()
+    data = [l for l in text.split("\n") if l.strip().startswith("|") and not is_sep(l)]
+    if len(data) < 3:                                   # 至少 表头 + 2 数据行
+        return None
+    header = [x for x in cells(data[0]) if x]
+    if len(header) < 2:
+        return None
+    rows: list[tuple[str, list[str]]] = []              # (整标签, [值单元])
+    for l in data[1:]:
+        cs = [x for x in cells(l) if x]
+        if not cs:
+            continue
+        label, vals = cs[0], [x for x in cs[1:] if re.search(r"\d", x)]
+        if not re.search(r"\d", label) and not vals and rows:   # 折行续标签 → 拼回
+            rows[-1] = (rows[-1][0] + label, rows[-1][1])
+        elif not re.search(r"\d", label):
+            rows.append((label, vals))
+    rows = [(lab, v) for lab, v in rows if v]           # 丢纯标题行(无值)
+    if len(rows) < 2:                                   # 不够"键值"结构 → 不拆
+        return None
+    hdr = "| " + " | ".join(header) + " |"
+    return [f"{hdr}\n| {lab} | " + " | ".join(v) + " |" for lab, v in rows]
 
 
 @dataclass
@@ -106,9 +137,13 @@ def chunk_doc(doc: dict) -> list[Chunk]:
 
         if btype == "table" and table_as_chunk:
             flush_buf()
-            # 大表按 max 切
-            for piece in _split_long(text, maxc):
-                emit(piece, "table", sp, art, page)
+            rows = _table_to_rows(text)
+            if rows:                                    # 规整 key-value 表 → 每行一块(保留表头)
+                for r in rows:
+                    emit(r, "table", sp, art, page)
+            else:                                       # 非规整 → 整表(大表按 max 切)
+                for piece in _split_long(text, maxc):
+                    emit(piece, "table", sp, art, page)
             continue
 
         if btype == "heading":
