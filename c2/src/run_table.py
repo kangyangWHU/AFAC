@@ -17,6 +17,7 @@ import api_client as api
 from config import TRAIN_TABLE_DIR, API_USER_IDS
 from preprocess import prep
 from slicer_table import slice_table
+from split_table import subtables
 from stitch_table import stitch_table, parse_tile, rows_to_html
 from evaluate import table_teds, text_edit_loss
 
@@ -204,6 +205,15 @@ def _strip_html(s):
     return " ".join(re.sub(r"<[^>]+>", " ", s or "").split())
 
 
+def _recognize_text(im, bbox, timeout, pad=6):
+    """裁一个小文字块 → 单独 API 识别 → 剥成纯文本。表外文字块与子表上方的标题段
+    共用这一套（裁剪→识别→拼接），不让小文字被 stitch 包成空 <table>。"""
+    x0, y0, x1, y1 = bbox
+    crop = im.crop((max(0, x0 - pad), max(0, y0 - pad),
+                    min(im.width, x1 + pad), min(im.height, y1 + pad)))
+    return _strip_html(api.call_safe(crop, timeout=timeout))
+
+
 def _call_text_blocks(im, blocks, timeout):
     """表外孤立文字块(页眉/页脚/水印/页码)单独识别，按位置返回拼到表格前/后的文本。
     放在主表之后调(query 最后)；CACHE_ONLY 离线评测下未缓存→空，不影响既有评测。"""
@@ -241,12 +251,36 @@ def run_one(im, timeout=240):
     return pred, ncalls, meta
 
 
+def run_one_split(im, timeout=240):
+    """多子表：subtables 把整图切成有序块 [(kind,bbox)]，text 块单独识别成文本、
+    table 块走 run_one，按阅读顺序拼接。
+
+    单表(table 块 ≤1)退回 run_one 整图、零行为变化。table_teds 按出现顺序逐表配对，
+    切成 N 个独立 <table> 后逐个对齐 GT[i]——避免旧 stitch 把 N 子表读成 1 大 table。"""
+    blocks = subtables(im)
+    if sum(1 for k, _ in blocks if k == "table") <= 1:
+        return run_one(im, timeout)
+    parts, ncalls = [], 0
+    for kind, bb in blocks:
+        if kind == "text":
+            txt = _recognize_text(im, bb, timeout)
+            if txt:
+                parts.append(txt)
+        else:
+            p, nc, _ = run_one(im.crop(bb), timeout)
+            parts.append(p)
+            ncalls += nc
+    return "\n".join(parts), ncalls, {"subs": sum(1 for k, _ in blocks if k == "table")}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=3)
     ap.add_argument("--timeout", type=int, default=240)
     ap.add_argument("--pick", choices=["median", "small", "spread"],
                     default="median")
+    ap.add_argument("--split", action="store_true",
+                    help="多子表先几何切分再各自 run_one")
     args = ap.parse_args()
 
     files = sorted(glob.glob(os.path.join(TRAIN_TABLE_DIR, "mds", "*.md")),
