@@ -6,7 +6,9 @@
 """
 from __future__ import annotations
 import json
+import os
 import re
+import threading
 from ..llm.base import LLMClient
 from .. import config
 
@@ -66,6 +68,13 @@ class Decomposer:
         a = config.load().get("agentic", {})
         self.max_tokens = a.get("decompose_max_tokens", 1000)
         self.retries = a.get("decompose_retries", 1)
+        # 子问题缓存：同(题,候选文档)复用上次分解 → 跨运行固定子问题, 让"只有retrieve在变"可净测+省token。
+        # 改 decompose prompt 时手动删 index/decompose_cache.json。
+        self.cache_on = a.get("decompose_cache", True)
+        self._cpath = os.path.join(config.path("index_dir"), "decompose_cache.json")
+        self._clock = threading.Lock()
+        self._cache = (json.load(open(self._cpath, encoding="utf-8"))
+                       if self.cache_on and os.path.exists(self._cpath) else {})
 
     def build_messages(self, q: dict, doc_ids: list[str]) -> list[dict]:
         opts = "\n".join(f"{k}. {v}" for k, v in q["options"].items())
@@ -84,6 +93,17 @@ class Decomposer:
                 for i, v in enumerate(opts.values()) if len(str(v)) > 2]
 
     def decompose(self, q: dict, doc_ids: list[str]) -> dict:
+        key = f"{q.get('qid')}||{'/'.join(map(str, doc_ids))}"
+        if self.cache_on and key in self._cache:
+            return self._cache[key]
+        obj = self._decompose_uncached(q, doc_ids)
+        if self.cache_on:
+            with self._clock:
+                self._cache[key] = obj
+                json.dump(self._cache, open(self._cpath, "w", encoding="utf-8"), ensure_ascii=False)
+        return obj
+
+    def _decompose_uncached(self, q: dict, doc_ids: list[str]) -> dict:
         msgs = self.build_messages(q, doc_ids)
         out = ""
         for _ in range(self.retries + 1):
