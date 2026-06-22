@@ -17,8 +17,13 @@ from .. import config
 _GEN_SYS = """你为 BM25 检索生成查询词：从子问题里抽取最能定位证据的实词——指标名/条款名/实体/专有名词/关键数字/领域术语。
 - 关键数字要保留（如 8894.3 7日 30个工作日 56%）。
 - 忽略设问套话（选项/是否/成立/正确/主张/下列/说法）。
+- 去掉纯类目词（名称/类型/情况/信息/数据）——它们是设问的范畴而非定位锚点，且是表头遍地的噪声：
+  「发行人名称」→ 检索词只要「发行人」；「文件类型」→「文件」。
 2-6 个词，空格分隔，只输出一行，不要解释。
 （注：检索按候选文档重算 IDF，公司名/年份等篇内遍地的词会自动降权，无需你特意去掉。）"""
+
+# 纯类目词：是设问的"问哪个范畴"，不是内容锚点；作为表头(子公司名称/债务人名称…)遍地出现 → BM25 噪声。
+_GENERIC_LABEL = ("名称", "类型", "情况", "信息")
 
 _JUDGE_SYS = """你从检索块里给出子问题要的【值】。分两类：
 A. 直接取值：块里有现成的事实（数值/名称/评级/日期/时限/金额/规则），直接抽出。
@@ -105,10 +110,25 @@ class SubQLoop:
             i += 1
         return merged
 
+    @staticmethod
+    def _clean_terms(terms: str) -> str:
+        """剥掉纯类目词(名称/类型…): 独立成词的丢, 黏在词尾的削(发行人名称→发行人)。
+        LLM 不一定听话(缓存里仍见"发行人名称"), 这里确定性兜底。绝不清空。"""
+        out = []
+        for t in terms.split():
+            for g in _GENERIC_LABEL:
+                if t == g:
+                    t = ""
+                elif t.endswith(g) and len(t) > len(g):
+                    t = t[:-len(g)]
+            if t:
+                out.append(t)
+        return " ".join(out) or terms
+
     def _gen_query(self, sq: str, tried: list[str]) -> str:
         key = f"{sq}||{'/'.join(tried)}"
         if self.cache_query and key in self._qcache:
-            return self._qcache[key]
+            return self._clean_terms(self._qcache[key])
         user = sq if not tried else f"{sq}\n\n已试过无效的检索词: {' / '.join(tried)}\n换一组更可能命中的词。"
         out = self.llm.complete([{"role": "system", "content": _GEN_SYS},
                                  {"role": "user", "content": user}],
@@ -118,7 +138,7 @@ class SubQLoop:
             with self._qlock:
                 self._qcache[key] = terms
                 json.dump(self._qcache, open(self._qpath, "w", encoding="utf-8"), ensure_ascii=False)
-        return terms
+        return self._clean_terms(terms)
 
     def _judge(self, sq: str, hits: list, terms: str) -> dict:
         blocks = []
