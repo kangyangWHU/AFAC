@@ -47,18 +47,23 @@ class AgenticSolver:
         self.decomposer = Decomposer(self.llm, outlines)
         self.loop = SubQLoop(self.llm, idx)
         self.synth_max_tokens = config.load().get("agentic", {}).get("synth_max_tokens", 600)
+        self.fact_workers = config.load().get("agentic", {}).get("fact_workers", 6)
+
+    def _run_one_fact(self, f: dict, doc_ids) -> dict:
+        dids = route(self.index, f["ask"], list(doc_ids))
+        r = self.loop.solve(f["ask"], dids, shape="compute")
+        return {"ask": f["ask"], "doc": "/".join(dids),
+                "value": r.value if r.found else "未查到",
+                "found": r.found, "src": r.source_chunk_id, "evidence": r.source_text}
 
     def _run_facts(self, d: dict, doc_ids) -> list[dict]:
-        """跑每条原子事实查询(全 compute=取值)。每条 ask 用独立路由选篇(非分解器猜)。"""
-        facts = []
-        for f in d["facts"]:
-            dids = route(self.index, f["ask"], list(doc_ids))
-            r = self.loop.solve(f["ask"], dids, shape="compute")
-            facts.append({"ask": f["ask"], "doc": "/".join(dids),
-                          "value": r.value if r.found else "未查到",
-                          "found": r.found, "src": r.source_chunk_id,
-                          "evidence": r.source_text})
-        return facts
+        """跑每条原子事实(全 compute=取值)。facts 互相独立 → 并行跑, 喂饱 GPU。"""
+        facts = d["facts"]
+        if self.fact_workers > 1 and len(facts) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=self.fact_workers) as ex:
+                return list(ex.map(lambda f: self._run_one_fact(f, doc_ids), facts))
+        return [self._run_one_fact(f, doc_ids) for f in facts]
 
     def _synthesize(self, q: dict, arch: str, facts: list[dict]) -> str:
         opts = "\n".join(f"{k}. {v}" for k, v in q["options"].items())
