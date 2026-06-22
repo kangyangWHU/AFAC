@@ -14,11 +14,11 @@ from ..llm.base import LLMClient
 from ..index.bm25 import BM25Index
 from .. import config
 
-_GEN_SYS = """你为 BM25 检索生成查询词，目标是在【已选定的单篇文档内】定位某个事实所在的段落/表格。
-- 只留能在文档内区分内容的词：指标名/条款名/具体事项/关键数字（如 经营活动现金流量净额、身故保险金、主体信用评级、8894.3、30个工作日、56%）。
-- 【去掉用于定位是哪篇文档的词】：公司名(如比亚迪)、报告名、年份(如2024年)、"第一份/第二份/前者/后者"——文档已选定，这些每块都有、是噪声、会把排序带偏。
-- 忽略"选项/是否/成立/正确/主张/下列/说法"等设问套话。
-2-6 个词，空格分隔，只输出一行，不要解释。"""
+_GEN_SYS = """你为 BM25 检索生成查询词：从子问题里抽取最能定位证据的实词——指标名/条款名/实体/专有名词/关键数字/领域术语。
+- 关键数字要保留（如 8894.3 7日 30个工作日 56%）。
+- 忽略设问套话（选项/是否/成立/正确/主张/下列/说法）。
+2-6 个词，空格分隔，只输出一行，不要解释。
+（注：检索按候选文档重算 IDF，公司名/年份等篇内遍地的词会自动降权，无需你特意去掉。）"""
 
 _JUDGE_SYS = """你在从检索块里查【一个事实的值】。问题问的是某个具体事实（数值/名称/评级/日期/时限/金额/规则等）。
 - 若某块含该事实：抽出它的值，输出 JSON：{"found":true,"value":"<事实的值，如 不超过10亿元 / 广东省广晟控股集团 / AAA / 30个工作日>","source":<块号整数>}。若问题自带数字需套条款计算，就算出最终值。
@@ -119,11 +119,11 @@ class SubQLoop:
         return pre + text[best_start:best_start + W]
 
     def _retrieve(self, terms: str, doc_ids: list[str]) -> list:
-        """按 query 排序的候选块。多文档时每篇轮询取(round-robin)，
-        保证每篇都有代表，不被单篇高分块挤占(治"搜两篇却全召回一篇")。"""
+        """按 query 排序的候选块。用 search_local(per-candidate IDF, 每篇单独重算)修全局IDF坑；
+        多文档时每篇轮询取(round-robin)，保证每篇都有代表(治"搜两篇却全召回一篇")。"""
         if len(doc_ids) <= 1:
-            return self.index.search(terms, k=self.batch * self.search_mult, doc_ids=doc_ids)
-        pools = [self.index.search(terms, k=self.batch * self.search_mult, doc_ids=[d])
+            return self.index.search_local(terms, doc_ids, k=self.batch * self.search_mult)
+        pools = [self.index.search_local(terms, [d], k=self.batch * self.search_mult)
                  for d in doc_ids]
         merged, i = [], 0
         while any(i < len(p) for p in pools):

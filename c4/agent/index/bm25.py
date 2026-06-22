@@ -77,6 +77,28 @@ class BM25Index(Retriever):
                                  "seq": c.get("seq"), "breadcrumb": c.get("breadcrumb", "")}))
         return out
 
+    def search_local(self, query: str, doc_ids: list[str],
+                     k: int | None = None) -> list[Hit]:
+        """per-candidate BM25：只在候选文档块上【重算 IDF】再检索。
+        修全局 IDF 的坑——公司名/年份等"全局稀有但篇内遍地"的词在候选集内 df 高→IDF 低→
+        不再带偏排序(如"比亚迪"不再把子公司表顶上来)。token 复用全局, 建子索引 ~10ms。"""
+        k = k or self.topk
+        cand = [i for d in doc_ids for i in self.by_doc.get(str(d), [])]
+        if not cand:
+            return []
+        sub = BM25Okapi([self._tokens[i] for i in cand], k1=self.k1, b=self.b)
+        scores = sub.get_scores(tokenize(query, self.drop_stop, self.mode))
+        order = sorted(range(len(cand)), key=lambda j: scores[j], reverse=True)[:k]
+        out = []
+        for j in order:
+            c = self.chunks[cand[j]]
+            out.append(Hit(chunk_id=c["chunk_id"], doc_id=c["doc_id"],
+                           score=float(scores[j]), text=c["text"],
+                           meta={"type": c.get("type"), "section_path": c.get("section_path"),
+                                 "article_no": c.get("article_no"), "page": c.get("page"),
+                                 "seq": c.get("seq"), "breadcrumb": c.get("breadcrumb", "")}))
+        return out
+
     def neighbors(self, doc_id: str, seq: int, window: int = 1) -> list[dict]:
         """按文档内 seq 取命中块的前后兄弟块（small-to-big 父块回填）。"""
         idxs = self.by_doc.get(doc_id, [])

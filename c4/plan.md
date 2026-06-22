@@ -217,7 +217,12 @@ $PY -m eval.accuracy out/B_routed/answer.csv          # 对 silver 标签评分
 - **当前 agentic 基线(本地35B): 71.7% high-conf, found-rate 84%** (vs legacy 88%, 差16分)。
   **天花板诊断**: 本地35B 在多步(genQuery/judge/synthesize)每步弱, 多步放大误差(found 84% vs 百炼91-98%)。
   增量修复(token+16/genQuery+2)有效但有限; 冲准确率需强模型(百炼)。
-- ⬜ **下一步**: ① 上强模型(百炼)测 agentic 真实潜力(本地是免费迭代用) ② 分解器"是否X"→取值 ③ synthesize 过选/漏选校准。
+- ✅ **per-candidate 子索引(用户root-fix, 替换genQuery patch)**：`bm25.search_local`——只在候选文档块上重算 IDF 再检索(~10ms, token复用)。
+  根因: 全局 BM25 IDF 把"公司名(比亚迪)"当稀有词给高权重(3.95), 但篇内33%块都有→无区分度却带偏排序(现金流块从#1压到200+)。旧管线也中招但宽网(22块)扛住, agentic窄批(4块)被坑。
+  loop._retrieve 改用 search_local; 删掉 genQuery 去公司名/年份的 patch(B 从根上压, 不靠查询特判)。
+  全量100: 71.7%→73.9%(B 与 genQuery patch 重叠故增量小, 但 query-noise 彻底根治)。
+  进展: 52(token截断)→69.6→71.7(genQuery)→**73.9%(B)**, found-rate 84%。
+- ⬜ **下一步**: ① found-rate 84% 天花板=judge-miss(弱模型)/"是否X"畸形ask/解析真空, 非查询噪声了 ② synthesize 过选漏选校准 ③ 上强模型(百炼)测真实潜力。
 - 注: 准确率 % 在 17 题上 ±2 道噪声(并发影响≤1道, 已验证), 提分以确定性逐案验证为准, 真基线需全量 100。
 
 ---
