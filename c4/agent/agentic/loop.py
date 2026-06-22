@@ -20,20 +20,13 @@ _GEN_SYS = """你为 BM25 检索生成查询词：从子问题里抽取最能定
 2-6 个词，空格分隔，只输出一行，不要解释。
 （注：检索按候选文档重算 IDF，公司名/年份等篇内遍地的词会自动降权，无需你特意去掉。）"""
 
-_JUDGE_SYS = """你在从检索块里查【一个事实的值】。问题问的是某个具体事实（数值/名称/评级/日期/时限/金额/规则等）。
-- 若某块含该事实：抽出它的值，输出 JSON：{"found":true,"value":"<事实的值，如 不超过10亿元 / 广东省广晟控股集团 / AAA / 30个工作日>","source":<块号整数>}。若问题自带数字需套条款计算，就算出最终值。
-- 若这批块都不含：输出 JSON：{"found":false,"requery":"<更可能命中的检索词，没有则空字符串>"}
-可先核对一句，最后一行只输出该 JSON。"""
-
-_VERIFY_SYS = """你在核验一条【主张】是否与文档一致。主张已含所有数字，检索块提供事实/条款。两步判断：
-(1) 这批块里有没有与主张【同一主题/事项】的条款或事实？
-    - 完全没有相关内容 → 输出 {"found":false,"requery":"<更可能命中的检索词，没有则空字符串>"}
-    - 有相关块 → 必须进入(2)给出 verdict，不要因为措辞不同或不完全确定就说没找到。
-(2) 对照该相关块判断主张成立与否：数字/主体/时限/条件实质一致即 verdict=true（措辞不同、表述更宽泛但意思一致也算 true）；有实质冲突才 verdict=false。
-    若主张是【跨文档比较】（如"第二份低于第一份""两份均为AAA"），必须在块里分别找出每一份对应的值再比较，不要只看一份就下结论。
-    输出 {"found":true,"verdict":<true 或 false>,"source":<块号整数>}
-可先核对一句，最后一行只输出该 JSON。"""
-
+_JUDGE_SYS = """你从检索块里给出子问题要的【值】。分两类：
+A. 直接取值：块里有现成的事实（数值/名称/评级/日期/时限/金额/规则），直接抽出。
+B. 套规则计算：子问题自带题干数字、块里是【公式/条款/比例】时，把题干数字代入算出【最终数值】，不要只回公式。
+   例：子问题给"基本保额90万、账户85万"，块里是"身故金=max(身故给付比例×基本保额, 账户价值), 40岁比例160%" → 算 max(160%×90, 85)=144万 → value填"144万"。
+- 命中(取到值或算出值)：输出 JSON {"found":true,"value":"<最终值>","source":<块号整数>}
+- 这批块都不含所需信息：输出 JSON {"found":false,"requery":"<更可能命中的检索词，没有则空字符串>"}
+可先核对/计算一句，最后一行只输出该 JSON。"""
 
 @dataclass
 class LoopResult:
@@ -42,7 +35,6 @@ class LoopResult:
     found: bool
     source_chunk_id: str | None
     n_calls: int
-    verdict: bool | None = None      # verify shape: 主张是否成立
     source_text: str | None = None   # 命中块的文本片段(喂 synthesize + 审计)
     trace: list[dict] = field(default_factory=list)
 
@@ -68,9 +60,6 @@ class SubQLoop:
         self.requery_budget = a.get("loop_requery", 1)
         self.search_mult = a.get("loop_search_mult", 3)
         self.window_chars = a.get("loop_window_chars", 500)   # 喂 judge 的窗口大小(以命中为中心)
-        self.narrow = a.get("loop_narrow", True)
-        self.narrow_k = a.get("loop_narrow_k", 20)
-        self.narrow_ratio = a.get("loop_narrow_ratio", 1.5)
         self.genquery_max_tokens = a.get("loop_genquery_max_tokens", 40)
         self.judge_max_tokens = a.get("loop_judge_max_tokens", 400)
         self.evidence_chars = a.get("loop_evidence_chars", 240)
@@ -80,23 +69,6 @@ class SubQLoop:
         self._qlock = threading.Lock()
         self._qcache = (json.load(open(self._qpath, encoding="utf-8"))
                         if self.cache_query and os.path.exists(self._qpath) else {})
-
-    def _narrow_docs(self, entity: str, doc_ids: list[str]) -> list[str]:
-        """value_compare 多文档: 按实体名(产品/公司)缩到最相关的文档, 去跨产品污染。
-        规则块常不含产品名, 但封面/标题块含 → 文档级 BM25 能定位。命中明确才缩。"""
-        if not (self.narrow and entity and len(doc_ids) > 1):
-            return doc_ids
-        score: dict[str, float] = {}
-        for h in self.index.search(entity, k=self.narrow_k, doc_ids=doc_ids):
-            score[h.doc_id] = score.get(h.doc_id, 0.0) + h.score
-        if not score:
-            return doc_ids
-        top = max(score, key=lambda d: score[d])
-        # 仅当 top 明显领先才缩, 否则保留全部更安全
-        rest = [v for d, v in score.items() if d != top]
-        if not rest or score[top] >= self.narrow_ratio * max(rest):
-            return [top]
-        return doc_ids
 
     def _window(self, text: str, terms: str) -> str:
         """以 BM25 命中为中心截窗口喂 judge：命中可能在块顶/块底，从头截会错过。
@@ -148,22 +120,18 @@ class SubQLoop:
                 json.dump(self._qcache, open(self._qpath, "w", encoding="utf-8"), ensure_ascii=False)
         return terms
 
-    def _judge(self, sq: str, hits: list, shape: str, terms: str) -> dict:
+    def _judge(self, sq: str, hits: list, terms: str) -> dict:
         blocks = []
         for i, h in enumerate(hits):
             bc = h.meta.get("breadcrumb") or h.meta.get("article_no") or ""
             blocks.append(f"[块{i}] {bc}\n{self._window(h.text, terms)}")
-        sys = _VERIFY_SYS if shape == "verify" else _JUDGE_SYS
-        label = "主张" if shape == "verify" else "子问题"
-        user = f"【{label}】{sq}\n\n【候选块】\n" + "\n\n".join(blocks)
-        out = self.llm.complete([{"role": "system", "content": sys},
+        user = f"【子问题】{sq}\n\n【候选块】\n" + "\n\n".join(blocks)
+        out = self.llm.complete([{"role": "system", "content": _JUDGE_SYS},
                                  {"role": "user", "content": user}],
                                 max_tokens=self.judge_max_tokens, enable_thinking=False)
         return _parse_json(out) or {"found": False, "requery": ""}
 
-    def solve(self, sq: str, doc_ids: list[str], entity: str = "",
-              shape: str = "compute") -> LoopResult:
-        doc_ids = self._narrow_docs(entity, doc_ids)
+    def solve(self, sq: str, doc_ids: list[str]) -> LoopResult:
         seen: set[str] = set()
         tried_terms: list[str] = []
         requery_left = self.requery_budget
@@ -186,18 +154,17 @@ class SubQLoop:
                     continue
                 break
             seen |= {h.chunk_id for h in hits}
-            v = self._judge(sq, hits, shape, terms)
+            v = self._judge(sq, hits, terms)
             n_calls += 1
             trace.append({"terms": terms, "chunks": [h.chunk_id for h in hits],
-                          "verdict": v})
+                          "judge": v})
             if v.get("found"):
                 si = v.get("source")
                 valid = isinstance(si, int) and 0 <= si < len(hits)
                 src = hits[si].chunk_id if valid else None
                 src_text = hits[si].text[:self.evidence_chars] if valid else None
-                verdict = bool(v.get("verdict")) if shape == "verify" else None
                 return LoopResult(sq, str(v.get("value", "")).strip() or None, True, src,
-                                  n_calls, verdict=verdict, source_text=src_text, trace=trace)
+                                  n_calls, source_text=src_text, trace=trace)
             rq = (v.get("requery") or "").strip()
             if rq and requery_left:
                 terms = rq

@@ -17,7 +17,7 @@ from .route import route
 
 _ARCH_HINT = {
     "value_compare": "各子问题给出了每个实体的数值。按选项里陈述的数值与排序，选与这些值最一致的选项。",
-    "option_verdict": "各子问题给出了每个选项主张的真/假。多选题：选入所有为真的选项（有正向证据就倾向选入，宁多勿漏）；判断题/单选：选为真的那个。",
+    "option_verdict": "已查到各选项所依赖的事实值。逐选项把事实与该选项主张比对：一致则该选项为真。多选题选入所有为真的选项（有正向证据就倾向选入，宁多勿漏）；判断题/单选选为真的那个。",
     "single_fact": "子问题给出了关键事实。选与该事实一致的选项。",
     "fallback": "依据子问题结论与原题直接判断。",
 }
@@ -51,7 +51,7 @@ class AgenticSolver:
 
     def _run_one_fact(self, f: dict, doc_ids) -> dict:
         dids = route(self.index, f["ask"], list(doc_ids))
-        r = self.loop.solve(f["ask"], dids, shape="compute")
+        r = self.loop.solve(f["ask"], dids)
         return {"ask": f["ask"], "doc": "/".join(dids),
                 "value": r.value if r.found else "未查到",
                 "found": r.found, "src": r.source_chunk_id, "evidence": r.source_text}

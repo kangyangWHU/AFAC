@@ -96,9 +96,6 @@ agentic:
   loop_search_mult: 3         # 每轮 BM25 取 batch*此值, 去重后取前 batch(分页用)
   loop_window_chars: 500      # 喂 judge 的窗口大小: 以 BM25 命中为中心截窗(块可大, 命中在顶/底都不漏)
   loop_cache_query: true      # 检索词缓存(index/query_cache.json): 同子问题复用 → 跨运行可复现+省token
-  loop_narrow: true           # value_compare 多文档时先按实体名缩到对应文档, 去跨产品污染
-  loop_narrow_k: 20           # 实体名缩文档时的文档级检索深度
-  loop_narrow_ratio: 1.5      # top 文档需领先次高的倍数才缩(否则保留全部更安全)
   loop_genquery_max_tokens: 40
   loop_judge_max_tokens: 700    # 本地 Qwen3.6 啰嗦, 400 会把判块JSON截断→found假; 调大
   loop_evidence_chars: 240    # 命中块喂 synthesize 的证据片段长度
