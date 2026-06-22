@@ -2,7 +2,7 @@
 MinerU 可作为更强的替换实现，接口一致。"""
 from __future__ import annotations
 import fitz  # PyMuPDF
-from .base import Parser, detect_article_no, is_section_heading, dedup_repeated_lines
+from .base import Parser, detect_article_no, heading_level, dedup_repeated_lines
 from ..schema import Doc, Block, Table
 
 
@@ -54,6 +54,7 @@ def _realign(all_lines, kept):
 def _build_with_pages(doc_id: str, lines_pages: list[tuple[str, int]]) -> list[Block]:
     blocks: list[Block] = []
     section_path: list[str] = []
+    sec_stack: list[tuple[int, str]] = []          # (层级, 标题), 同级替换式嵌套
     cur: list[str] = []
     cur_page = None
     cur_article = None
@@ -72,14 +73,16 @@ def _build_with_pages(doc_id: str, lines_pages: list[tuple[str, int]]) -> list[B
         cur, cur_article, cur_type = [], None, "text"
 
     for line, page in lines_pages:
-        if is_section_heading(line) and len(line) <= 40:
+        h = heading_level(line)
+        if h:
+            lvl, htext = h
             flush()
-            if "章" in line[:6] or "编" in line[:6]:
-                section_path[:] = [line]
-            else:
-                section_path[:] = section_path[:1] + [line]
+            while sec_stack and sec_stack[-1][0] >= lvl:
+                sec_stack.pop()
+            sec_stack.append((lvl, htext))
+            section_path[:] = [t for _, t in sec_stack]
             blocks.append(Block(block_id=f"{doc_id}#b{idx:04d}", type="heading",
-                                text=line, section_path=list(section_path), page=page))
+                                text=htext, section_path=list(section_path), page=page))
             idx += 1
             continue
         art = detect_article_no(line)

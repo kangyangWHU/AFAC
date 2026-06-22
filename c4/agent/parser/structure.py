@@ -2,12 +2,13 @@
 法规、合同等条文型文档共用。"""
 from __future__ import annotations
 from ..schema import Block
-from .base import detect_article_no, is_section_heading
+from .base import detect_article_no, heading_level
 
 
 def build_blocks(doc_id: str, lines: list[str]) -> list[Block]:
     blocks: list[Block] = []
     section_path: list[str] = []
+    sec_stack: list[tuple[int, str]] = []          # (层级, 标题), 同级替换式嵌套
     cur: list[str] | None = None
     cur_article: str | None = None
     cur_type = "text"
@@ -32,16 +33,18 @@ def build_blocks(doc_id: str, lines: list[str]) -> list[Block]:
         line = raw.rstrip()
         if not line.strip():
             continue
-        if is_section_heading(line) and len(line.strip()) <= 40:
+        h = heading_level(line)
+        if h:
+            lvl, htext = h
             flush()
-            # 维护章/节层级：遇"章"重置到一级，"节"追加二级
-            if "章" in line[:6] or "编" in line[:6]:
-                section_path[:] = [line.strip()]
-            else:
-                section_path[:] = section_path[:1] + [line.strip()]
+            # 层级栈：弹出同级及更深，再压入 → 同级标题相互替换而非堆叠
+            while sec_stack and sec_stack[-1][0] >= lvl:
+                sec_stack.pop()
+            sec_stack.append((lvl, htext))
+            section_path[:] = [t for _, t in sec_stack]
             blocks.append(Block(
                 block_id=f"{doc_id}#b{idx:04d}", type="heading",
-                text=line.strip(), section_path=list(section_path)))
+                text=htext, section_path=list(section_path)))
             idx += 1
             continue
         art = detect_article_no(line)
