@@ -8,9 +8,10 @@ table 时只配上 GT[0]、其余全 0 分（db515 原 0.107、ce5799/f64061/ec7
 
 三层架构（subtables 把整图切成有序块，调用方 run_one_split 逐块处理）：
 A. 裁表外小文字块：split_table_texts 剥出页眉/页脚/水印/页码 → kind='text'。
-B. 裁子表：在主表区按"子表缝"切段；前导矮段(标题)→ kind='text'，子表主体→ 'table'。
-C. text 块单独 API 识别成纯文本、table 块走 run_one，按阅读顺序拼接（A/B 的小块共用
-   同一套"裁剪→识别→拼接"）。
+B. 裁子表段：在主表区按"子表缝"切段，全标 kind='seg'（**不在几何层预判标题/表格**）。
+C. text 块单独识别成纯文本；seg 块走 run_one，**按识别出的 td 数判**:多格(≥10)=真子表
+   (保留 table)、单格/几格=标题(转纯文本)。按阅读顺序拼接。靠识别而非几何段高,矮的真
+   子表(ec745 147px、td=306)不会被误当标题。
 
 子表缝判据（_row_bounds）：连续白线(整行墨<0.3%×W)成"白带"，切点须同时满足
 ① 白带高 ≥2×行缝基准(子表缝纵向远高于行间缝，实测真子表缝 2.5~10 倍、单表内空行≈1
@@ -20,7 +21,7 @@ C. text 块单独 API 识别成纯文本、table 块走 run_one，按阅读顺�
 """
 import numpy as np
 
-from slicer_table import split_table_texts
+from slicer_table import split_table_texts, _runlen_lines
 
 
 def _panel_seam_xs(g):
@@ -72,7 +73,40 @@ _SEAM_K = 2.0
 _SEAM_VMAX = 2
 
 
-def _row_bounds(dark, k=_SEAM_K, vmax=_SEAM_VMAX):
+def _vline_break_ys(dark180):
+    """竖线断裂找横缝：框线竖线(纵向长墨柱)在子表之间**全部断开**的 y。对称于 panel 的
+    横线断裂找左右(这里纵向墨柱被横向白带打断找上下)。仅有框表(竖线≥3)。救"白带被稀疏
+    行打断、缝高不足"的有框密集表(88684b6b/471413c1)。
+
+    两条收紧(避免顶部抬头标题被切、切到文字):
+    ① 只取**中间**的断裂带(3%<s<97%H)——排除顶部抬头标题/表尾,它们不是子表间。
+    ② 切点取断裂带**顶部 s**(上子表框结束处)——标题归下子表、不切到标题文字。
+    注:"只剩第1列"(88c6dbb4 GT1)和"真子表标题区"(1c9ac6d2 GT3)的断裂带 cov 都=2、几何
+    无法区分,故仍按<20%判断裂——宁可 88c6dbb4 多切一刀(td 判后 table 仍=1、无害),也不能
+    漏切 1c9ac6d2(漏切=table 数错、TEDS 崩)。"""
+    H = dark180.shape[0]
+    vlines = _runlen_lines(dark180, min_run=120)
+    if len(vlines) < 3:
+        return []
+    cov = np.zeros(H)
+    for x in vlines:
+        cov += dark180[:, x]
+    brk = cov < len(vlines) * 0.2                   # 贯穿竖线<20%=断裂
+    ys = []
+    y = 0
+    while y < H:
+        if brk[y]:
+            s = y
+            while y < H and brk[y]:
+                y += 1
+            if y - s >= 3 and H * 0.03 < s < H * 0.97:   # ② 中间的带; ③ 切点取顶部 s
+                ys.append(s)
+        else:
+            y += 1
+    return ys
+
+
+def _row_bounds(dark, dark180=None, k=_SEAM_K, vmax=_SEAM_VMAX):
     """单栏内的上下子表切点：**子表缝 = 高白带 且 无框线竖线贯穿**。
 
     判据一(缝高)：连续白带(整行墨<0.3%×W)高度 ≥ k×行缝基准(本栏白带高度中位)。子表
@@ -106,45 +140,46 @@ def _row_bounds(dark, k=_SEAM_K, vmax=_SEAM_VMAX):
         if int((dark[s:e].mean(0) > 0.8).sum()) > vmax:    # 框线竖线贯穿 → 表内，非缝
             continue
         cuts.append((s + e) // 2)
-    return [0] + sorted(cuts) + [H]
+    if dark180 is not None:                                # 判据三:竖线断裂(有框表)
+        cuts += _vline_break_ys(dark180)
+    cuts = sorted(set(cuts))
+    merged = []                                            # 相邻(<120px)缝合并=同一缝
+    for c in cuts:
+        if not merged or c - merged[-1] >= 120:
+            merged.append(c)
+    return [0] + merged + [H]
 
 
 def subtables(im, pad=4):
     """把整图切成**有序块**列表 `[(kind, bbox), ...]`（阅读顺序，先上后下）。
 
-    kind='text' : 小文字块——① `split_table_texts` 剥出的表外页眉/页脚/水印/页码；
-                  ② 子表上方被切出的矮标题段(高<0.4×中位)。两者都交由调用方"裁剪→
-                  单独 API 识别→拼成纯文本"，**共用同一套小块识别**，不污染表结构。
-    kind='table': 子表主体，交由调用方走 run_one。
+    kind='text' : `split_table_texts` 剥出的表外页眉/页脚/水印/页码，调用方单独识别成纯文本。
+    kind='seg'  : 主表区切出的子表段——**不在几何层预判它是标题还是表格**。调用方对每段
+                  run_one,按识别出的 td 数判定:多格(≥阈值)=真子表(table)、单格/几格=标题
+                  (转纯文本)。实测真子表 td≥72、标题 td≤5,中间空带极宽,靠识别比靠"段高
+                  <0.4×中位"那种几何猜可靠——后者会把矮的真子表(ec745 147px)误当标题。
 
-    单表时返回单个 ('table', 整图 或 主表bbox)；调用方按 table 块数 ≤1 退回 run_one。
-
-    把矮标题段标成 'text'(而非旧的几何"并回表体")：table 块数完全一样(矮段本就不算
-    table)，但标题被独立识别成文本、不会被 stitch 包成空 <table> 或读进表格第一行。
-    末尾矮段不并(可能是真的末尾小子表，1de69 第5表 92px)——只认**前导**矮段为标题。"""
+    单表(只 1 个 seg)由调用方退回 run_one 整图。"""
     tb, texts = split_table_texts(im)
     if tb is None:
-        return [('table', (0, 0, im.width, im.height))]
+        return [('seg', (0, 0, im.width, im.height))]
     x0, y0, x1, y1 = tb
     items = [(by0, 'text', (bx0, by0, bx1, by1))      # ① 表外小文字块
              for (bx0, by0, bx1, by1) in texts]
     g = np.asarray(im.crop(tb).convert("L"))
     dark = (g < 128)
+    dark180 = (g < 180)                               # 松二值化:给竖线断裂检测(救浅灰框线)
     H, W = g.shape
     colb = [0] + _panel_seam_xs(g) + [W]
-    for c in range(len(colb) - 1):                    # ② 主表内切子表
+    for c in range(len(colb) - 1):                    # ② 主表内切子表段(不预判类型)
         cx0, cx1 = colb[c], colb[c + 1]
-        rb = _row_bounds(dark[:, cx0:cx1])
-        segs = [(ra, rbb) for ra, rbb in zip(rb[:-1], rb[1:])
-                if rbb - ra >= 20 and dark[ra:rbb, cx0:cx1].mean() >= 0.01]
-        if not segs:
-            continue
-        med = float(np.median([b - a for a, b in segs]))
-        lead = 0                                       # 前导矮段=标题→text
-        while lead < len(segs) - 1 and (segs[lead][1] - segs[lead][0]) < 0.4 * med:
-            lead += 1
-        for i, (ra, rbb) in enumerate(segs):
+        rb = _row_bounds(dark[:, cx0:cx1], dark180[:, cx0:cx1])
+        for ra, rbb in zip(rb[:-1], rb[1:]):
+            # 丢极小段(<20px)和空白段(墨<0.3%)。阈值 0.3% 卡在"空白带(墨<0.2%)"和
+            # "稀疏标题/说明(墨0.3~1%)"之间:空白照丢(无框单表不切碎)、标题保留(不丢字)。
+            if rbb - ra < 20 or dark[ra:rbb, cx0:cx1].mean() < 0.003:
+                continue
             bb = (x0 + cx0, y0 + max(0, ra - pad), x0 + cx1, y0 + min(H, rbb + pad))
-            items.append((y0 + ra, 'text' if i < lead else 'table', bb))
+            items.append((y0 + ra, 'seg', bb))
     items.sort(key=lambda t: t[0])                     # 阅读顺序
-    return [(k, bb) for _, k, bb in items] or [('table', tb)]
+    return [(k, bb) for _, k, bb in items] or [('seg', tb)]

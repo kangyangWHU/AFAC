@@ -251,26 +251,37 @@ def run_one(im, timeout=240):
     return pred, ncalls, meta
 
 
-def run_one_split(im, timeout=240):
-    """多子表：subtables 把整图切成有序块 [(kind,bbox)]，text 块单独识别成文本、
-    table 块走 run_one，按阅读顺序拼接。
+_MIN_TABLE_CELLS = 10   # 段识别出 td≥此数=真子表;否则=标题(转文本)。实测真子表td≥72、标题≤5
 
-    单表(table 块 ≤1)退回 run_one 整图、零行为变化。table_teds 按出现顺序逐表配对，
-    切成 N 个独立 <table> 后逐个对齐 GT[i]——避免旧 stitch 把 N 子表读成 1 大 table。"""
+
+def run_one_split(im, timeout=240):
+    """多子表：subtables 把整图切成有序块 [(kind,bbox)]。'text' 块(表外文字)单独识别；
+    'seg' 块走 run_one，**按识别出的 td 数判**:多格(≥10)=真子表(保留 table)、单格/几格
+    =标题(转纯文本)。按阅读顺序拼接。单表(只 1 个 seg)退回 run_one 整图。
+
+    table_teds 按出现顺序逐表配对,切成 N 个独立 <table> 逐个对齐 GT[i]——避免旧 stitch
+    把 N 子表读成 1 大 table。按 td 数(识别结果)判表/标题,不靠几何段高,矮的真子表(ec745
+    147px、td=306)不会被误当标题合并掉。"""
     blocks = subtables(im)
-    if sum(1 for k, _ in blocks if k == "table") <= 1:
+    if sum(1 for k, _ in blocks if k == "seg") <= 1:
         return run_one(im, timeout)
-    parts, ncalls = [], 0
+    parts, ncalls, ntab = [], 0, 0
     for kind, bb in blocks:
         if kind == "text":
             txt = _recognize_text(im, bb, timeout)
             if txt:
                 parts.append(txt)
-        else:
+        else:                                  # seg: run_one 后按 td 数判表/标题
             p, nc, _ = run_one(im.crop(bb), timeout)
-            parts.append(p)
             ncalls += nc
-    return "\n".join(parts), ncalls, {"subs": sum(1 for k, _ in blocks if k == "table")}
+            if p.lower().count("<td") >= _MIN_TABLE_CELLS:
+                parts.append(p)
+                ntab += 1
+            else:
+                txt = _strip_html(p)
+                if txt:
+                    parts.append(txt)
+    return "\n".join(parts), ncalls, {"subs": ntab}
 
 
 def main():
