@@ -14,7 +14,7 @@ _ORDINALS = [(re.compile(r"第一份|第1份|第一篇|前者|首份"), 0),
              (re.compile(r"第四份|第4份|第四篇"), 3)]
 
 
-def route(index: BM25Index, ask: str, candidate_docs: list[str]) -> list[str]:
+def route(index: BM25Index, ask: str, candidate_docs: list[str], idrouter=None) -> list[str]:
     """返回最可能含该事实的 doc_ids（按分排序）。
     ① ask 里有"第N份"序数 → 直接取候选第 N 篇（同类文档靠顺序区分，内容分不出）。
     ② 否则按内容打分 = 该 doc【最佳几块】的 BM25 分（max-pool）；某篇明显领先就缩到 1 篇。
@@ -32,6 +32,10 @@ def route(index: BM25Index, ask: str, candidate_docs: list[str]) -> list[str]:
     for pat, i in _ORDINALS:
         if pat.search(ask) and i < len(cands):
             return [cands[i]]
+    if idrouter is not None:                    # 语义身份路由: ask 强匹配某篇产品/主体名时直接定篇(治泛词把"安佑福"带偏到e生保)
+        hit = idrouter.route(ask, cands)
+        if hit:
+            return hit
     a = config.load().get("agentic", {})
     pool_n = a.get("route_pool_n", 3)           # 每篇取最佳 N 块求和(max-pool变体, 抗块数偏置)
     min_lead = a.get("route_min_lead", 1.3)     # top 领先次高的倍数阈值, 够大才缩到1篇

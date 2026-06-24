@@ -16,14 +16,15 @@ run:
 # 切百炼 qwen3.7-plus：base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 #                     api_key: env:BAILIAN   model: qwen3.6-27b        # 合规提交用(百炼)
 llm:
-  base_url: http://localhost:12345/v1        # 本地 vLLM(免费, 可放开测); 提交切百炼见上注释
-  api_key: EMPTY
-  model: Qwen/Qwen3.6-35B-A3B
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1   # 百炼; 本地 vLLM 见 git 历史
+  api_key: env:BAILIAN
+  model: glm-5.2
   temperature: 0.0
   max_tokens: 3072          # 非thinking ~400/call用不满, 留空间写"答案:"行
-  enable_thinking: false    # 实测全量thinking 79% vs 无thinking 80%, 在噪声带内无收益, 关
+  enable_thinking: false    # 默认关; verdict/synth 由 reasoning_effort 单独开思考(judge 不开)
+  reasoning_effort: medium  # 仅 verdict/synth 开 medium 思考(solver.final_thinking 门控); loop judge/genQuery 仍非思考
   seed: 42                  # 固定 seed → 百炼输出确定可复现(实测 temp0 仍有微随机, 加seed后逐字一致)
-  timeout: 120
+  timeout: 300
   retries: 2
 
 # 文本归一化（解析后、入块前）
@@ -88,6 +89,7 @@ agentic:
   # 分解器：题 -> 子问题
   decompose_max_tokens: 1000
   decompose_retries: 1         # JSON 不合法时的重试次数
+  decompose_cache: false       # 关缓存: prompt 改过 + 各模型各自 decompose, 缓存会冻结某一版(每次重拆)
 
   # 子问题 loop：检索 + judge（读块吐值/判真）
   loop_max_iter: 3             # 单子问题最多迭代轮数(每轮一次 judge)
@@ -104,6 +106,8 @@ agentic:
   route_chunk_k: 30           # 每篇取多少 chunk 聚合打分
   route_min_lead: 1.3         # top 篇领先次高的倍数, 够大才缩到 1 篇(否则返回前 route_top_k)
   route_top_k: 2
+  # 语义身份路由(idroute.py)：embed server 在线 + embed_model 必须与 server 模型id【完全一致】
+  embed_model: Qwen/Qwen3-Embedding-8B   # 必带 Qwen/ 前缀(对齐 vLLM 模型id)；不一致→404→idrouter 静默退化成 BM25
 
   # synthesize：原题 + 子问题结论 -> 最终答案(1 次 LLM, 不降级)
   synth_max_tokens: 2000        # 本地模型逐选项详析很长, 600 会把"答案:"行截断→落"A"兜底; 调大
