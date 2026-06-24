@@ -17,42 +17,33 @@ ARCHETYPES = {"value_compare", "option_verdict", "single_fact", "fallback"}
 SYS = """你是金融文档问答的"原子事实分解器"。把题目拆成若干【单篇文档 + 单个事实】的取值查询。只输出 JSON，不要解释。
 
 铁律：
-1. 每条 fact 只问【一个】值/事实，且必须能【唯一定位到文档里的那一处】。同一指标文档常有多处值（多年份/报告期、多主体/公司、多口径如合并vs母公司、多张表）——ask 必须带区分限定（年份/日期/报告期、主体、口径、所属表），把那一处钉死；缺限定就会取到别年/别表的值。（doc 字段【仅当题干/选项明确点名了该篇时】才写——即出现【序数】"第一份/第二份/前者/后者"，或【文档原样id/标题字符串】；否则【一律留空】，由后续 route 按正文内容把它定到正确的篇。route 按内容打分比按标题猜更可靠，硬猜 doc 会绑错篇→漏检，所以【拿不准就别写 doc】。）
-   ✗ "资产负债率数值"(多张表都有)  ✓ "截至2020年3月31日的资产负债率"
-   选项若列举一组值(如"5.70%和35.83%") → ask 取【整行/整组(各报告期列全)】，别压成单个数。
-2. 问【值是什么】，不要问【是不是等于X】——比较/判真一律留到最后做：
-   ✗ "发行人是否为广晟"   ✓ "发行人名称"
-   ✗ "评级是否为AAA"      ✓ "主体信用评级"
-3. 【跨文档 claim：均/都/两份/分别/各/不一致】凡选项主张【横跨多篇候选文档】，【必须】按候选文档数拆成每篇各一条（绝不合成一条——合成只检到一篇，判不了"均/不一致"）。每条【如何定到对的篇】：
-   - 题干用【序数】(第一份/第二份/前者/后者) 或【原样 id/标题字符串】点了名 → 写 doc=该篇原样id（仅此情形写 doc）。
-   - 否则【不写 doc】，改在每条 ask 里带上该篇的【区分性内容】(主体/公司/产品全称、该篇独有的指标或口径)，让 route 按内容把每条各自定到不同篇——别靠猜标题硬绑 doc（猜错→漏检）。
-   ✗ 两条都硬绑【猜】的 doc
-   ✓ 各带主体名、doc 留空：{"ask":"<甲公司>本期债券发行金额"} + {"ask":"<乙公司>本期债券发行金额"}
-   ✓ 题干明说"第一/第二份"才绑：{"ask":"有条件赎回条款的设置情况","doc":"<第1篇原样id>"} + {"ask":"...","doc":"<第2篇原样id>"}
-4. 算值排序题：每个实体一条，ask 把题干给的数字全写进去。
-5. 【案例计算题】题干给的情形数据（某人、给定的金额/费用、发生的事件）是【计算输入】，文档里根本没有；选项里【算出来的金额/合计】文档里也查不到。两者都【不要】建成 fact：
-   ✗ "某人住院花了多少"  ✗ "X赔a元…合计c元"（选项算出来的数，查文档查不到）
-   ✓ 识别标志：选项是"各产品分别赔多少、合计多少"这类算出来的结果 = 案例计算题。则为【题干涉及的每个产品/条款】各建一条"赔付规则"fact，把题干费用情形写进 ask，让 verdict 代入规则算、再与各选项比对：
-     {"ask":"<题干涉及的某产品>对[题干给的费用/免赔额/事件情形]的赔付规则(免赔额/给付比例/赔付范围/分摊方式)"}
-6. 不同选项依赖同一事实 → 合并成一条（去重）。
+1. 【一条 fact 一个值，ask 带全身份】ask 信息尽量全、把"取哪一处"钉死：主体/公司/产品全称 + 年份/报告期 + 口径(合并vs母公司、全年vs年末) + 场景。同一指标常有多版(多年/多主体/多表)，缺限定就取错。选项给一组值(如"5.70%和35.83%") → ask 取整组(各报告期列全)，别压成单个。
+2. 【定篇：只在题干【自己点名了某篇】时才写 doc，否则一律留空——你只拿到候选 id 和顺序、【没有标题】，【绝不按内容/公司/产品名猜 doc】】
+   写 doc【仅】两种情形：
+   ① 题干用序数(第一份/第二份/前者/后者) → doc=候选里【对应顺序】那篇 id(第一份=第1篇)。
+   ② 题干用文档名/原样 id(如"文档fc_text_006""text06") → doc=该 id(fc_text_006 会自动归一到候选 text06)。
+   其余【全部留空 doc】——尤其"哪些产品/公司…"这种【选项点名实体】的题：实体→篇由 route/idrouter 按内容定(它有准确身份库、比你猜准)，你只需把【主体全名】写进 ask。
+      ✓ 留空+带主体:"平安e生保的施救费用赔偿上限是?"   ✓ 题干点名篇:{"ask":"是否有转股价格向下修正条款","doc":"text06"}   ✗ 题干没点名却按产品名猜 doc
+3. 【问值，不问是否=X；问值别用表头泛词】比较/判真留到最后。"发行人是谁""主体信用评级"这类【要找的就是身份本身】、身份未知写不进 ask 的，必须靠【篇】定位(题干点名就按铁律2②写 doc；没点名则该 fact 天然属某篇)。问值时直奔答案、别加"名称/类型/情况"这类表头泛词(会把"子公司名称/债务人名称"等无关表顶上来)：
+   ✗"发行人是否为「某公司」"(别问是否) ✗"发行人名称"(表头泛词) ✓{"ask":"发行人是?","doc":"text01"}　✓{"ask":"主体信用评级是?","doc":"text01"}
+4. 【跨多篇主张拆开】选项横跨多篇(均/都/两份/分别/各/不一致) → 按候选篇数拆成每篇各一条(绝不合成,否则只检到一篇)，每条按铁律2定篇、ask 各带自己主体的全名。
+5. 【案例计算题别查算出来的数】题干情形(某人/金额/事件)和选项算出的合计，文档里都没有 → 别建 fact；改为题干涉及的【每个产品】各建一条赔付规则 fact(把情形写进 ask、留给 verdict 代入算)：ask 形如「某产品对[题干费用/免赔额/事件]的赔付规则(免赔额/给付比例/范围/分摊)」。
+6. 不同选项依赖同一事实 → 合并去重。
 
 archetype（供最后推理用，不影响拆法）：value_compare | option_verdict | single_fact | fallback
 
 facts 不能为空：每道题都要拆出能定位答案的事实。多选/判断/计算/取数题【一律】要拆（每个选项/实体所依赖的事实都列出来）。fallback 只用于题目完全无法在文档里定位任何事实的极端情况（极罕见），别因为"要结合多篇/需要推理"就用 fallback——结合和推理是【最后一步】做的，分解阶段只管把事实查出来。
 
-每条 fact 字段：id；ask（单个值/事实的取值查询）；doc（可选＝该 fact 所属候选文档的原样id；能确定属于某篇时填、跨文档比较时必填，不确定留空由路由定）
+每条 fact 字段：id；ask；doc（可选，仅【铁律2②题干点名了文档】时填候选原样id，否则省略、由 route 定篇）
 
 只输出这个 JSON（不要 markdown 代码块）：
 {"archetype":"...","facts":[{"id":"f1","ask":"...","doc":"候选原样id或省略"}]}"""
 
 
-def _fmt_docs(outlines: dict, doc_ids: list[str]) -> str:
-    lines = []
-    for d in map(str, doc_ids):
-        o = outlines.get(d, {})
-        nm = o.get("name") or "(无标题)"
-        lines.append(f"  {d}: {nm}")
-    return "\n".join(lines)
+def _fmt_docs(doc_ids: list[str]) -> str:
+    # 只给候选 id + 顺序(供"第N份"映射)，【不给标题】——outlines.name 多为公司/文档类型【泛名(多篇撞名)】或缺失，
+    # 给了只会诱导模型【按内容猜 doc】并猜错；内容→篇交 route/idrouter(用准确的 doc_identities)。
+    return "\n".join(f"  第{i + 1}篇: {d}" for i, d in enumerate(map(str, doc_ids)))
 
 
 def _parse_json(text: str) -> dict | None:
@@ -65,6 +56,22 @@ def _parse_json(text: str) -> dict | None:
         return json.loads(m.group(0))
     except Exception:
         return None
+
+
+def _match_doc(ref, cand_set: set[str]) -> str | None:
+    """铁律2②: 把题干式文档名归一到候选原样id。先精确; 否则按【末尾数字组】唯一匹配
+    (fc_text_006→text06)；歧义(如多篇 ..._att1 末尾同号)则不匹配, 留给 route。"""
+    if ref is None:
+        return None
+    ref = str(ref).strip()
+    if ref in cand_set:
+        return ref
+    nums = re.findall(r"\d+", ref)
+    if not nums:
+        return None
+    rn = int(nums[-1])
+    hits = [c for c in cand_set if (m := re.findall(r"\d+", c)) and int(m[-1]) == rn]
+    return hits[0] if len(hits) == 1 else None
 
 
 class Decomposer:
@@ -84,7 +91,7 @@ class Decomposer:
 
     def build_messages(self, q: dict, doc_ids: list[str]) -> list[dict]:
         opts = "\n".join(f"{k}. {v}" for k, v in q["options"].items())
-        user = (f"【候选文档】\n{_fmt_docs(self.outlines, doc_ids)}\n\n"
+        user = (f"【候选文档(只列 id 和顺序, 无标题)】\n{_fmt_docs(doc_ids)}\n\n"
                 f"【题目】{q['question']}\n\n【选项】\n{opts}\n\n"
                 f"【答案格式】{q.get('answer_format')}\n\n请输出分解 JSON。")
         return [{"role": "system", "content": SYS},
@@ -151,6 +158,5 @@ class Decomposer:
             if oid not in valid:
                 oid = opts[i] if infer_by_order and i < len(opts) else "shared"
             s["option_id"] = oid
-            d = s.get("doc")                          # 仅保留【精确命中候选id】的篇绑定; 否则 None → 丢给 route 按内容定篇
-            s["doc"] = str(d).strip() if (d is not None and str(d).strip() in cand_set) else None
+            s["doc"] = _match_doc(s.get("doc"), cand_set)  # 铁律2②: 题干名→候选id(fc_text_006→text06); 配不上→None→route
         return obj
