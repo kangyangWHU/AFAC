@@ -91,7 +91,9 @@ class AgenticSolver:
         self._cid2chunk = {ch["chunk_id"]: ch for ch in idx.chunks}
 
     def _run_one_fact(self, f: dict, doc_ids) -> dict:
-        dids = route(self.index, f["ask"], list(doc_ids), self.idrouter)
+        cand = [str(d) for d in doc_ids]
+        d = f.get("doc")                              # 分解器钉死的篇(精确命中候选id)直接用; 否则按内容路由
+        dids = [d] if d in cand else route(self.index, f["ask"], cand, self.idrouter)
         ask = _DOC_REF.sub("", f["ask"]).strip()
         r = self.loop.solve(ask, dids)
         chunk_ids = [cid for t in r.trace for cid in t.get("chunks", [])]

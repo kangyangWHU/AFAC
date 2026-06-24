@@ -17,27 +17,32 @@ ARCHETYPES = {"value_compare", "option_verdict", "single_fact", "fallback"}
 SYS = """你是金融文档问答的"原子事实分解器"。把题目拆成若干【单篇文档 + 单个事实】的取值查询。只输出 JSON，不要解释。
 
 铁律：
-1. 每条 fact 只问【一个】值/事实（来自单篇文档；到底哪一篇由后续路由决定，你不用指定）。
+1. 每条 fact 只问【一个】值/事实，且必须能【唯一定位到文档里的那一处】。同一指标文档常有多处值（多年份/报告期、多主体/公司、多口径如合并vs母公司、多张表）——ask 必须带区分限定（年份/日期/报告期、主体、口径、所属表），把那一处钉死；缺限定就会取到别年/别表的值。（该 fact 已能确定属于某一篇候选文档时，写上 doc=该篇原样id；不确定就留空，由后续路由按内容定篇。）
+   ✗ "资产负债率数值"(多张表都有)  ✓ "截至2020年3月31日的资产负债率"
+   选项若列举一组值(如"5.70%和35.83%") → ask 取【整行/整组(各报告期列全)】，别压成单个数。
 2. 问【值是什么】，不要问【是不是等于X】——比较/判真一律留到最后做：
    ✗ "发行人是否为广晟"   ✓ "发行人名称"
    ✗ "评级是否为AAA"      ✓ "主体信用评级"
-3. 【跨文档比较 / 两份均为X】必须拆成每篇各一条（按文档拆，但不用写文档名）：
-   "第二份发行额低于第一份" → {"ask":"第一份文档的本期债券发行金额"} 和 {"ask":"第二份文档的本期债券发行金额"}
+3. 【跨文档 claim：均/都/两份/分别/各/不一致】凡选项主张【横跨多篇候选文档】（"两份均…/都…/分别…/各自…/不一致"），【必须】按候选文档数拆成每篇各一条，每篇证据各检一份；绝不能合成一条——合成只会路由到一篇、另一篇证据缺失，就判不了"均/不一致"。
+   每条拆出的 fact【必须带 doc 字段】＝该篇在【候选文档】里冒号前的【原样 id】（逐字复制，如 text04 / 9 / annual_cscec_2025_report），把这条钉死到那一篇；别把"第一份/textXX中"写进 ask 靠后续猜。
+   ✗ 一条"两份均设有条件赎回条款"
+   ✓ {"ask":"有条件赎回条款的设置情况","doc":"<候选里第1篇的原样id>"} + {"ask":"有条件赎回条款的设置情况","doc":"<候选里第2篇的原样id>"}
+   数值比较同理：{"ask":"本期债券发行金额","doc":"<第1篇id>"} + {"ask":"本期债券发行金额","doc":"<第2篇id>"}
 4. 算值排序题：每个实体一条，ask 把题干给的数字全写进去。
-5. 【案例计算题】题干给的情形数据（某人、给定的金额/费用、发生的事件）是【计算输入】，文档里根本没有——【不要】为它建 fact：
-   ✗ "王某本人的医疗费用总额"  ✗ "李某住院花了多少"（这些题干已给，查文档查不到）
-   ✓ 只为文档里的【规则】建 fact，把情形数据写进该 fact 的 ask 供后续代入算：
-     {"ask":"太保团体百万医疗对王某8万住院费(医保已报3万)的赔付金额(免赔额/给付比例规则)"}
+5. 【案例计算题】题干给的情形数据（某人、给定的金额/费用、发生的事件）是【计算输入】，文档里根本没有；选项里【算出来的金额/合计】文档里也查不到。两者都【不要】建成 fact：
+   ✗ "某人住院花了多少"  ✗ "X赔a元…合计c元"（选项算出来的数，查文档查不到）
+   ✓ 识别标志：选项是"各产品分别赔多少、合计多少"这类算出来的结果 = 案例计算题。则为【题干涉及的每个产品/条款】各建一条"赔付规则"fact，把题干费用情形写进 ask，让 verdict 代入规则算、再与各选项比对：
+     {"ask":"<题干涉及的某产品>对[题干给的费用/免赔额/事件情形]的赔付规则(免赔额/给付比例/赔付范围/分摊方式)"}
 6. 不同选项依赖同一事实 → 合并成一条（去重）。
 
 archetype（供最后推理用，不影响拆法）：value_compare | option_verdict | single_fact | fallback
 
 facts 不能为空：每道题都要拆出能定位答案的事实。多选/判断/计算/取数题【一律】要拆（每个选项/实体所依赖的事实都列出来）。fallback 只用于题目完全无法在文档里定位任何事实的极端情况（极罕见），别因为"要结合多篇/需要推理"就用 fallback——结合和推理是【最后一步】做的，分解阶段只管把事实查出来。
 
-每条 fact 字段：id；ask（单个值/事实的取值查询）
+每条 fact 字段：id；ask（单个值/事实的取值查询）；doc（可选＝该 fact 所属候选文档的原样id；能确定属于某篇时填、跨文档比较时必填，不确定留空由路由定）
 
 只输出这个 JSON（不要 markdown 代码块）：
-{"archetype":"...","facts":[{"id":"f1","ask":"..."}]}"""
+{"archetype":"...","facts":[{"id":"f1","ask":"...","doc":"候选原样id或省略"}]}"""
 
 
 def _fmt_docs(outlines: dict, doc_ids: list[str]) -> str:
@@ -88,14 +93,14 @@ class Decomposer:
         """兜底拆解：LLM 给空/fallback 时, 每个选项(或题干)生成一条 fact, doc 全搜。"""
         opts = q.get("options", {})
         if q.get("answer_format") == "tf" or len(opts) < 2:
-            return [{"id": "f1", "ask": q["question"]}]
-        return [{"id": f"f{i+1}", "ask": v}
-                for i, v in enumerate(opts.values()) if len(str(v)) > 2]
+            return [{"id": "f1", "option_id": "shared", "ask": q["question"]}]
+        return [{"id": f"f{i+1}", "option_id": k, "ask": v}
+                for i, (k, v) in enumerate(opts.items()) if len(str(v)) > 2]
 
     def decompose(self, q: dict, doc_ids: list[str]) -> dict:
         key = f"{q.get('qid')}||{'/'.join(map(str, doc_ids))}"
         if self.cache_on and key in self._cache:
-            return self._cache[key]
+            return self._norm(json.loads(json.dumps(self._cache[key])), q, doc_ids)
         obj = self._decompose_uncached(q, doc_ids)
         if self.cache_on:
             with self._clock:
@@ -110,7 +115,7 @@ class Decomposer:
             out = self.llm.complete(msgs, max_tokens=self.max_tokens, enable_thinking=False)
             obj = _parse_json(out)
             if obj is not None and self._valid(obj):
-                obj = self._norm(obj, doc_ids)
+                obj = self._norm(obj, q, doc_ids)
                 if not obj["facts"]:                    # LLM 给了 fallback/空 → 用选项兜底
                     obj["facts"] = self._facts_from_options(q)
                 return obj
@@ -128,7 +133,23 @@ class Decomposer:
             return False
         return all(isinstance(s, dict) and "ask" in s for s in facts)
 
-    def _norm(self, obj: dict, doc_ids: list[str]) -> dict:
-        for i, s in enumerate(obj["facts"]):
+    def _norm(self, obj: dict, q: dict, doc_ids: list[str]) -> dict:
+        opts = list(k for k in q.get("options", {}) if k in "ABCD")
+        valid = set(opts) | {"shared"}
+        cand_set = set(map(str, doc_ids))
+        facts = obj.get("facts") or []
+        infer_by_order = (obj.get("archetype") == "option_verdict"
+                          and q.get("answer_format") == "multi"
+                          and len(facts) == len(opts))
+        for i, s in enumerate(facts):
             s.setdefault("id", f"f{i+1}")
-        return obj                                   # 绑哪篇文档交给 route.py, 分解器不管
+            oid = s.get("option_id")
+            if isinstance(oid, list):
+                oid = oid[0] if oid else None
+            oid = str(oid).upper() if oid is not None else ""
+            if oid not in valid:
+                oid = opts[i] if infer_by_order and i < len(opts) else "shared"
+            s["option_id"] = oid
+            d = s.get("doc")                          # 仅保留【精确命中候选id】的篇绑定; 否则 None → 丢给 route 按内容定篇
+            s["doc"] = str(d).strip() if (d is not None and str(d).strip() in cand_set) else None
+        return obj
