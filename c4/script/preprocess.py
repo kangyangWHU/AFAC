@@ -18,6 +18,8 @@ sys.path.insert(0, ROOT)
 
 from agent.doc_index import build_doc_index, DOMAINS          # noqa: E402
 from agent.parser.registry import get_parser                  # noqa: E402
+from agent.chunker.base import normalize                      # noqa: E402
+from agent import config                                      # noqa: E402
 
 RAW = os.path.join(ROOT, "data", "public_dataset_upload", "raw")
 QDIR = os.path.join(ROOT, "data", "public_dataset_upload", "questions", "group_a")
@@ -56,6 +58,7 @@ def main():
     os.makedirs(LOGS, exist_ok=True)
     report = []
     ok = fail = 0
+    _NZ = config.load().get("normalize", {})
     for doc_id in sorted(targets):
         meta = index.get(doc_id)
         if not meta:
@@ -66,6 +69,8 @@ def main():
         try:
             parser = get_parser(domain, ext)
             doc = parser.parse(doc_id, path)
+            for b in doc.blocks:                          # 解析即归一: 去 PDF 伪空格(中文/数字间), 让 processed/ 即干净源
+                b.text = normalize(b.text, _NZ.get("strip_cjk_spaces", True), _NZ.get("collapse_spaces", True))
             outdir = os.path.join(PROC, domain)
             os.makedirs(outdir, exist_ok=True)
             json.dump(doc.to_dict(), open(os.path.join(outdir, f"{doc_id}.json"), "w"),

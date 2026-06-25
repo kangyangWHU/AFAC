@@ -10,6 +10,7 @@ import os
 import re
 import threading
 from ..llm.base import LLMClient
+from ..chunker.base import normalize
 from .. import config
 
 ARCHETYPES = {"value_compare", "option_verdict", "single_fact", "fallback"}
@@ -180,6 +181,7 @@ class Decomposer:
                           and len(facts) == len(opts))
         for i, s in enumerate(facts):
             s.setdefault("id", f"f{i+1}")
+            s["ask"] = normalize(s.get("ask", ""))    # 去 PDF/模型伪空格(2024 年→2024年), 对齐已归一的块/身份
             oid = s.get("option_id")
             if isinstance(oid, list):
                 oid = oid[0] if oid else None
