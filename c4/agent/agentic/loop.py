@@ -73,6 +73,12 @@ class SubQLoop:
         self._qlock = threading.Lock()
         self._qcache = (json.load(open(self._qpath, encoding="utf-8"))
                         if self.cache_query and os.path.exists(self._qpath) else {})
+        # BM25 检索结果缓存：同一(query,候选篇)复用上次召回的块序 → 跨运行迭代 judge 时不再重检索
+        self.cache_retrieve = a.get("loop_cache_retrieve", True)
+        self._rpath = os.path.join(config.path("index_dir"), "retrieve_cache.json")
+        self._rlock = threading.Lock()
+        self._rcache = (json.load(open(self._rpath, encoding="utf-8"))
+                        if self.cache_retrieve and os.path.exists(self._rpath) else {})
 
     def _window(self, text: str, terms: str) -> str:
         """以 BM25 命中为中心截窗口喂 judge：命中可能在块顶/块底，从头截会错过。
@@ -97,16 +103,24 @@ class SubQLoop:
     def _retrieve(self, terms: str, doc_ids: list[str]) -> list:
         """按 query 排序的候选块。用 search_local(per-candidate IDF, 每篇单独重算)修全局IDF坑；
         多文档时每篇轮询取(round-robin)，保证每篇都有代表(治"搜两篇却全召回一篇")。"""
+        key = terms + "||" + "/".join(sorted(map(str, doc_ids)))
+        if self.cache_retrieve and key in self._rcache:          # 缓存命中: 用块id重建 Hit(loop只用顺序+text+meta)
+            return self.index.hits_from_ids(self._rcache[key])
         if len(doc_ids) <= 1:
-            return self.index.search_local(terms, doc_ids, k=self.batch * self.search_mult)
-        pools = [self.index.search_local(terms, [d], k=self.batch * self.search_mult)
-                 for d in doc_ids]
-        merged, i = [], 0
-        while any(i < len(p) for p in pools):
-            for p in pools:
-                if i < len(p):
-                    merged.append(p[i])
-            i += 1
+            merged = self.index.search_local(terms, doc_ids, k=self.batch * self.search_mult)
+        else:
+            pools = [self.index.search_local(terms, [d], k=self.batch * self.search_mult)
+                     for d in doc_ids]
+            merged, i = [], 0
+            while any(i < len(p) for p in pools):
+                for p in pools:
+                    if i < len(p):
+                        merged.append(p[i])
+                i += 1
+        if self.cache_retrieve:
+            with self._rlock:
+                self._rcache[key] = [h.chunk_id for h in merged]
+                json.dump(self._rcache, open(self._rpath, "w", encoding="utf-8"), ensure_ascii=False)
         return merged
 
     def _gen_query(self, sq: str, tried: list[str]) -> str:

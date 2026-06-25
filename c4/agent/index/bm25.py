@@ -60,7 +60,7 @@ class BM25Index(Retriever):
                doc_ids: list[str] | None = None) -> list[Hit]:
         assert self._bm25 is not None, "index not built"
         k = k or self.topk
-        q = tokenize(query, self.drop_stop, self.mode)
+        q = list(dict.fromkeys(tokenize(query, self.drop_stop, self.mode)))  # query 去重: BM25逐token累加, 重复词会双倍加权
         scores = self._bm25.get_scores(q)
         if doc_ids:
             cand = [i for d in doc_ids for i in self.by_doc.get(d, [])]
@@ -87,7 +87,7 @@ class BM25Index(Retriever):
         if not cand:
             return []
         sub = BM25Okapi([self._tokens[i] for i in cand], k1=self.k1, b=self.b)
-        scores = sub.get_scores(tokenize(query, self.drop_stop, self.mode))
+        scores = sub.get_scores(list(dict.fromkeys(tokenize(query, self.drop_stop, self.mode))))  # query 去重
         order = sorted(range(len(cand)), key=lambda j: scores[j], reverse=True)[:k]
         out = []
         for j in order:
@@ -97,6 +97,21 @@ class BM25Index(Retriever):
                            meta={"type": c.get("type"), "section_path": c.get("section_path"),
                                  "article_no": c.get("article_no"), "page": c.get("page"),
                                  "seq": c.get("seq"), "breadcrumb": c.get("breadcrumb", "")}))
+        return out
+
+    def hits_from_ids(self, chunk_ids: list[str]) -> list[Hit]:
+        """从 chunk_id 列表(按序)重建 Hit(score 置0; 检索缓存命中时用——loop 只用顺序+text+meta, 不用分值)。"""
+        m = getattr(self, "_by_cid", None)
+        if m is None:
+            m = self._by_cid = {c["chunk_id"]: c for c in self.chunks}
+        out = []
+        for cid in chunk_ids:
+            c = m.get(cid)
+            if c:
+                out.append(Hit(chunk_id=c["chunk_id"], doc_id=c["doc_id"], score=0.0, text=c["text"],
+                               meta={"type": c.get("type"), "section_path": c.get("section_path"),
+                                     "article_no": c.get("article_no"), "page": c.get("page"),
+                                     "seq": c.get("seq"), "breadcrumb": c.get("breadcrumb", "")}))
         return out
 
     def neighbors(self, doc_id: str, seq: int, window: int = 1) -> list[dict]:
