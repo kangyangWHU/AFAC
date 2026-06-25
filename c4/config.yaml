@@ -16,7 +16,7 @@ run:
 # 切百炼 qwen3.7-plus：base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 #                     api_key: env:BAILIAN   model: qwen3.6-27b        # 合规提交用(百炼)
 llm:
-  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1   # 百炼; 本地 vLLM 见 git 历史
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   api_key: env:BAILIAN
   model: glm-5.2
   temperature: 0.0
@@ -87,7 +87,7 @@ reasoner:
 # v4 Agentic RAG（见 plan.md §v4）。所有可调数值集中在此，代码不留魔法数。
 agentic:
   # 分解器：题 -> 子问题
-  decompose_max_tokens: 1000
+  decompose_max_tokens: 6000   # gpt-oss 等推理模型推理吃 token, 给足防 JSON 截断; glm-5.2 非思考用不满(cap 无害)
   decompose_retries: 1         # JSON 不合法时的重试次数
   decompose_cache: false       # 关缓存: prompt 改过 + 各模型各自 decompose, 缓存会冻结某一版(每次重拆)
 
@@ -106,8 +106,8 @@ agentic:
   route_chunk_k: 30           # 每篇取多少 chunk 聚合打分
   route_min_lead: 1.3         # top 篇领先次高的倍数, 够大才缩到 1 篇(否则返回前 route_top_k)
   route_top_k: 2
-  # 语义身份路由(idroute.py)：embed server 在线 + embed_model 必须与 server 模型id【完全一致】
-  embed_model: Qwen/Qwen3-Embedding-8B   # 必带 Qwen/ 前缀(对齐 vLLM 模型id)；不一致→404→idrouter 静默退化成 BM25
+  # 文档身份路由(idroute.py): ask 唯一【字面命中】某篇身份(doc_identities.json)→定篇; 否则整组齐检。不依赖 embed server。
+  route_id_lit_min: 5   # 字面阈: ask 出现某篇身份的≥此长公共子串→定篇(≈产品/主体名长, 滤"保险公司"等4字泛词)
 
   # synthesize：原题 + 子问题结论 -> 最终答案(1 次 LLM, 不降级)
   synth_max_tokens: 2000        # 本地模型逐选项详析很长, 600 会把"答案:"行截断→落"A"兜底; 调大
