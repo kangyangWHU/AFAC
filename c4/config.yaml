@@ -99,6 +99,7 @@ agentic:
   loop_window_chars: 500      # 喂 judge 的窗口大小: 以 BM25 命中为中心截窗(块可大, 命中在顶/底都不漏)
   loop_cache_query: true      # 检索词缓存(index/query_cache.json): 同子问题复用 → 跨运行可复现+省token
   loop_cache_retrieve: true   # BM25检索结果缓存(index/retrieve_cache.json): 同(query,候选篇)复用召回块序 → 迭代judge时不重检索
+  loop_genquery: false          # 默认关同义扩展: 裸 ask 检索已~95%命中; 扩展易把"注册金额"误扩成"注册资本"反带偏。开则补phrasing gap
   loop_genquery_max_tokens: 40
   loop_judge_max_tokens: 700    # 本地 Qwen3.6 啰嗦, 400 会把判块JSON截断→found假; 调大
   loop_evidence_chars: 240    # 命中块喂 synthesize 的证据片段长度

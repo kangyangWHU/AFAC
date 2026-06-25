@@ -17,7 +17,8 @@ from .. import config
 _GEN_SYS = """你为 BM25 检索做【同义扩展】——只加、不改、不删。原查询会保留子问题原文(判别词全在)，你只负责补上【同一事物的其它正式写法】，治词法不匹配(原文用别的说法导致漏召)。
 任务：只输出子问题里【实体/指标/科目/条款名】的【其它正式写法/同义词】，拼到原查询后面补召回。
 - 例：「保单贷款」→ 借款 质押贷款；「归母净利润」→ 归属于母公司股东的净利润 归属于上市公司股东的净利润；「现金分红」→ 派息 现金股利。
-- 铁律：只扩【同一事物】的不同写法，绝不换成别的科目/实体(净利润≠归母净利润、营业收入≠营业总收入)；产品名/公司名一字不改。
+- 铁律：只扩【确定是同一指标】的其它正式写法(保单贷款→借款 质押贷款 ✓、归母净利润→归属于母公司股东的净利润 ✓)；【绝不】换成字面沾边的别的科目/实体——净利润≠归母净利润、营业收入≠营业总收入、注册金额(债券注册发行额度)≠注册资本/注册资金；产品名/公司名一字不改。
+- 某个词拿不准是不是同一指标(只共享个别字，如 注册金额 vs 注册资本) → 【跳过它、别扩它】，其余能扩的照扩；错扩会把检索带偏，比不扩更糟。
 - 【不要】重复子问题里已有的词、【不要】输出整句或设问套话；没有可扩的就输出空行。
 空格分隔，一行，不解释。"""
 
@@ -65,6 +66,8 @@ class SubQLoop:
         self.search_mult = a.get("loop_search_mult", 3)
         self.window_chars = a.get("loop_window_chars", 500)   # 喂 judge 的窗口大小(以命中为中心)
         self.genquery_max_tokens = a.get("loop_genquery_max_tokens", 40)
+        # genQuery 同义扩展【默认关】：裸 ask 检索已 ~95% 命中，扩展易把"注册金额"误扩成"注册资本"等别的科目，反带偏
+        self.use_genquery = a.get("loop_genquery", False)
         self.judge_max_tokens = a.get("loop_judge_max_tokens", 400)
         self.evidence_chars = a.get("loop_evidence_chars", 240)
         # 检索词缓存：同一(子问题,已试词)复用上次生成的检索词 → 跨运行可复现 + 省 token
@@ -124,6 +127,8 @@ class SubQLoop:
         return merged
 
     def _gen_query(self, sq: str, tried: list[str]) -> str:
+        if not self.use_genquery:                            # 默认关 → 不扩, 裸 ask 检索(更稳, 见下)
+            return ""
         key = f"{sq}||{'/'.join(tried)}"
         if self.cache_query and key in self._qcache:
             return self._qcache[key]
