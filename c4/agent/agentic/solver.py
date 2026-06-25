@@ -16,6 +16,8 @@ from .idroute import IdRouter
 
 # "第N份文档/前者/后者"是给路由用的, 但会毒化 judge。
 _DOC_REF = re.compile(r"第[一二三四五六七八九十\d]+份(文档|报告)?之?的?|前者的?|后者的?|两份(文档|报告)?[中里的]*")
+# 聚合/全称量词: 选项含此 → 该选项的 fact 要【逐篇各核一次】(verdict 再判"是否都满足"), 而非整组一次
+_AGG_RE = re.compile(r"均|都|两份|两者|双方|所有|全部|各")
 
 _ARCH_HINT = {
     "value_compare": "各子问题给出了每个实体的数值。按选项里陈述的数值与排序，选与这些值最一致的选项。",
@@ -89,16 +91,20 @@ class AgenticSolver:
         self._cid2text = {ch["chunk_id"]: ch["text"] for ch in idx.chunks}
         self._cid2chunk = {ch["chunk_id"]: ch for ch in idx.chunks}
 
-    def _fact_docs(self, f: dict, cand: list[str]) -> list[list[str]]:
-        """这条 fact 在哪个【篇组】跑 loop。decompose 已定 scope(单篇=具名/拆篇, 整组=单点查找):
-        单篇→直接搜; 整组(答案只在其一)→高精度身份能唯一命中就缩到一篇(省), 否则【整组一起检】
-        (一次 judge, 答案自然从有它那篇浮上来; 不赌路由、不按篇拆)。"""
+    def _fact_docs(self, f: dict, cand: list[str], agg_q: bool = False) -> list[list[str]]:
+        """这条 fact 在哪个/哪些【篇组】跑 loop。decompose 已定 scope(单篇=具名/拆篇, 整组=单点查找):
+        - 单篇 → 直接搜;
+        - 整组 + 【聚合题】(任一选项含 均/都/两份…) → 【每篇各一条】逐篇核, verdict 再判"是否都满足"(治"均"
+          假阳); 带实体的 fact 在别篇查无→无害;
+        - 整组 + 普通(答案只在其一) → 高精度身份唯一命中就缩一篇, 否则整组齐检。"""
         docs = f.get("doc") or cand
         if not isinstance(docs, list):
             docs = [docs]
         docs = [d for d in docs if d in cand] or cand
         if len(docs) == 1:                            # 具名/拆篇 → 单篇
             return [docs]
+        if agg_q:                                     # 聚合题 → 整组 fact 逐篇各跑一次(verdict 核"是否都")
+            return [[c] for c in docs]
         pin = self.idrouter.route(f["ask"], docs)     # 整组里实体名/语义唯一命中 → 缩到一篇
         return [pin] if pin else [docs]               # 否则 → 整组一起检索
 
@@ -112,9 +118,16 @@ class AgenticSolver:
                 "found": r.found, "src": r.source_chunk_id, "evidence": r.source_text,
                 "chunks": chunk_ids}
 
-    def _run_facts(self, d: dict, doc_ids) -> list[dict]:
+    def _run_facts(self, d: dict, doc_ids, q: dict) -> list[dict]:
         cand = [str(x) for x in doc_ids]
-        jobs = [(f, dids) for f in d["facts"] for dids in self._fact_docs(f, cand)]
+        agg_q = any(_AGG_RE.search(str(t or "")) for t in q.get("options", {}).values())
+        seen, jobs = set(), []
+        for f in d["facts"]:
+            for dids in self._fact_docs(f, cand, agg_q):
+                key = (f["ask"], tuple(dids))         # 去重: 模型重复 fact + 聚合拆出的同篇
+                if key not in seen:
+                    seen.add(key)
+                    jobs.append((f, dids))
         if self.fact_workers > 1 and len(jobs) > 1:
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=self.fact_workers) as ex:
@@ -357,7 +370,7 @@ class AgenticSolver:
 
     def answer(self, q: dict, doc_ids) -> AgenticAnswer:
         d = self.decomposer.decompose(q, doc_ids)
-        facts = self._run_facts(d, doc_ids)
+        facts = self._run_facts(d, doc_ids, q)
         rule = self._selection_rule(q, d["archetype"])
         ans, verdicts, _ = self._verify_options(q, d["archetype"], facts, rule)
         path = "verdict"

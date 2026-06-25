@@ -46,8 +46,9 @@ facts 不能为空：每道题都要拆出能定位答案的事实。多选/判�
 
 
 def _fmt_docs(doc_ids: list[str]) -> str:
-    # 只给候选 id + 顺序(供"第N份"映射)，【不给标题】——outlines.name 多为公司/文档类型【泛名(多篇撞名)】或缺失，
-    # 给了只会诱导模型【按内容猜 doc】并猜错；内容→篇交 route/idrouter(用准确的 doc_identities)。
+    # 给候选 id + 顺序(供"第N份"映射)，【不给标题】(标题/泛名会诱导按内容猜 doc)。
+    # 即便给了 id, 模型仍可能【按公司/年/名字猜哪篇】——这类【无题面显式依据】的猜在 _norm 里被丢弃,
+    # 只认 ① ask 里位置词(第N份/前者) ② 题干/选项点了的文档名; 其余按内容→篇交 solver 路由。
     return "\n".join(f"  第{i + 1}篇: {d}" for i, d in enumerate(map(str, doc_ids)))
 
 
@@ -92,6 +93,10 @@ def _doc_in_ask(ask, cand_set: set[str]) -> str | None:
         if d:
             return d
     return None
+
+
+# 题干【显式位置词】：只有 ask 真带这些, 模型按位置指派某篇才算数(治"按年份/选项序猜位置")。
+_POS_RE = re.compile(r"第[一二三四五六七八九十两\d]+[份篇章]|前者|后者|前一[份篇]|后一[份篇]")
 
 
 class Decomposer:
@@ -182,8 +187,12 @@ class Decomposer:
             if oid not in valid:
                 oid = opts[i] if infer_by_order and i < len(opts) else "shared"
             s["option_id"] = oid
-            pin = (_match_doc(s.get("doc"), cand_set)             # 模型填的 doc 字段(归一到候选id)
-                   or _doc_in_ask(s.get("ask"), cand_set))        # 兜底: ask 里出现文档名也 pin
-            # decompose 定 scope: 具名/拆篇→[单篇]; 否则→[整组](单点查找,答案只在其一,solver 全组齐检)
+            ask = s.get("ask", "")
+            opt = q.get("options", {}).get(oid, "")
+            pin = _match_doc(s.get("doc"), cand_set) or _doc_in_ask(ask, cand_set)
+            # 只保留【题面显式信号】支撑的 pin: ask 带位置词(第N份/前者/后者), 或 题干/选项点了这篇的文档名;
+            # 否则是模型【按公司/年/名字猜的篇】(无显式依据)→ 丢弃 → [整组], 交 solver 按内容路由(idrouter 字面/全组齐检)
+            if pin and not (_POS_RE.search(ask) or _doc_in_ask(f"{ask} {opt}", cand_set) == pin):
+                pin = None
             s["doc"] = [pin] if pin else [str(x) for x in doc_ids]
         return obj
