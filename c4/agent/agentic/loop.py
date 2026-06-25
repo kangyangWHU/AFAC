@@ -11,7 +11,7 @@ import re
 import threading
 from dataclasses import dataclass, field
 from ..llm.base import LLMClient
-from ..index.bm25 import BM25Index
+from ..index.bm25 import BM25Index, tokenize
 from .. import config
 
 _GEN_SYS = """你为 BM25 检索做【同义扩展】——只加、不改、不删。原查询会保留子问题原文(判别词全在)，你只负责补上【同一事物的其它正式写法】，治词法不匹配(原文用别的说法导致漏召)。
@@ -89,7 +89,7 @@ class SubQLoop:
         W = self.window_chars
         if len(text) <= W:
             return text
-        toks = [t for t in dict.fromkeys(terms.split()) if len(t) >= 2]
+        toks = [t for t in dict.fromkeys(tokenize(terms, True, "jieba")) if len(t) >= 2]  # jieba 分词: 中文 ask 无空格, split() 切不开
         pos = {t: [m.start() for m in re.finditer(re.escape(t), text)] for t in toks}
         anchors = sorted(p for ps in pos.values() for p in ps)
         if not anchors:
