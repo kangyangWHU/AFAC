@@ -12,7 +12,6 @@ from ..llm.qwen import QwenClient
 from ..postprocess.answer import normalize_answer, is_valid, parse_option_verdicts
 from .decompose import Decomposer
 from .loop import SubQLoop
-from .route import route
 from .idroute import IdRouter
 
 # "第N份文档/前者/后者"是给路由用的, 但会毒化 judge。
@@ -90,10 +89,20 @@ class AgenticSolver:
         self._cid2text = {ch["chunk_id"]: ch["text"] for ch in idx.chunks}
         self._cid2chunk = {ch["chunk_id"]: ch for ch in idx.chunks}
 
-    def _run_one_fact(self, f: dict, doc_ids) -> dict:
-        cand = [str(d) for d in doc_ids]
-        d = f.get("doc")                              # 分解器钉死的篇(精确命中候选id)直接用; 否则按内容路由
-        dids = [d] if d in cand else route(self.index, f["ask"], cand, self.idrouter)
+    def _fact_docs(self, f: dict, cand: list[str]) -> list[list[str]]:
+        """这条 fact 在哪个【篇组】跑 loop。decompose 已定 scope(单篇=具名/拆篇, 整组=单点查找):
+        单篇→直接搜; 整组(答案只在其一)→高精度身份能唯一命中就缩到一篇(省), 否则【整组一起检】
+        (一次 judge, 答案自然从有它那篇浮上来; 不赌路由、不按篇拆)。"""
+        docs = f.get("doc") or cand
+        if not isinstance(docs, list):
+            docs = [docs]
+        docs = [d for d in docs if d in cand] or cand
+        if len(docs) == 1:                            # 具名/拆篇 → 单篇
+            return [docs]
+        pin = self.idrouter.route(f["ask"], docs)     # 整组里实体名/语义唯一命中 → 缩到一篇
+        return [pin] if pin else [docs]               # 否则 → 整组一起检索
+
+    def _run_one_fact(self, f: dict, dids: list[str]) -> dict:
         ask = _DOC_REF.sub("", f["ask"]).strip()
         r = self.loop.solve(ask, dids)
         chunk_ids = [cid for t in r.trace for cid in t.get("chunks", [])]
@@ -104,12 +113,13 @@ class AgenticSolver:
                 "chunks": chunk_ids}
 
     def _run_facts(self, d: dict, doc_ids) -> list[dict]:
-        facts = d["facts"]
-        if self.fact_workers > 1 and len(facts) > 1:
+        cand = [str(x) for x in doc_ids]
+        jobs = [(f, dids) for f in d["facts"] for dids in self._fact_docs(f, cand)]
+        if self.fact_workers > 1 and len(jobs) > 1:
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=self.fact_workers) as ex:
-                return list(ex.map(lambda f: self._run_one_fact(f, doc_ids), facts))
-        return [self._run_one_fact(f, doc_ids) for f in facts]
+                return list(ex.map(lambda j: self._run_one_fact(*j), jobs))
+        return [self._run_one_fact(f, dids) for f, dids in jobs]
 
     def _evidence_pool(self, facts: list[dict], *, tagged: bool = False) -> str:
         seen: set[str] = set()

@@ -14,27 +14,32 @@ from .. import config
 
 ARCHETYPES = {"value_compare", "option_verdict", "single_fact", "fallback"}
 
-SYS = """你是金融文档问答的"原子事实分解器"。把题目拆成若干【单篇文档 + 单个事实】的取值查询。只输出 JSON，不要解释。
+SYS = """你是金融文档问答的"原子事实分解器"。
 
-铁律：
-1. 【一条 fact 一个值，ask 带全身份】ask 信息尽量全、把"取哪一处"钉死：主体/公司/产品全称 + 年份/报告期 + 口径(合并vs母公司、全年vs年末) + 场景。同一指标常有多版(多年/多主体/多表)，缺限定就取错。选项给一组值(如"5.70%和35.83%") → ask 取整组(各报告期列全)，别压成单个。
-2. 【定篇：只在题干【自己点名了某篇】时才写 doc，否则一律留空——你只拿到候选 id 和顺序、【没有标题】，【绝不按内容/公司/产品名猜 doc】】
-   写 doc【仅】两种情形：
-   ① 题干用序数(第一份/第二份/前者/后者) → doc=候选里【对应顺序】那篇 id(第一份=第1篇)。
-   ② 题干用文档名/原样 id(如"文档fc_text_006""text06") → doc=该 id(fc_text_006 会自动归一到候选 text06)。
-   其余【全部留空 doc】——尤其"哪些产品/公司…"这种【选项点名实体】的题：实体→篇由 route/idrouter 按内容定(它有准确身份库、比你猜准)，你只需把【主体全名】写进 ask。
-      ✓ 留空+带主体:"平安e生保的施救费用赔偿上限是?"   ✓ 题干点名篇:{"ask":"是否有转股价格向下修正条款","doc":"text06"}   ✗ 题干没点名却按产品名猜 doc
-3. 【问值，不问是否=X；问值别用表头泛词】比较/判真留到最后。"发行人是谁""主体信用评级"这类【要找的就是身份本身】、身份未知写不进 ask 的，必须靠【篇】定位(题干点名就按铁律2②写 doc；没点名则该 fact 天然属某篇)。问值时直奔答案、别加"名称/类型/情况"这类表头泛词(会把"子公司名称/债务人名称"等无关表顶上来)：
-   ✗"发行人是否为「某公司」"(别问是否) ✗"发行人名称"(表头泛词) ✓{"ask":"发行人是?","doc":"text01"}　✓{"ask":"主体信用评级是?","doc":"text01"}
-4. 【跨多篇主张拆开】选项横跨多篇(均/都/两份/分别/各/不一致) → 按候选篇数拆成每篇各一条(绝不合成,否则只检到一篇)，每条按铁律2定篇、ask 各带自己主体的全名。
-5. 【案例计算题别查算出来的数】题干情形(某人/金额/事件)和选项算出的合计，文档里都没有 → 别建 fact；改为题干涉及的【每个产品】各建一条赔付规则 fact(把情形写进 ask、留给 verdict 代入算)：ask 形如「某产品对[题干费用/免赔额/事件]的赔付规则(免赔额/给付比例/范围/分摊)」。
-6. 不同选项依赖同一事实 → 合并去重。
+【先想清楚你的产物拿来干嘛——想通了怎么拆自然就对，别背规则】：
+系统会把你产出的每条 ask 拿去【某一篇文档】里检索一小段、读出【一个值】；最后另一步用这些值跟选项逐一比对、判对错。
+所以你的任务 = 把题目变成【验证各选项所需的、一条条能被检索器找到的"取值查询"】——不是复述题目、不是下判断。
+
+由此推出怎么拆(每条都讲"为什么"，按理解判断；遇到下面没列举到的写法，照同样的道理办)：
+1. 一条 ask 只问【一个值】，带全限定(主体 + 年份/报告期 + 口径如合并vs母公司 + 场景)把"读哪一处"钉死。
+   为什么：检索器一次只读一小段、抽一个值；同一指标多篇/多年/多表都有，限定不全就读到别处。
+2. 问【值是多少】，别抄选项原话、别把待验证的那个数写进 ask；也别用"名称/类型/情况"这类表头泛词。
+   为什么：检索靠你的词去匹配【文档原文里的指标】(原文写"初始转股价19.59元")——文档里没有你的判断词("明确记载了")，那个数(19.59)正是要去找的、对错最后才判；"名称/类型"是大量表头词、会把无关表顶上来。
+   ✗"明确记载初始转股价为19.59元" / ✗"发行人名称" → ✓"初始转股价是多少?" / ✓"发行人是?"
+3. 每条都要让检索器知道【去哪一篇读】，二选一：
+   - 题干自己点了篇(序数"第一份/前者"、或文档名如"fc_text_003"、或某标题) → 把题干用的【那个名字原样写进 doc 字段】(代码会自动对到候选篇，你不用管它写成 fc_text_003 还是 text03)。
+   - 没点篇 → 把【主体全名】(公司/产品/发行人)写进 ask，让检索器按内容定篇。
+   为什么：同一指标很多篇都有，不说是谁的/哪篇就落错篇。注意你只看得到候选的【id 和顺序、没有标题】，所以【别自己按内容猜哪篇是哪篇】(猜常错)——除非题干点名，一律靠主体名交给检索器(它有准确的文档身份库)。
+4. 只要【一句话指向不止一篇候选】(像"两份均…""其中一份…"这种，任何跨多篇的表述都算)，→ 按候选篇数拆成【每篇各一条】，每条按第3条定篇。
+   为什么：要核"都有X""其中一份的X=19.59"，必须【对每篇分别去查 X】；合成一条只会查到一篇、漏掉另一篇。
+5. 案例题里题目给的情景数(某人花了8000元)、选项算出来的合计(三家合计13.5万)，文档里查不到 → 别建成 fact；改为给【每个涉及的产品/条款】建一条"赔付规则"ask、把情景写进去，留给最后一步代入算。
+6. 不同选项依赖【同一个值】→ 合并成一条。
 
 archetype（供最后推理用，不影响拆法）：value_compare | option_verdict | single_fact | fallback
 
 facts 不能为空：每道题都要拆出能定位答案的事实。多选/判断/计算/取数题【一律】要拆（每个选项/实体所依赖的事实都列出来）。fallback 只用于题目完全无法在文档里定位任何事实的极端情况（极罕见），别因为"要结合多篇/需要推理"就用 fallback——结合和推理是【最后一步】做的，分解阶段只管把事实查出来。
 
-每条 fact 字段：id；ask；doc（可选，仅【铁律2②题干点名了文档】时填候选原样id，否则省略、由 route 定篇）
+每条 fact 字段：id；ask；doc（可选，仅【铁律2②题干点名了文档】时填候选原样id；否则省略，代码自动置为【整组】、由 solver 全组齐检）
 
 只输出这个 JSON（不要 markdown 代码块）：
 {"archetype":"...","facts":[{"id":"f1","ask":"...","doc":"候选原样id或省略"}]}"""
@@ -72,6 +77,21 @@ def _match_doc(ref, cand_set: set[str]) -> str | None:
     rn = int(nums[-1])
     hits = [c for c in cand_set if (m := re.findall(r"\d+", c)) and int(m[-1]) == rn]
     return hits[0] if len(hits) == 1 else None
+
+
+def _doc_in_ask(ask, cand_set: set[str]) -> str | None:
+    """code 兜底: ask 文本里若出现【候选篇的名字】(候选原样id, 或 "fc_text_002" 这类题干式写法)→自动 pin。
+    治"模型把文档名写进了 ask 却没填 doc 字段"。只认够独特的引用, 不碰裸数字(防误绑年份)。"""
+    if not ask:
+        return None
+    for c in cand_set:                                            # a) 候选原样id(≥4字符才够独特)作子串出现
+        if len(c) >= 4 and c in ask:
+            return c
+    for m in re.findall(r"(?:fc_)?text[_ ]?0*\d+", ask, re.I):    # b) fc_text_002 / text02 这类引用→归一到候选
+        d = _match_doc(m, cand_set)
+        if d:
+            return d
+    return None
 
 
 class Decomposer:
@@ -119,18 +139,22 @@ class Decomposer:
     def _decompose_uncached(self, q: dict, doc_ids: list[str]) -> dict:
         msgs = self.build_messages(q, doc_ids)
         out = ""
+        obj = None
         for _ in range(self.retries + 1):
             out = self.llm.complete(msgs, max_tokens=self.max_tokens, enable_thinking=False)
-            obj = _parse_json(out)
-            if obj is not None and self._valid(obj):
-                obj = self._norm(obj, q, doc_ids)
-                if not obj["facts"]:                    # LLM 给了 fallback/空 → 用选项兜底
-                    obj["facts"] = self._facts_from_options(q)
-                return obj
+            cand = _parse_json(out)
+            if cand is not None and self._valid(cand):
+                obj = cand
+                break
             msgs = msgs + [{"role": "assistant", "content": out[:600]},
                            {"role": "user", "content": "上面不是合法 JSON。只输出符合规定格式的 JSON。"}]
-        return {"archetype": "option_verdict", "facts": self._facts_from_options(q),
-                "raw": out[:300]}
+        if obj is None:                                  # 始终没拿到合法 JSON
+            obj = {"archetype": "option_verdict", "facts": [], "raw": out[:300]}
+        obj = self._norm(obj, q, doc_ids)
+        if not obj["facts"]:                             # 空/fallback → 选项兜底, 并【同样过 _norm 以 pin 文档名】
+            obj["facts"] = self._facts_from_options(q)
+            obj = self._norm(obj, q, doc_ids)
+        return obj
 
     @staticmethod
     def _valid(obj: dict | None) -> bool:
@@ -158,5 +182,8 @@ class Decomposer:
             if oid not in valid:
                 oid = opts[i] if infer_by_order and i < len(opts) else "shared"
             s["option_id"] = oid
-            s["doc"] = _match_doc(s.get("doc"), cand_set)  # 铁律2②: 题干名→候选id(fc_text_006→text06); 配不上→None→route
+            pin = (_match_doc(s.get("doc"), cand_set)             # 模型填的 doc 字段(归一到候选id)
+                   or _doc_in_ask(s.get("ask"), cand_set))        # 兜底: ask 里出现文档名也 pin
+            # decompose 定 scope: 具名/拆篇→[单篇]; 否则→[整组](单点查找,答案只在其一,solver 全组齐检)
+            s["doc"] = [pin] if pin else [str(x) for x in doc_ids]
         return obj

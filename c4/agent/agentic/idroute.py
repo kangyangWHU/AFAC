@@ -20,6 +20,7 @@ class IdRouter:
         self.model = a.get("embed_model", "Qwen3-Embedding-8B")
         self.id_min = a.get("route_id_min", 0.58)        # 置信阈：top 相似度需 ≥ 此值
         self.id_margin = a.get("route_id_margin", 0.07)  # 领先阈：top 比次高至少高出此值
+        self.lit_min = a.get("route_id_lit_min", 5)      # 字面阈：ask 里出现某篇身份的≥此长公共子串(产品/主体名)→直接定篇
         p = os.path.join(config.path("index_dir"), "doc_identities.json")
         self.identities = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else {}
         self.ok = bool(self.identities)
@@ -46,6 +47,23 @@ class IdRouter:
         nb = math.sqrt(sum(x * x for x in b))
         return s / (na * nb + 1e-9)
 
+    @staticmethod
+    def _lcs(a: str, b: str) -> int:
+        """最长公共子串长度(字面匹配用): ask 与某篇身份名共有的最长连续片段。"""
+        if not a or not b:
+            return 0
+        prev = [0] * (len(b) + 1)
+        best = 0
+        for i in range(1, len(a) + 1):
+            cur = [0] * (len(b) + 1)
+            for j in range(1, len(b) + 1):
+                if a[i - 1] == b[j - 1]:
+                    cur[j] = prev[j - 1] + 1
+                    if cur[j] > best:
+                        best = cur[j]
+            prev = cur
+        return best
+
     def route(self, ask: str, cands: list[str]) -> list[str] | None:
         """置信时返回 [单篇]，否则 None(回退内容路由)。"""
         if not self.ok:
@@ -54,6 +72,12 @@ class IdRouter:
         named = [d for d in cands if ids[d]]
         if len(named) < 2:
             return None
+        # 字面优先: ask 里出现某篇身份的【≥lit_min 长公共子串】且【唯一】→ 直接定篇。
+        # 治 A(近重复产品 embedding 被 margin 挡) 和 B(案例情景词把别篇顶上来: 产品名子串长、情景词短)。
+        # 多篇都强匹配(如同公司多年报、名称互含)→ 字面不唯一, 落到嵌入消歧。
+        lit = sorted(((d, self._lcs(ask, ids[d])) for d in named), key=lambda x: x[1], reverse=True)
+        if lit[0][1] >= self.lit_min and (len(lit) < 2 or lit[1][1] < self.lit_min):
+            return [str(lit[0][0])]
         vecs = self._embed([ask] + [ids[d] for d in named])
         if not vecs or any(v is None for v in vecs):
             return None
