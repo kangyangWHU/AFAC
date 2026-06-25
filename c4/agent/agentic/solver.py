@@ -14,8 +14,9 @@ from .decompose import Decomposer
 from .loop import SubQLoop
 from .idroute import IdRouter
 
-# "第N份文档/前者/后者"是给路由用的, 但会毒化 judge。
-_DOC_REF = re.compile(r"第[一二三四五六七八九十\d]+份(文档|报告)?之?的?|前者的?|后者的?|两份(文档|报告)?[中里的]*")
+# "第N份文档/前者/后者/text0N"是给路由/定篇用的标签, 留在 ask 里只会污染 BM25 query 与 judge → 检索前剥掉。
+_DOC_REF = re.compile(r"第[一二三四五六七八九十\d]+份(文档|报告)?之?的?|前者的?|后者的?|两份(文档|报告)?[中里的]*"
+                      r"|(?:文档|文件|在)?\s*[（(]?\s*(?:fc_)?text[ _]?0*\d+\s*[）)]?\s*[中里内]?之?的?")
 # 聚合/全称量词: 选项含此 → 该选项的 fact 要【逐篇各核一次】(verdict 再判"是否都满足"), 而非整组一次
 _AGG_RE = re.compile(r"均|都|两份|两者|双方|所有|全部|各")
 
