@@ -13,6 +13,7 @@ import re
 import json
 from dataclasses import dataclass
 from typing import Iterator, cast
+from html.parser import HTMLParser
 
 from ..textutil import heading_level, detect_article_no
 
@@ -20,6 +21,41 @@ _SENT_SPLIT = re.compile(r"[^。！？；]*[。！？；]|[^。！？；]+$")
 _TABLE_ROW = re.compile(r"^\|.*\|$")
 _SEP_ROW = re.compile(r"^\|[\s:|\-]+\|$")
 _MD_HEAD = re.compile(r"^(#{1,6})\s+(.+)$")
+_HTML_TABLE = re.compile(r"<table\b.*?</table>", re.DOTALL | re.IGNORECASE)
+
+
+class _HTMLRows(HTMLParser):
+    """从 HTML 表(含合并单元格)抽每行单元格文本。"""
+    def __init__(self):
+        super().__init__()
+        self.rows: list[list[str]] = []
+        self._r: list[str] | None = None
+        self._c: list[str] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "tr":
+            self._r = []
+        elif tag in ("td", "th"):
+            self._c = []
+
+    def handle_endtag(self, tag):
+        if tag in ("td", "th") and self._c is not None and self._r is not None:
+            self._r.append("".join(self._c).strip())
+            self._c = None
+        elif tag == "tr" and self._r is not None:
+            self.rows.append(self._r)
+            self._r = None
+
+    def handle_data(self, data):
+        if self._c is not None:
+            self._c.append(data)
+
+
+def _html_table_to_pipe(html: str) -> list[str]:
+    """HTML 表 → 管道行(复用 markdown 表的逐行+表头切分)。"""
+    p = _HTMLRows()
+    p.feed(html)
+    return ["| " + " | ".join(r) + " |" for r in p.rows if any(c for c in r)]
 # LaTeX 噪声清洗(幂等;覆盖解析时未清的旧缓存)
 _LATEX_CMD = re.compile(r"\\(?:underline|textbf|textit|text|mathrm|mathbf|emph|boldsymbol)\s*\{([^{}]*)\}")
 _LATEX_SUP = re.compile(r"[\^_]\{([^{}]*)\}")
@@ -63,6 +99,20 @@ def _blocks(md: str) -> Iterator[tuple[str, object]]:
     """把一页 md 切成 ('table',[rows]) / ('head',(lvl,title)) / ('para',text)。"""
     paras = re.split(r"\n\s*\n", md)
     for para in paras:
+        if "<table" in para.lower():               # HTML 表(含合并单元格)→ 抽行, 表前后残文也保留
+            last = 0
+            for mt in _HTML_TABLE.finditer(para):
+                pre = para[last:mt.start()].strip()
+                if pre:
+                    yield ("para", pre)
+                rows = _html_table_to_pipe(mt.group(0))
+                if rows:
+                    yield ("table", rows)
+                last = mt.end()
+            tail = para[last:].strip()
+            if tail:
+                yield ("para", tail)
+            continue
         lines = [l for l in para.split("\n") if l.strip()]
         if not lines:
             continue
