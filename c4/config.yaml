@@ -4,17 +4,11 @@ paths:
   raw_root: data/public_dataset_upload/raw
   questions_dir: data/public_dataset_upload/questions/group_a
   doc_index: doc_index.json
-  processed_dir: processed_vl
-  chunks_dir: chunks
-  index_dir: processed_vl
+  index_dir: processed_vl        # 预处理产物(索引/大纲/身份)统一在此
 
-# 跑题并发（每题独立，瓶颈在等百炼API；线程数=同时在飞的请求数）
-run:
-  concurrency: 8             # 1=串行; 8~12 通常安全; 过高易触发百炼QPS限流(已有retries兜底)
-
-# LLM（仅 Qwen 系，合规）。本地 vLLM 开发用；正式提交切百炼。
-# 切百炼 qwen3.7-plus：base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-#                     api_key: env:BAILIAN   model: qwen3.6-27b        # 合规提交用(百炼)
+# LLM（仅 Qwen 系，合规）。本地 gpt-oss 开发用；正式提交切百炼 qwen。
+# 本地 gpt-oss: base_url http://localhost:30000/v1  model openai/gpt-oss-120b  api_key EMPTY
+# 百炼合规:    base_url https://dashscope.aliyuncs.com/compatible-mode/v1  api_key env:BAILIAN  model qwen3.6-27b
 llm:
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   api_key: env:BAILIAN
@@ -22,28 +16,12 @@ llm:
   temperature: 0.0
   max_tokens: 3072          # 非thinking ~400/call用不满, 留空间写"答案:"行
   enable_thinking: false    # 默认关; verdict/synth 由 reasoning_effort 单独开思考(judge 不开)
-  reasoning_effort: medium  # 仅 verdict/synth 开 medium 思考(solver.final_thinking 门控); loop judge/genQuery 仍非思考
-  seed: 42                  # 固定 seed → 百炼输出确定可复现(实测 temp0 仍有微随机, 加seed后逐字一致)
+  reasoning_effort: low     # gpt-oss 费token, 降到 low
+  seed: 42                  # 固定 seed → 输出确定可复现
   timeout: 300
   retries: 2
 
-# 文本归一化（解析后、入块前）
-normalize:
-  strip_cjk_spaces: true     # 去除中文字符间的伪空格（PyMuPDF 常见："研 发"->"研发"）
-  collapse_spaces: true      # 合并连续空白
-
-# 结构感知分块
-chunker:
-  target_chars: 600          # 目标块大小（字符）
-  max_chars: 1000            # 块上限，超则切分
-  min_chars: 80              # 过短块并入相邻
-  merge_short_articles: true # 法规短条文合并到 target_chars
-  table_as_chunk: true       # 表格独立成块（不与正文混切）
-  parent_window: 1           # small-to-big：检索命中后回填前后 N 个兄弟块
-  drop_low_value: true       # 建索引时丢弃目录/空壳表/碎片块
-  breadcrumb: true           # 每块加 [文档名›章节›第X条] 定位(仅展示/审核, 不进BM25索引, 检索零回归)
-
-# BM25 词法检索
+# BM25 词法检索(唯一合规召回; 规则禁 embedding/dense/rerank)
 bm25:
   tokenizer: jieba           # jieba | char
   k1: 1.5
@@ -61,76 +39,33 @@ vl:
   bc_doc_title: false        # breadcrumb 是否含文档名(doc-scoped检索下冗余, 默认否)
   bc_cap: 24                 # breadcrumb 单段最长字数(超/带句中标点的标题丢弃)
 
-# 检索编排
-retrieval:
-  per_option_query: true     # multi/tf 对每个选项单独检索
-  per_option_per_doc: true   # 每个选项在【每个候选文档内】单独检索(治大文档错段/某年值漏召回)
-  per_option_doc_k: 8        # 每个(选项×文档)取前 k (3->8: 治欠选,对的块常排top-3外)
-  expand_synonyms: true      # query同义词扩展(保单贷款↔借款等), 治词法不匹配致欠选
-  dedup: true
-  min_per_doc: 2             # 每个候选文档至少保底召回块数（多文档题防漏）
-  max_chunks: 22             # 14->22: 配合doc_k救欠选(多文档题每篇多留证据); token仍在预算内
-  per_query_k: 4             # 单条 query 取前 k
-  backfill_parent: true      # 命中块回填前后兄弟块(small-to-big)
-  filter_low_value: true     # 过滤目录页/空壳表/碎片块
-  # 指标定向检索：对比题里选项偏向某一文档，另一文档漏掉关键表。
-  # 对每个候选文档额外跑这些 query，保证关键指标表被各文档都拉到。
-  metric_queries:
-    financial_reports: "主要会计数据 营业收入 营业总收入 归属于上市公司股东的净利润 经营活动产生的现金流量净额 研发投入 研发费用 现金分红 股息"
-    # financial_contracts 的指标定向反而引入噪声(募集书释义/碎表多)，暂禁用
-  metric_per_doc: 3          # 每个文档从指标定向 query 至少纳入的块数
-  # 自适应兜底：模型答空/无 时，提高 min_per_doc 重检索重问
-  adaptive_on_empty: true
-  adaptive_min_per_doc: 5
-
-# B 榜文档路由
-router:
-  chunk_k: 30                # 每条 query 在域内取前 k chunk 做 doc 聚合
-  top_k: 5                   # 路由返回候选文档数（喂给后续检索）
-  sig_weight: 1.0            # 文档签名(标题/目录)命中的乘性加成权重(实测最优;0=纯正文sum)
-
-# 推理
-reasoner:
-  max_evidence_chars: 18000  # 12k->18k: 防已召回的关键块被格式化截断(财报/多文档证据长)
-  verify_multi: false        # 关闭：实测+72%token/0增益,且"促选入"与235b过度选择弱点相反(73.46最优版即关闭)
-
-# v4 Agentic RAG（见 plan.md §v4）。所有可调数值集中在此，代码不留魔法数。
+# Agentic RAG。所有可调数值集中在此，代码不留魔法数。
 agentic:
-  index_variant: "_vl"         # ""=旧parse索引(bm25.pkl/outlines.json); "_vl"=新PaddleOCR-VL索引(bm25_vl.pkl/outlines_vl.json)
+  index_variant: "_vl"         # ""=旧索引 / "_vl"=新PaddleOCR-VL索引(bm25_vl.pkl/outlines_vl.json)
   # 分解器：题 -> 子问题
-  decompose_max_tokens: 6000   # gpt-oss 等推理模型推理吃 token, 给足防 JSON 截断; glm-5.2 非思考用不满(cap 无害)
+  decompose_max_tokens: 6000   # 推理模型推理吃 token, 给足防 JSON 截断
   decompose_retries: 1         # JSON 不合法时的重试次数
-  decompose_cache: false       # 关缓存: prompt 改过 + 各模型各自 decompose, 缓存会冻结某一版(每次重拆)
+  decompose_cache: false       # 关缓存: 各模型各自 decompose, 缓存会冻结某一版
 
   # 子问题 loop：检索 + judge（读块吐值/判真）
-  loop_max_iter: 3             # 单子问题最多迭代轮数(每轮一次 judge)
-  loop_batch: 8               # 每轮判块数; 饱和词(如"发行人"159块全含)排名平, 答案常落第5名, batch=8 才进判题集
+  loop_max_iter: 1             # 1轮(原3): 省token, 多轮收益小
+  loop_batch: 8               # 每轮判块数; 饱和词答案常落第5名, batch=8 才进判题集
   loop_requery: 1             # loop 内重出检索词次数上限
-  loop_search_mult: 3         # 每轮 BM25 取 batch*此值, 去重后取前 batch(分页用)
-  loop_window_chars: 500      # 喂 judge 的窗口大小: 以 BM25 命中为中心截窗(块可大, 命中在顶/底都不漏)
-  loop_cache_query: true      # 检索词缓存(index/query_cache.json): 同子问题复用 → 跨运行可复现+省token
-  loop_cache_retrieve: true   # BM25检索结果缓存(index/retrieve_cache.json): 同(query,候选篇)复用召回块序 → 迭代judge时不重检索
-  loop_genquery: false          # 默认关同义扩展: 裸 ask 检索已~95%命中; 扩展易把"注册金额"误扩成"注册资本"反带偏。开则补phrasing gap
+  loop_search_mult: 3         # 每轮 BM25 取 batch*此值, 去重后取前 batch
+  loop_window_chars: 500      # 喂 judge 的窗口大小: 以 BM25 命中为中心截窗
+  loop_cache_query: true      # 检索词缓存: 同子问题复用 → 可复现+省token
+  loop_cache_retrieve: true   # BM25 检索结果缓存: 同(query,候选篇)复用召回块序
+  loop_genquery: false        # 默认关同义扩展: 裸 ask 已~95%命中; 扩展易带偏
   loop_genquery_max_tokens: 40
-  loop_judge_max_tokens: 700    # 本地 Qwen3.6 啰嗦, 400 会把判块JSON截断→found假; 调大
+  loop_judge_max_tokens: 700  # 啰嗦模型 400 会把判块JSON截断→found假; 调大
   loop_evidence_chars: 240    # 命中块喂 synthesize 的证据片段长度
 
-  # 事实 -> 文档路由(route.py): 给定 ask, 在候选 doc_ids 里选篇(分解器不再猜 doc)
+  # 事实 -> 文档路由(route.py): 给定 ask, 在候选 doc_ids 里选篇
   route_chunk_k: 30           # 每篇取多少 chunk 聚合打分
-  route_min_lead: 1.3         # top 篇领先次高的倍数, 够大才缩到 1 篇(否则返回前 route_top_k)
+  route_min_lead: 1.3         # top 篇领先次高的倍数, 够大才缩到 1 篇
   route_top_k: 2
-  # 文档身份路由(idroute.py): ask 唯一【字面命中】某篇身份(doc_identities.json)→定篇; 否则整组齐检。不依赖 embed server。
-  route_id_lit_min: 5   # 字面阈: ask 出现某篇身份的≥此长公共子串→定篇(≈产品/主体名长, 滤"保险公司"等4字泛词)
+  # 文档身份路由(idroute.py): ask 唯一字面命中某篇身份→定篇; 否则整组齐检
+  route_id_lit_min: 5         # 字面阈: ≥此长公共子串→定篇(滤"保险公司"等泛词)
 
-  # synthesize：原题 + 子问题结论 -> 最终答案(1 次 LLM, 不降级)
-  synth_max_tokens: 2000        # 本地模型逐选项详析很长, 600 会把"答案:"行截断→落"A"兜底; 调大
-
-  # outline 文档名抽取（建索引时, outline.py）
-  outline_scan_blocks: 3      # 只在最前几块找标题(深入会抓到条标题)
-  outline_name_minlen: 6      # ≥此长度才算名(滤掉"养老年金"等泛词碎片)
-  outline_name_maxlen: 36
-
-# 伪表清洗（解析过度检测的版面表）
-table_clean:
-  enabled: true
-  reclass_min_digits: 5      # 表格块数字<此 且 像释义/正文 -> 重分类为 text 并去管道符
+  # synthesize：原题 + 子问题结论 -> 最终答案(1 次 LLM)
+  synth_max_tokens: 2000      # 逐选项详析很长, 太小会把"答案:"行截断
