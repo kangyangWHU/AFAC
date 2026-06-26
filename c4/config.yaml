@@ -4,9 +4,9 @@ paths:
   raw_root: data/public_dataset_upload/raw
   questions_dir: data/public_dataset_upload/questions/group_a
   doc_index: doc_index.json
-  processed_dir: processed
+  processed_dir: processed_vl
   chunks_dir: chunks
-  index_dir: index
+  index_dir: processed_vl
 
 # 跑题并发（每题独立，瓶颈在等百炼API；线程数=同时在飞的请求数）
 run:
@@ -50,6 +50,16 @@ bm25:
   b: 0.75
   topk: 8                    # 单 query 返回块数
   drop_stopwords: true
+  index_breadcrumb: true     # breadcrumb(章节/条款号)进 BM25 索引词(无embedding下补词面召回); 可关
+
+# 新 parse+chunk(PaddleOCR-VL → 段落块)
+vl:
+  dpi: 200
+  target_chars: 300          # 段落过大时按句聚到此
+  max_chars: 400             # 段落超此才切
+  bc_levels: 2               # breadcrumb 取最近几级章节
+  bc_doc_title: false        # breadcrumb 是否含文档名(doc-scoped检索下冗余, 默认否)
+  bc_cap: 24                 # breadcrumb 单段最长字数(超/带句中标点的标题丢弃)
 
 # 检索编排
 retrieval:
@@ -86,6 +96,7 @@ reasoner:
 
 # v4 Agentic RAG（见 plan.md §v4）。所有可调数值集中在此，代码不留魔法数。
 agentic:
+  index_variant: "_vl"         # ""=旧parse索引(bm25.pkl/outlines.json); "_vl"=新PaddleOCR-VL索引(bm25_vl.pkl/outlines_vl.json)
   # 分解器：题 -> 子问题
   decompose_max_tokens: 6000   # gpt-oss 等推理模型推理吃 token, 给足防 JSON 截断; glm-5.2 非思考用不满(cap 无害)
   decompose_retries: 1         # JSON 不合法时的重试次数

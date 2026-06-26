@@ -75,8 +75,9 @@ class AgenticAnswer:
 
 class AgenticSolver:
     def __init__(self):
-        idx = BM25Index.from_file(os.path.join(config.path("index_dir"), "bm25.pkl"))
-        outlines = json.load(open(os.path.join(config.path("index_dir"), "outlines.json"),
+        variant = config.load().get("agentic", {}).get("index_variant", "")  # ""=旧, "_vl"=新parse
+        idx = BM25Index.from_file(os.path.join(config.path("index_dir"), f"bm25{variant}.pkl"))
+        outlines = json.load(open(os.path.join(config.path("index_dir"), f"outlines{variant}.json"),
                                   encoding="utf-8"))
         self.index = idx
         self.llm = QwenClient()

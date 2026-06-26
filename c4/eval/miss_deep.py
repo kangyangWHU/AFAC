@@ -13,7 +13,7 @@ from agent.agentic.solver import _DOC_REF
 from agent.llm.qwen import QwenClient
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-idx = BM25Index.from_file("index/bm25.pkl"); loop = SubQLoop(QwenClient(), idx)
+idx = BM25Index.from_file("processed_vl/bm25_vl.pkl"); loop = SubQLoop(QwenClient(), idx)
 A = json.load(open("out/decompose_route.json"))
 GEN = set("是 多少 是否 的 在 年 是什么 预计 为 元 中 有 哪 项 该 了 文档 报告 占 与".split())
 kt = lambda a: [t for t in tokenize(a, True, "jieba") if t not in GEN and len(t) > 1]

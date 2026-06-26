@@ -42,14 +42,19 @@ class BM25Index(Retriever):
         self.topk = cfg["topk"]
         self.mode = cfg.get("tokenizer", "jieba")
         self.drop_stop = cfg.get("drop_stopwords", True)
+        self.index_breadcrumb = cfg.get("index_breadcrumb", False)  # breadcrumb 进不进索引词
         self.chunks: list[dict] = []
         self.by_doc: dict[str, list[int]] = {}
         self._bm25: BM25Okapi | None = None
         self._tokens: list[list[str]] = []
 
+    def _index_text(self, c: dict) -> str:
+        bc = c.get("breadcrumb", "")
+        return f"{bc} {c['text']}" if (self.index_breadcrumb and bc) else c["text"]
+
     def build(self, chunks: list[dict]):
         self.chunks = chunks
-        self._tokens = [tokenize(c["text"], self.drop_stop, self.mode) for c in chunks]
+        self._tokens = [tokenize(self._index_text(c), self.drop_stop, self.mode) for c in chunks]
         self.by_doc = {}
         for i, c in enumerate(chunks):
             self.by_doc.setdefault(c["doc_id"], []).append(i)

@@ -13,7 +13,7 @@ SCEN = re.compile(r"[王李张赵刘陈]某|某人")        # 案例情景人物
 GEN = set("是 多少 是否 的 在 年 是什么 预计 为 元 中 有 哪 项 该 了 文档 报告 占 与".split())
 kt = lambda a: [t for t in tokenize(a, True, "jieba") if t not in GEN and len(t) > 1]
 
-idx = BM25Index.from_file("index/bm25.pkl")
+idx = BM25Index.from_file("processed_vl/bm25_vl.pkl")
 loop = SubQLoop(None, idx); loop.cache_retrieve = False
 A = json.load(open("out/decompose_route.json"))
 

@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 SCEN = re.compile(r"[王李张赵刘陈]某|某人")
 OUT = "out/judge.jsonl"
-idx = BM25Index.from_file("index/bm25.pkl"); loop = SubQLoop(QwenClient(), idx)
+idx = BM25Index.from_file("processed_vl/bm25_vl.pkl"); loop = SubQLoop(QwenClient(), idx)
 A = json.load(open("out/decompose_route.json"))
 
 done = set()

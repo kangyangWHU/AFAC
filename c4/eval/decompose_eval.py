@@ -38,7 +38,7 @@ def main():
     if args.n:
         qs = qs[:args.n]
 
-    outlines = json.load(open(os.path.join(config.path("index_dir"), "outlines.json"),
+    outlines = json.load(open(os.path.join(config.path("index_dir"), "outlines_vl.json"),
                                encoding="utf-8"))
     dec = Decomposer(QwenClient(), outlines)
 

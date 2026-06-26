@@ -10,7 +10,7 @@ import os
 import re
 import threading
 from ..llm.base import LLMClient
-from ..chunker.base import normalize
+from ..textutil import normalize
 from .. import config
 
 ARCHETYPES = {"value_compare", "option_verdict", "single_fact", "fallback"}

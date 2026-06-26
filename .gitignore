@@ -18,14 +18,18 @@ env/
 
 # ============ c4：大型派生产物（可由代码重建）============
 c4/index/
-c4/processed/
+c4/processed_vl/
+c4/out/
 c4/chunks/
 c4/labeling/
-
+c4/relabel/
+c4/relabel_opus/
+c4/submissions/
 # ============ c3：大型派生产物 ============
-c3/data/
+c3/
 
 c2/cache/
+c2/cache_up/
 c2/out/
 # ============ 临时/系统 ============
 *.tmp
