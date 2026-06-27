@@ -8,6 +8,8 @@ import os
 import re
 import glob
 import argparse
+import numpy as np
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
@@ -18,7 +20,7 @@ from config import TRAIN_TABLE_DIR, API_USER_IDS
 from preprocess import prep
 from slicer_table import slice_table
 from split_table import subtables
-from stitch_table import stitch_table, parse_tile, rows_to_html
+from stitch_table import stitch_table, parse_tile, parse_tile_segments, rows_to_html
 from evaluate import table_teds, text_edit_loss
 
 
@@ -254,6 +256,15 @@ def run_one(im, timeout=240):
 _MIN_TABLE_CELLS = 10   # 段识别出 td≥此数=真子表;否则=标题(转文本)。实测真子表td≥72、标题≤5
 
 
+def _grid_cells(g):
+    return sum(len(r) for r in g)
+
+
+def _grid_cols(g):
+    ws = [len(r) for r in g if r]
+    return Counter(ws).most_common(1)[0][0] if ws else 0
+
+
 def run_one_split(im, timeout=240):
     """多子表：subtables 把整图切成有序块 [(kind,bbox)]。'text' 块(表外文字)单独识别；
     'seg' 块走 run_one，**按识别出的 td 数判**:多格(≥10)=真子表(保留 table)、单格/几格
@@ -261,26 +272,66 @@ def run_one_split(im, timeout=240):
 
     table_teds 按出现顺序逐表配对,切成 N 个独立 <table> 逐个对齐 GT[i]——避免旧 stitch
     把 N 子表读成 1 大 table。按 td 数(识别结果)判表/标题,不靠几何段高,矮的真子表(ec745
-    147px、td=306)不会被误当标题合并掉。"""
+    147px、td=306)不会被误当标题合并掉。
+
+    **表头小条合并**:竖线断裂(③)有时把单表的「列号表头行」从表身剥下来切成两段——表头
+    小条(td≈220)+表身大表(td≈6000),列数几乎相同。这会让 pred 表数>GT、索引错位 TEDS 崩
+    (945e8fe9/88c6dbb4/1f4293f3 89→3.5)。判据:相邻两表,小表 cells < 大表/8 **且** 列数差
+    ≤6 → 判表头小条,行拼接(上+下)归一表。两条 AND 缺一不可:只看列数会误并真子表(97c4c182
+    列72≈67);只看 td 小会误并真小子表(19a15357 顶部 td80 但列10≠68)。真子表(列不同)一律
+    不动。同一合并顺手修「一段被 run_one 多吐碎块」(c713916a td=39 碎块顶歪索引)。
+    **未合并的表沿用 run_one 原始 HTML 输出,与改动前逐字节一致,不影响其它表。**
+
+    **稀疏薄条退 fallback**:稀疏尾行(只剩行号、数据空)被白缝切下来后,墨量低(<1%),
+    本身不是子表;若除它之外只剩 1 个密集真表(墨≥1%),整图其实是单表 → 退回整图 run_one
+    (整图能把稀疏尾正确补成满列宽,如 80995347 读全 107/107 行)。**只数密集 seg 决定是否
+    多子表**,稀疏薄条不计入——避免 94352240(1密集+2稀疏尾)被当 3 子表切进 split 路径、稀疏
+    尾读成 1 列假表顶歪索引(98→68)。阈值 1% 边际极大(实测薄条≤0.72%、真表≥4.13%),真小
+    子表(19a15357 顶部 9.71%)稳算密集、不误退。"""
     blocks = subtables(im)
-    if sum(1 for k, _ in blocks if k == "seg") <= 1:
+    g0 = np.asarray(im.convert("L")) < 128
+    def _seg_ink(bb):
+        x0, y0, x1, y1 = bb
+        return g0[y0:y1, x0:x1].mean() if y1 > y0 and x1 > x0 else 0.0
+    dense = [bb for k, bb in blocks if k == "seg" and _seg_ink(bb) >= 0.01]
+    if len(dense) <= 1:                              # 密集真表≤1 → 单表,退整图 fallback
         return run_one(im, timeout)
-    parts, ncalls, ntab = [], 0, 0
+    items, ncalls = [], 0          # item: ["table", grid, html|None] | ["text", str, None]
     for kind, bb in blocks:
         if kind == "text":
             txt = _recognize_text(im, bb, timeout)
             if txt:
-                parts.append(txt)
+                items.append(["text", txt, None])
         else:                                  # seg: run_one 后按 td 数判表/标题
             p, nc, _ = run_one(im.crop(bb), timeout)
             ncalls += nc
             if p.lower().count("<td") >= _MIN_TABLE_CELLS:
-                parts.append(p)
-                ntab += 1
+                grids = [g for _, g in parse_tile_segments(p) if g]
+                if len(grids) == 1:
+                    items.append(["table", grids[0], p])      # 整段一表:留原始 HTML
+                else:
+                    for g in grids:                           # 一段多表(碎块):待合并,重渲染
+                        items.append(["table", g, None])
             else:
                 txt = _strip_html(p)
                 if txt:
-                    parts.append(txt)
+                    items.append(["text", txt, None])
+    merged = []                    # 表头小条/碎块合并:相邻表 小cells<大/8 且 列差≤6 → 拼行
+    for it in items:
+        if it[0] == "table" and merged and merged[-1][0] == "table":
+            prev = merged[-1][1]
+            sm, lg = sorted((_grid_cells(prev), _grid_cells(it[1])))
+            if sm < lg / 8 and abs(_grid_cols(prev) - _grid_cols(it[1])) <= 6:
+                merged[-1] = ["table", prev + it[1], None]    # 上+下拼行,重渲染
+                continue
+        merged.append(it)
+    parts, ntab = [], 0
+    for kind, val, html in merged:
+        if kind == "table":
+            parts.append(html if html is not None else rows_to_html(val))
+            ntab += 1
+        else:
+            parts.append(val)
     return "\n".join(parts), ncalls, {"subs": ntab}
 
 
