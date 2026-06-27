@@ -1,66 +1,63 @@
-"""v4 Agentic 编排器（plan.md §v4）：decompose → 子问题 loop → verdict/synthesize。
-原则：LLM 负责抽取/核验，代码只做结构化解析与合法性校验；不做基于错题的答案补丁。
+"""简化编排（无 judge / 无 verdict）：规则 decompose → 逐 fact 直接检索 → 合并全部 chunk
+→ 一次领域 prompt 答题（legacy 式合并推理）。decompose 的价值=驱动逐选项/逐篇把证据召回；
+judge/loop 仅留给 eval 测检索效果, 不进生产线。
 """
 from __future__ import annotations
 import os
 import re
-import json
 from dataclasses import dataclass, field
 from .. import config
 from ..index.bm25 import BM25Index
 from ..llm.qwen import QwenClient
 from ..postprocess.answer import normalize_answer, is_valid, parse_option_verdicts
 from .decompose import Decomposer
-from .loop import SubQLoop
-from .idroute import IdRouter
 
-# "第N份文档/前者/后者/text0N"是给路由/定篇用的标签, 留在 ask 里只会污染 BM25 query 与 judge → 检索前剥掉。
+# "第N份/前者/text0N"是定篇标签, 留在 ask 里污染 BM25 query → 检索前剥掉。
 _DOC_REF = re.compile(r"第[一二三四五六七八九十\d]+份(文档|报告)?之?的?|前者的?|后者的?|两份(文档|报告)?[中里的]*"
                       r"|(?:文档|文件|在)?\s*[（(]?\s*(?:fc_)?text[ _]?0*\d+\s*[）)]?\s*[中里内]?之?的?")
-# 聚合/全称量词: 选项含此 → 该选项的 fact 要【逐篇各核一次】(verdict 再判"是否都满足"), 而非整组一次
-_AGG_RE = re.compile(r"均|都|两份|两者|双方|所有|全部|各")
 
-_ARCH_HINT = {
-    "value_compare": "各子问题给出了每个实体的数值。按选项里陈述的数值与排序，选与这些值最一致的选项。",
-    "option_verdict": "已查到各选项所依赖的事实值。逐选项把事实与该选项主张比对：一致则该选项为真。多选题选入所有为真的选项（有正向证据就倾向选入，宁多勿漏）；判断题/单选选为真的那个。",
-    "single_fact": "子问题给出了关键事实。选与该事实一致的选项。",
-    "fallback": "依据子问题结论与原题直接判断。",
+# ---- 领域 prompt（复用 legacy reasoner 文案）----
+_BASE = """你是金融长文档问答专家。严格依据【证据】作答，证据没有的不要用常识臆测。
+先看清题干在问什么"条件/范围"。判断某选项是否入选，依据是【该选项是否满足题干所问的条件】，
+不是【选项里那句描述本身是否属实】。若选项自带的说明已表明它不满足题干要求，
+那么即使这句说明属实，该选项对本题也应判为不入选。
+对每个选项，按固定格式判断，避免"事实算对但结论填反"：
+  选项X：陈述了「<选项主张>」｜证据事实「<从证据得到的事实/数值>」｜两者是否一致 → 真/假
+判定"是否一致"的规则：只有当选项与证据在【主体/年份/单位/数值/方向】上确有不符时才判假；
+若这些都对，仅仅是选项表述更概括、或省略了不影响真假的限定词，**不算不符，应判真**。
+多选题逐项独立判断；选项主张与证据事实一致就选，不要因"措辞不如证据具体"或"没找到反证"而漏掉本应为真的项。
+**务必**在最后单独一行输出最终结论：答案：<字母>（这一行不能省略）。"""
+
+_DOMAIN = {
+    "regulatory": "这是监管法规题。必须依据法条原文判断，注意施行日期、时限（X日/X个月）、"
+                  "义务主体、普通决议vs特别决议、阈值（比例/金额）。区分相近条款。",
+    "insurance": "这是保险条款题。注意责任触发条件与计算公式（身故保险金、退保金/现金价值、"
+                 "账户价值、已领年金）。涉及计算时逐产品列式计算再比较大小，不要跳步。",
+    "financial_reports": "这是财报题。多为跨年/跨公司数值比较（营收、净利润、现金流、研发投入、"
+                         "分红）。先从证据表格取准确数值（注意年份列对应），再判断增长/下滑/高低。"
+                         "注意同义口径：研发投入≈研发费用、现金分红≈股息≈派息。",
+    "financial_contracts": "这是债券/金融合同题。核对发行人、发行规模、信用评级、受托管理人、"
+                           "违约责任、增信安排等要素，逐项与证据比对。",
+    "research": "这是行业研报题。核验具体数字（市场规模、增速、份额、年份）。数字须在证据中有"
+                "明确出处；趋势方向类可据图表描述判断。张冠李戴只指'数值对但主体/国家/年份/单位/方向被换掉'；"
+                "选项若与证据的主体年份单位数值方向都一致、只是少写个限定词，应判真，不要疑心判假。",
 }
 
-_STATEMENT_TRUTH_RE = re.compile(
-    r"(下列|以下).{0,12}(说法|表述|陈述|描述|判断).{0,12}(正确|准确|符合|一致|成立)|"
-    r"(哪些|哪项).{0,12}(说法|表述|陈述|描述|判断).{0,12}(正确|准确|符合|一致|成立)"
-)
+_FMT_HINT = {
+    "mcq": "单选题：只有一个正确选项，输出单个字母。",
+    "tf": "判断题：根据选项含义输出 A 或 B。",
+    "multi": "多选题：选出所有正确选项，按字母序输出（如 ABC）。漏选错选均算错，逐项严格判断。",
+}
+_FMT_ANS = {"mcq": "单个字母", "tf": "A或B", "multi": "所有正确字母按字母序如ABC"}
 
-_ENTITY_CRITERION_PATTERNS = [
-    (re.compile(r"(哪些|哪几|下列哪些|以下哪些).{0,18}(产品|保险|条款).{0,18}(可以|可|能够|能).{0,8}(赔付|赔偿|给付|报销)"),
-     "选择在题目给定场景下可以赔付/赔偿/给付/报销的产品。"),
-    (re.compile(r"(哪些|哪几|下列哪些|以下哪些).{0,24}(给出|载明|明确).{0,12}(计算方法|计算公式|公式|方法)"),
-     "选择条款中明确给出具体计算方法或公式的对象。"),
-    (re.compile(r"(哪些|哪几|下列哪些|以下哪些).{0,20}(属于|构成).{0,12}(免责|除外责任|责任免除)"),
-     "选择确实属于免责范围/除外责任/责任免除的情形。"),
-    (re.compile(r"(哪些|哪几|下列哪些|以下哪些).{0,24}(满足|符合|适用|具有|包含|包括)"),
-     "选择满足原题条件的对象。"),
-]
 
-_SYN_SYS = """你根据【检索到的原文证据】对原题作答（像人读资料一样，自己从原文里找答案）。
-- 【以原文为准】：逐字逐格回原文核对，比数值先对齐日期/报告期/主体/口径/单位，别拿相邻列或别期的数顶替。
-- 逐选项把主张与原文比对：原文逐字支持才算真。多选选入所有为真的选项；判断/单选选为真的那个。
-- 原文没明说的，尽力判断别空答。
-- 最后单独一行输出：答案：<字母>（多选按字母序如 ABD）。"""
+def _build_messages(q: dict, evidence: str) -> list[dict]:
+    sys = _BASE + "\n" + _DOMAIN.get(q.get("domain", ""), "") + "\n" + _FMT_HINT.get(q["answer_format"], "")
+    opts = "\n".join(f"{k}. {v}" for k, v in q["options"].items())
+    user = (f"【证据】\n{evidence}\n\n【题目】\n{q['question']}\n\n【选项】\n{opts}\n\n"
+            f"请逐项判断并在最后一行给出：答案：<字母>")
+    return [{"role": "system", "content": sys}, {"role": "user", "content": user}]
 
-_VERDICT_SYS = """你是金融长文档问答的选项核验器。只依据给定【原文证据】（文档原文/表格）判断每个选项是否应【选入答案】。多选漏选=整题错，故判 false 要保守：只在【硬冲突】或【主张范围未被证据证实】时判 false。
-逐项判断 A-D，输出结构化 verdict：
-- true：原文证据支持该选项【完整主张】。【措辞宽松】——选项把原文概括/同义改写、省略无关紧要的修辞，只要核心事实与方向对得上，就判 true，别因"不够字面"而否。
-- false：与原文【硬冲突】判 false——数值不相等、日期/报告期不符、方向相反(增vs减/高vs低)、单位或口径错、主体/义务主体写错、条件/时限矛盾。数值类务必找到【对得上那个日期/报告期/主体的那一格】再比，别拿相邻列或别期顶替(如 35.83% ≠ 35.90%)。
-  下列【主张范围词】是选项核心、不是"无关紧要的限定词"，证据未逐一证实就判 false(宁缺勿滥选)：
-  ·全称量词(均/都/两份均/所有/任一)：须对它点名的【每个主体/文档】都在证据里证实该谓词，只要一个未证实→false。
-  ·具体数值/比例/日期/口径(全年vs年末、合并vs母公司等)：须与证据【同口径同期】精确对上，口径或期间不同→false。
-  ·适用场景/范围/对象(某险种承保情形、某条款适用主体等)：选项情形须落在证据所述范围内，情形不符→false，别因"名字沾边"就选。
-- unknown：原文证据里【确实找不到】相关依据(是真没有，不是"不够逐字")。
-evidence 只能填写【原文证据】中出现的 chunk_id；没有直接证据则填空数组。
-最后只输出 JSON，不要 markdown，不要解释。格式：
-{"A":{"verdict":"true|false|unknown","evidence":["chunk_id"],"reason":"一句话理由"},"B":{...},"C":{...},"D":{...}}"""
 
 @dataclass
 class AgenticAnswer:
@@ -77,66 +74,60 @@ class AgenticSolver:
     def __init__(self):
         variant = config.load().get("agentic", {}).get("index_variant", "")  # ""=旧, "_vl"=新parse
         idx = BM25Index.from_file(os.path.join(config.path("index_dir"), f"bm25{variant}.pkl"))
-        outlines = json.load(open(os.path.join(config.path("index_dir"), f"outlines{variant}.json"),
-                                  encoding="utf-8"))
         self.index = idx
         self.llm = QwenClient()
-        self.decomposer = Decomposer(self.llm, outlines)
-        self.loop = SubQLoop(self.llm, idx)
-        self.idrouter = IdRouter()
+        self.decomposer = Decomposer(idx)
         a = config.load().get("agentic", {})
         self.synth_max_tokens = a.get("synth_max_tokens", 600)
         self.fact_workers = a.get("fact_workers", 6)
-        self.pool_max_chars = a.get("synth_pool_chars", 16000)
-        self.sib = a.get("verify_siblings", 2)   # 每 fact 除 src 外多带几块同源候选(治近重复表/口径不一: 文档同指标多版值)
-        self.final_thinking = config.get("llm.reasoning_effort") is not None  # 仅"最终答题"(verdict/synth)开思考; judge不开. 配了reasoning_effort才生效
+        self.pool_max_chars = a.get("synth_pool_chars", 18000)
+        self.retrieve_k = a.get("retrieve_k", 8)            # 每 fact 每篇取多少 chunk
+        self.final_thinking = config.get("llm.reasoning_effort") is not None
         self._cid2text = {ch["chunk_id"]: ch["text"] for ch in idx.chunks}
         self._cid2chunk = {ch["chunk_id"]: ch for ch in idx.chunks}
+        self._ids = self.decomposer.ids                     # doc_id → 产品/主体名(给证据块打可读标签)
 
-    def _fact_docs(self, f: dict, cand: list[str], agg_q: bool = False) -> list[list[str]]:
-        """这条 fact 在哪个/哪些【篇组】跑 loop。decompose 已定 scope(单篇=具名/拆篇, 整组=单点查找):
-        - 单篇 → 直接搜;
-        - 整组 + 【聚合题】(任一选项含 均/都/两份…) → 【每篇各一条】逐篇核, verdict 再判"是否都满足"(治"均"
-          假阳); 带实体的 fact 在别篇查无→无害;
-        - 整组 + 普通(答案只在其一) → 高精度身份唯一命中就缩一篇, 否则整组齐检。"""
-        docs = f.get("doc") or cand
-        if not isinstance(docs, list):
-            docs = [docs]
-        docs = [d for d in docs if d in cand] or cand
-        if len(docs) == 1:                            # 具名/拆篇 → 单篇
-            return [docs]
-        if agg_q:                                     # 聚合题 → 整组 fact 逐篇各跑一次(verdict 核"是否都")
-            return [[c] for c in docs]
-        pin = self.idrouter.route(f["ask"], docs)     # 整组里实体名/语义唯一命中 → 缩到一篇
-        return [pin] if pin else [docs]               # 否则 → 整组一起检索
+    def _backfill(self, cids: list[str]) -> list[str]:
+        """命中块 + 前后各1邻块(small-to-big, 治答案跨块/'详见'指针), 按 seq 连贯, 去重。"""
+        out: list[str] = []
+        seen: set[str] = set()
+        for cid in cids:
+            ch = self._cid2chunk.get(cid)
+            grp = [cid]
+            if ch and ch.get("seq") is not None:
+                try:
+                    grp = sorted({cid} | {nb["chunk_id"] for nb in
+                                 self.index.neighbors(ch["doc_id"], ch["seq"], 1)},
+                                 key=lambda c: self._cid2chunk.get(c, {}).get("seq", 0))
+                except Exception:
+                    pass
+            for c in grp:
+                if c not in seen:
+                    seen.add(c); out.append(c)
+        return out
 
-    def _run_one_fact(self, f: dict, dids: list[str]) -> dict:
-        ask = _DOC_REF.sub("", f["ask"]).strip()
-        r = self.loop.solve(ask, dids)
-        chunk_ids = [cid for t in r.trace for cid in t.get("chunks", [])]
-        return {"ask": f["ask"], "doc": "/".join(dids),
-                "option_id": f.get("option_id", "shared"),
-                "value": r.value if r.found else "未查到",
-                "found": r.found, "src": r.source_chunk_id, "evidence": r.source_text,
-                "chunks": chunk_ids}
-
-    def _run_facts(self, d: dict, doc_ids, q: dict) -> list[dict]:
+    def _gather_evidence(self, d: dict, doc_ids) -> list[dict]:
+        """逐 fact 在其【每篇】各取 top-k chunk(保证 ≤2 篇都有代表) + 邻块回填(无 judge)。"""
         cand = [str(x) for x in doc_ids]
-        agg_q = any(_AGG_RE.search(str(t or "")) for t in q.get("options", {}).values())
-        seen, jobs = set(), []
-        for f in d["facts"]:
-            for dids in self._fact_docs(f, cand, agg_q):
-                key = (f["ask"], tuple(dids))         # 去重: 模型重复 fact + 聚合拆出的同篇
-                if key not in seen:
-                    seen.add(key)
-                    jobs.append((f, dids))
-        if self.fact_workers > 1 and len(jobs) > 1:
+
+        def run(f: dict) -> dict:
+            docs = [x for x in (f.get("doc") or cand) if x in cand] or cand
+            ask = _DOC_REF.sub("", f["ask"]).strip() or f["ask"]
+            cids: list[str] = []
+            for dd in docs:                                  # 每篇各取, 不让一篇挤掉另一篇
+                cids += [h.chunk_id for h in self.index.search_local(ask, [dd], k=self.retrieve_k)]
+            f["chunks"] = self._backfill(cids)
+            return f
+
+        facts = d["facts"]
+        if self.fact_workers > 1 and len(facts) > 1:
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=self.fact_workers) as ex:
-                return list(ex.map(lambda j: self._run_one_fact(*j), jobs))
-        return [self._run_one_fact(f, dids) for f, dids in jobs]
+                return list(ex.map(run, facts))
+        return [run(f) for f in facts]
 
-    def _evidence_pool(self, facts: list[dict], *, tagged: bool = False) -> str:
+    def _evidence_pool(self, facts: list[dict]) -> str:
+        """合并全部 fact 的 chunk → 去重 → 带 [id|doc|breadcrumb] 标签 → 截到 pool 上限。"""
         seen: set[str] = set()
         out, chars = [], 0
         for s in facts:
@@ -147,236 +138,37 @@ class AgenticSolver:
                 t = self._cid2text.get(cid)
                 if not t:
                     continue
-                if tagged:
-                    ch = self._cid2chunk.get(cid, {})
-                    bc = ch.get("breadcrumb") or ch.get("article_no") or ch.get("type") or ""
-                    block = f"[{cid} | {ch.get('doc_id')} | {bc}]\n{t}"
-                else:
-                    block = t
+                ch = self._cid2chunk.get(cid, {})
+                did = str(ch.get("doc_id"))
+                name = (self._ids.get(did) or did)[:40]      # 用产品/主体名而非不透明 doc_id, 让模型把证据归到对应选项
+                bc = ch.get("breadcrumb") or ch.get("article_no") or ch.get("type") or ""
+                block = f"[{name} | {bc}] {t}"
                 out.append(block)
                 chars += len(block)
                 if chars >= self.pool_max_chars:
-                    return "\n---\n".join(out)
-        return "\n---\n".join(out)
+                    return "\n\n".join(out)
+        return "\n\n".join(out)
 
-    def _evidence_by_option(self, q: dict, facts: list[dict]) -> tuple[str, set[str]]:
-        """按【选项】分组，每选项只放 judge 选中的【答案块 src】(+相邻块补上下文)，不是整条检索轨迹。
-        loop 的价值=judge 已从一批块里挑出答案块；塞全部 chunks 等于丢掉这层筛选、退化成 legacy 大池。
-        src 为空(没命中)的 fact 退取它检索到的前1块当弱线索。返回(分组文本, 实际展示的 chunk_id 集)。"""
-        opts = [k for k in q.get("options", {}) if k in "ABCD"]
-        by_opt: dict[str, list[str]] = {}
-        for s in facts:
-            bucket = by_opt.setdefault(s.get("option_id") or "shared", [])
-            src, ranked = s.get("src"), s.get("chunks", [])
-            if src:                                  # 答案块 + 前 sib 个同源候选: 近重复表/口径不一时让 verdict 找到对得上选项的那一版
-                picks = [src] + [c for c in ranked if c != src][:self.sib]
-            else:
-                picks = ranked[:1]                   # 没命中 → 前1块当弱线索
-            for i, cid in enumerate(picks):          # 仅 src 补相邻块, 其余只放本块, 控规模
-                for c in (self._src_with_context(cid) if i == 0 else [cid]):
-                    if c not in bucket:
-                        bucket.append(c)
-        shown: set[str] = set()
-
-        def render(cids: list[str]) -> str:
-            blocks = []
-            for cid in cids:
-                t = self._cid2text.get(cid)
-                if not t:
-                    continue
-                shown.add(cid)
-                ch = self._cid2chunk.get(cid, {})
-                bc = ch.get("breadcrumb") or ch.get("article_no") or ch.get("type") or ""
-                blocks.append(f"[{cid} | {ch.get('doc_id')} | {bc}]\n{t}")
-            return "\n---\n".join(blocks) if blocks else "(该选项未检索到定向证据，参考公共证据)"
-
-        sections = [f"《选项{o} 证据》\n{render(by_opt.get(o, []))}" for o in opts]
-        shared = by_opt.get("shared", [])
-        if shared:
-            sections.append(f"《公共证据(跨选项对比/题干共用)》\n{render(shared)}")
-        return "\n\n".join(sections), shown
-
-    def _src_with_context(self, cid: str, window: int = 1) -> list[str]:
-        """src 块 + 前后 window 个相邻块(治答案跨块/'详见'指针)，按 seq 连贯排序。"""
-        ch = self._cid2chunk.get(cid)
-        if not ch:
-            return [cid]
-        out = {cid}
-        seq = ch.get("seq")
-        if seq is not None:
-            try:
-                for nb in self.index.neighbors(ch["doc_id"], seq, window):
-                    out.add(nb["chunk_id"])
-            except Exception:
-                pass
-        return sorted(out, key=lambda c: self._cid2chunk.get(c, {}).get("seq", 0))
-
-    @staticmethod
-    def _json_obj(text: str) -> dict | None:
-        t = re.sub(r"```(?:json)?|```", "", text).strip()
-        dec = json.JSONDecoder()
-        for i, ch in enumerate(t):
-            if ch != "{":
-                continue
-            try:
-                obj, _ = dec.raw_decode(t[i:])
-            except Exception:
-                continue
-            if isinstance(obj, dict):
-                return obj
-        return None
-
-    @staticmethod
-    def _has_options(obj) -> bool:
-        """模型是否真给出了含 A-D 键的 verdict JSON（区分'判了'与'压根没吐 JSON'）。"""
-        if not isinstance(obj, dict):
-            return False
-        raw = obj.get("verdicts") if isinstance(obj.get("verdicts"), dict) else obj
-        return isinstance(raw, dict) and any(k in raw for k in "ABCD")
-
-    @staticmethod
-    def _norm_verdict(v) -> str:
-        if isinstance(v, bool):
-            return "true" if v else "false"
-        s = str(v or "").strip().lower()
-        false_words = ("false", "no", "假", "错误", "不正确", "不成立", "不符合",
-                       "不一致", "冲突", "矛盾")
-        true_words = ("true", "yes", "真", "正确", "成立", "符合", "一致", "支持")
-        unknown_words = ("unknown", "uncertain", "无法判断", "不能判断", "证据不足",
-                         "未查到", "不确定", "未知")
-        if any(w in s for w in unknown_words):
-            return "unknown"
-        if any(w in s for w in false_words):
-            return "false"
-        if any(w in s for w in true_words):
-            return "true"
-        return "unknown"
-
-    def _normalize_verdicts(self, obj: dict | None, q: dict,
-                            allowed_evidence: set[str]) -> dict[str, dict]:
-        raw = obj.get("verdicts") if isinstance(obj, dict) and isinstance(obj.get("verdicts"), dict) else obj
-        out: dict[str, dict] = {}
-        for opt in sorted(k for k in q.get("options", {}) if k in "ABCD"):
-            item = raw.get(opt) if isinstance(raw, dict) else None
-            if not isinstance(item, dict):
-                out[opt] = {"verdict": "unknown", "evidence": [], "invalid_evidence": [],
-                            "reason": "未输出该选项判断"}
-                continue
-            ev = item.get("evidence", [])
-            if isinstance(ev, str):
-                ev = [ev]
-            if not isinstance(ev, list):
-                ev = []
-            ev = [str(x).strip() for x in ev if str(x).strip()]
-            invalid = [x for x in ev if x not in allowed_evidence]
-            ev = [x for x in ev if x in allowed_evidence]
-            out[opt] = {
-                "verdict": self._norm_verdict(item.get("verdict")),
-                "evidence": ev,
-                "invalid_evidence": invalid,
-                "reason": str(item.get("reason", "")).strip()[:500],
-            }
-        return out
-
-    @staticmethod
-    def _answer_from_verdicts(q: dict, verdicts: dict[str, dict]) -> str:
-        true_opts = sorted(k for k, v in verdicts.items() if v.get("verdict") == "true")
-        if q.get("answer_format") == "multi":
-            return "".join(true_opts)
-        if len(true_opts) == 1:
-            return true_opts[0]
-        return ""
-
-    @staticmethod
-    def _selection_rule(q: dict, arch: str) -> dict[str, str]:
-        question = str(q.get("question", "")).strip()
-        if arch == "value_compare":
-            return {
-                "mode": "value_compare",
-                "criterion": "选择与题干数值、条款规则、计算结果或排序关系最一致的选项。",
-                "verdict_true": "该选项的数值/排序/计算结论与证据一致，应选入最终答案。",
-                "verdict_false": "该选项的数值/排序/计算结论与证据冲突，或关键比较关系不成立，不应选入最终答案。",
-            }
-        if _STATEMENT_TRUTH_RE.search(question):
-            return {
-                "mode": "statement_truth",
-                "criterion": "选择被原文证据支持、与文档内容一致的选项陈述。",
-                "verdict_true": "该选项陈述整体被原文证据支持，应选入最终答案。",
-                "verdict_false": "该选项陈述整体与原文证据冲突，或关键主体/数值/条件/口径不一致，不应选入最终答案。",
-            }
-        for pat, criterion in _ENTITY_CRITERION_PATTERNS:
-            if pat.search(question):
-                return {
-                    "mode": "entity_satisfies_predicate",
-                    "criterion": criterion,
-                    "verdict_true": "该选项对应的对象/情形满足原题选择条件，应选入最终答案。",
-                    "verdict_false": "该选项对应的对象/情形不满足原题选择条件，不应选入最终答案；即使选项括号里的否定性解释本身被证据支持，也要判 false。",
-                }
-        return {
-            "mode": "statement_truth",
-            "criterion": "选择被原文证据支持、与题目要求一致的选项。",
-            "verdict_true": "该选项按原题要求被证据支持，应选入最终答案。",
-            "verdict_false": "该选项按原题要求不被证据支持或与证据冲突，不应选入最终答案。",
-        }
-
-    def _verify_options(self, q: dict, arch: str, facts: list[dict],
-                        rule: dict[str, str]) -> tuple[str, dict[str, dict], str]:
-        opts = "\n".join(f"{k}. {v}" for k, v in q["options"].items())
-        subqs = "\n".join(f"- {s['ask']}" for s in facts)
-        pool, allowed = self._evidence_by_option(q, facts)
-        user = (f"【题目】{q['question']}\n\n【选项】\n{opts}\n\n"
-                f"【答案判定规则】\n"
-                f"- mode: {rule['mode']}\n"
-                f"- selection_criterion: {rule['criterion']}\n"
-                f"- verdict=true: {rule['verdict_true']}\n"
-                f"- verdict=false: {rule['verdict_false']}\n"
-                f"- 注意：verdict 表示该选项字母是否应进入最终答案；"
-                f"不要只判断括号里的解释句是否事实为真。\n\n"
-                f"【已分解的待核子问题(回到下面原文证据里逐一核到那一格)】\n{subqs}\n\n"
-                f"【原文证据(已按选项分组：判某选项时先核它名下《选项X 相关证据》，"
-                f"《公共证据》供跨选项对比)】\n{pool}\n\n"
-                f"【题型】{_ARCH_HINT.get(arch, '')}\n"
-                "请逐项核验选项，并只输出指定 JSON。")
-        out = self.llm.complete([{"role": "system", "content": _VERDICT_SYS},
-                                 {"role": "user", "content": user}],
-                                max_tokens=self.synth_max_tokens, enable_thinking=self.final_thinking)
-        obj = self._json_obj(out)
-        if not self._has_options(obj):          # 没吐出含 A-D 的 JSON → 硬提醒重试一次，别直接落 fallback 猜
-            out2 = self.llm.complete(
-                [{"role": "system", "content": _VERDICT_SYS},
-                 {"role": "user", "content": user},
-                 {"role": "assistant", "content": out[:600]},
-                 {"role": "user", "content": "你没有输出规定格式的 JSON。现在【只】输出那个 JSON（必须含 A/B/C/D 四个键），不要任何解释。"}],
-                max_tokens=self.synth_max_tokens, enable_thinking=self.final_thinking)
-            if self._has_options(self._json_obj(out2)):
-                obj, out = self._json_obj(out2), out2
-        verdicts = self._normalize_verdicts(obj, q, allowed)
-        ans = self._answer_from_verdicts(q, verdicts)
-        return ans, verdicts, out
-
-    def _synthesize(self, q: dict, arch: str, facts: list[dict]) -> str:
-        opts = "\n".join(f"{k}. {v}" for k, v in q["options"].items())
-        subqs = "\n".join(f"- {s['ask']}" for s in facts)
-        pool = self._evidence_pool(facts)
-        user = (f"【题目】{q['question']}\n\n【选项】\n{opts}\n\n"
-                f"【已分解的待核子问题(回到原文证据里逐一核实)】\n{subqs}\n\n"
-                f"【检索到的原文证据】\n{pool}\n\n"
-                f"【题型】{_ARCH_HINT.get(arch, '')}\n"
-                "请【以原文证据为准】，对每个选项逐一核对判断，给出最终答案。")
-        out = self.llm.complete([{"role": "system", "content": _SYN_SYS},
-                                 {"role": "user", "content": user}],
-                                max_tokens=self.synth_max_tokens, enable_thinking=self.final_thinking)
+    def _answer_llm(self, q: dict, facts: list[dict]) -> str:
         fmt = q.get("answer_format", "mcq")
+        pool = self._evidence_pool(facts)
+        msgs = _build_messages(q, pool)
+        out = self.llm.complete(msgs, max_tokens=self.synth_max_tokens,
+                                enable_thinking=self.final_thinking)
         ans = normalize_answer(out, fmt) or parse_option_verdicts(out, fmt)
-        return ans if is_valid(ans, fmt) else "A"
+        if not is_valid(ans, fmt):                          # 没"答案："行→强制再问一次只输出字母
+            out2 = self.llm.complete(
+                msgs + [{"role": "assistant", "content": out[-1500:]},
+                        {"role": "user", "content":
+                         f"基于以上分析直接下结论，只输出一行 答案：<{_FMT_ANS.get(fmt)}>"}],
+                max_tokens=30, enable_thinking=False)
+            a2 = normalize_answer(out2, fmt) or parse_option_verdicts(out2, fmt)
+            if is_valid(a2, fmt):
+                ans = a2
+        return ans if is_valid(ans, fmt) else "A"           # 绝不交空卷
 
     def answer(self, q: dict, doc_ids) -> AgenticAnswer:
         d = self.decomposer.decompose(q, doc_ids)
-        facts = self._run_facts(d, doc_ids, q)
-        rule = self._selection_rule(q, d["archetype"])
-        ans, verdicts, _ = self._verify_options(q, d["archetype"], facts, rule)
-        path = "verdict"
-        if not is_valid(ans, q.get("answer_format", "mcq")):
-            ans = self._synthesize(q, d["archetype"], facts)
-            path = f"{path}+synth_fallback"
-        return AgenticAnswer(q["qid"], ans, path, d["archetype"], facts, verdicts, rule)
+        facts = self._gather_evidence(d, doc_ids)
+        ans = self._answer_llm(q, facts)
+        return AgenticAnswer(q["qid"], ans, "merge", d["archetype"], facts)
