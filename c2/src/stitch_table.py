@@ -418,8 +418,13 @@ def rows_to_html(rows, panel_n=1):
 # ---------------------------------------------------------------------------
 # 多子表重组主入口
 # ---------------------------------------------------------------------------
-def stitch_multi(tile_outputs, meta):
-    """按 API 自带的多 <table> 边界拆子表、各自重建、拼回。单表走单表路径。"""
+def stitch_multi(tile_outputs, meta, single=False):
+    """按 API 自带的多 <table> 边界拆子表、各自重建、拼回。单表走单表路径。
+
+    single=True(全宽模式用):**不做任何子表检测** —— 几何层 subtables/run_one_split 已把子表
+    切好,进来的 unit 就是单张子表。关掉 band 边界(caption 误判)和 _split_at_headers(表头行
+    误判),只把所有带重建成一张表(列重建/稀疏补位仍走 _reconstruct_grid)。修「全宽单列tile
+    被 stitch 误拆成多表」(8a4 被拆4张→11.3)。"""
     n_band = len(tile_outputs)
     n_col = max((len(row) for row in tile_outputs), default=0)
     col_cells = meta.get("col_cells", [])
@@ -487,7 +492,7 @@ def stitch_multi(tile_outputs, meta):
             # 边界判定：① 同 tile 出现新表段(j>0)；② 段前有标题样文字
             # (竖线缝 split_bands 实测净负，已弃用——会过切，offset 多子表收益)
             has_data = any(any(g for g in br) for br in cur_bands)
-            boundary = (j > 0) or (seg_cap and has_data)
+            boundary = False if single else ((j > 0) or (seg_cap and has_data))
             if boundary and cur_bands:
                 subtables.append((cur_caption, cur_bands))
                 cur_caption = seg_cap
@@ -503,7 +508,7 @@ def stitch_multi(tile_outputs, meta):
     if len(subtables) <= 1:
         rows = _reconstruct_grid(cur_bands if subtables else [], col_cells, col_cuts,
                                  overlap_x=overlap_x, overlap_y=overlap_y, framed=framed)
-        segs = _split_at_headers(rows)
+        segs = [rows] if (single and rows) else _split_at_headers(rows)
         if len(segs) >= 2:
             html = "\n\n".join(rows_to_html(s, panel_n) for s in segs)
         else:
@@ -529,4 +534,4 @@ def stitch_multi(tile_outputs, meta):
 
 # 兼容旧调用名
 def stitch_table(tile_outputs, meta, **kw):
-    return stitch_multi(tile_outputs, meta)
+    return stitch_multi(tile_outputs, meta, single=kw.get("single", False))

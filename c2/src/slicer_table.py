@@ -301,7 +301,8 @@ def split_table_texts(im, hi_frac=0.05, wd_frac=0.40):
     return tb, [b[:4] for b in texts]
 
 
-def slice_table(im, tile_max=TILE_MAX, blank_ink=BLANK_INK, peel=True):
+def slice_table(im, tile_max=TILE_MAX, blank_ink=BLANK_INK, peel=True,
+                col_tile_max=None, max_rows=None):
     """密度自适应 + 严格网格线 2D 切分。
 
     返回:
@@ -366,10 +367,23 @@ def slice_table(im, tile_max=TILE_MAX, blank_ink=BLANK_INK, peel=True):
     # tile 直接限行列：每 tile ≤MAX_TILE_ROWS 行 × ≤MAX_TILE_COLS 列。不再用 CELL_BUDGET 中介
     # (本是图片 OCR API、无 token 截断,格数由行列上限直接限定);max_rows 固定也天然不受列上限
     # 影响 → 不会经"行带挪动"破坏 _split_at_headers 子表切分(00332 列上限耦合丢表头的旧根因)。
-    row_cuts, row_cells = _group_boundaries(row_bnd, tile_max, max_cells=MAX_TILE_ROWS)
+    # col_tile_max: 列方向像素上限,默认=tile_max。设成很大(=W)则列不拆、全宽一个列tile
+    # (8a4 那种"宽刚过limit、拆列会孤立出重复列小块→幻觉"的表用)。
+    # max_rows: 每 tile 行数上限,默认 MAX_TILE_ROWS。全宽时配短行(如8)防长输出截断。
+    _ctm = col_tile_max or tile_max
+    _mr = max_rows or MAX_TILE_ROWS
+    # 全宽模式自动门控:表宽刚过 limit(1~1.4×)——拆列会把表切成不均衡的小块,8a4 那种"重复
+    # 标签列被孤立成小tile"会触发 API 复读幻觉/丢列。改成不拆列、全宽短行(8行),下游 run_one
+    # 走 stitch 单表模式(不拆子表、保留列重建)。稀疏表(94352240)全宽也无害——stitch 单表模式
+    # 照样补稀疏列(实测仍 98),故只需宽度门控、不需密度判据。
+    fullwidth = False
+    if col_tile_max is None and tile_max < W <= 1.4 * tile_max:
+        fullwidth = True
+        _ctm, _mr = W, 8
+    row_cuts, row_cells = _group_boundaries(row_bnd, tile_max, max_cells=_mr)
     # 列 tile 切分单独用列上限（仅切列，不影响上面已定的行带划分）。
     # 安全落刀：列切点 snap 到 ±25px 内文字墨最少处，避免把单元格/数字从中间切开。
-    col_cuts, col_cells = _group_boundaries(col_bnd, tile_max, max_cells=MAX_TILE_COLS)
+    col_cuts, col_cells = _group_boundaries(col_bnd, _ctm, max_cells=MAX_TILE_COLS)
     col_cuts = _snap_cuts(col_cuts, textink, win=25)
     # 安全落刀（行，对称于列）：snap 到横向文字墨最少处，避免把一行文字从中间横切。
     # _textink_cols 作用在 dark.T 上 = 每原始行的横向短墨段(笔画)占比。
@@ -425,7 +439,7 @@ def slice_table(im, tile_max=TILE_MAX, blank_ink=BLANK_INK, peel=True):
             "blank": blank, "grid": grid_ok, "col_framed": col_framed,
             "tile_boxes": tile_boxes, "overlap_x": overlap_x, "overlap_y": overlap_y,
             "panel_n": panel_n, "cell_edge": round(edge, 1), "upsample": upsample,
-            "text_blocks": text_blocks}
+            "text_blocks": text_blocks, "fullwidth": fullwidth}
     return tiles, meta
 
 

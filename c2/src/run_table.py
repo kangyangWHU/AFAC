@@ -238,14 +238,16 @@ def _call_text_blocks(im, blocks, timeout):
     return b, a
 
 
-def run_one(im, timeout=240, peel=True):
-    tiles, meta = slice_table(im, peel=peel)
+def run_one(im, timeout=240, peel=True, col_tile_max=None, max_rows=None):
+    tiles, meta = slice_table(im, peel=peel, col_tile_max=col_tile_max, max_rows=max_rows)
     up = meta.get("upsample", 1)
     cdir = api.CACHE_UP_DIR if up > 1 else None      # 上采样 tile 缓存与原始分离
     outs = _call_grid(tiles, timeout, upsample=up, cache_dir=cdir)
     if not getattr(api, "CACHE_ONLY", False):
         outs = _refine_bad_tiles(tiles, outs, meta, timeout, upsample=up, cache_dir=cdir)
-    pred = stitch_table(outs, meta)
+    # 全宽模式:走 stitch 的单表模式(关子表检测,保留列重建/稀疏补位)。子表已在几何层切好,
+    # stitch 不该再拆——否则全宽单列tile被它的 caption 边界/表头行检测误拆成多表(8a4 11.3)。
+    pred = stitch_table(outs, meta, single=bool(meta.get("fullwidth")))
     # 表外文字块：单独识别后按位置拼回表格前/后(query 放最后)
     before, after = _call_text_blocks(im, meta.get("text_blocks", []), timeout)
     pred = before + pred + after
