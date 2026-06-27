@@ -86,6 +86,28 @@ class AgenticSolver:
         self._cid2text = {ch["chunk_id"]: ch["text"] for ch in idx.chunks}
         self._cid2chunk = {ch["chunk_id"]: ch for ch in idx.chunks}
         self._ids = self.decomposer.ids                     # doc_id → 产品/主体名(给证据块打可读标签)
+        self.cover_n = a.get("cover_chunks", 8)             # fc 每篇封面首块数(发行人/简称/代码/日期/评级等元数据常在封面)
+        self._cover = self._build_cover()
+
+    def _build_cover(self) -> dict:
+        """每篇封面(page=1)前若干非图/非空文本块——元数据(简称/代码/发行人/日期/评级)的稳定位置, 治宽query淹没。"""
+        by_doc: dict[str, list] = {}
+        for ch in self.index.chunks:
+            if ch.get("page") == 1:
+                by_doc.setdefault(ch["doc_id"], []).append(ch)
+        cover: dict[str, list[str]] = {}
+        for d, chs in by_doc.items():
+            chs.sort(key=lambda c: c.get("seq", 0))
+            out = []
+            for c in chs:
+                t = (c.get("text") or "").strip()
+                if "img_in_" in t or t.startswith("<div><img") or len(t) < 3:
+                    continue
+                out.append(c["chunk_id"])
+                if len(out) >= self.cover_n:
+                    break
+            cover[d] = out
+        return cover
 
     def _backfill(self, cids: list[str]) -> list[str]:
         """命中块 + 前后各1邻块(small-to-big, 治答案跨块/'详见'指针), 按 seq 连贯, 去重。"""
@@ -106,16 +128,24 @@ class AgenticSolver:
                     seen.add(c); out.append(c)
         return out
 
-    def _gather_evidence(self, d: dict, doc_ids) -> list[dict]:
-        """逐 fact 在其【每篇】各取 top-k chunk(保证 ≤2 篇都有代表) + 邻块回填(无 judge)。"""
+    def _gather_evidence(self, d: dict, doc_ids, domain: str = "") -> list[dict]:
+        """逐 fact 在其【每篇】各取 top-k chunk(保证 ≤2 篇都有代表) + 邻块回填(无 judge)。
+        fc 域额外纳入封面元数据块(发行人/简称/代码/日期/评级常在封面, 宽query淹没)。"""
         cand = [str(x) for x in doc_ids]
+
+        fc = (domain == "financial_contracts")               # 仅 fc: 命中的封面块从后排提到前排
 
         def run(f: dict) -> dict:
             docs = [x for x in (f.get("doc") or cand) if x in cand] or cand
             ask = _DOC_REF.sub("", f["ask"]).strip() or f["ask"]
             cids: list[str] = []
             for dd in docs:                                  # 每篇各取, 不让一篇挤掉另一篇
-                cids += [h.chunk_id for h in self.index.search_local(ask, [dd], k=self.retrieve_k)]
+                k = self.retrieve_k * 3 if fc else self.retrieve_k    # fc 多召回供封面重排
+                hits = self.index.search_local(ask, [dd], k=k)
+                if fc:                                       # 命中(score>0)的封面块提前(短、高价值元数据); 表格不提(量大无区分度,反淹池过选)
+                    cov = set(self._cover.get(dd, []))
+                    hits = sorted(hits, key=lambda h: not (h.chunk_id in cov and h.score > 0))
+                cids += [h.chunk_id for h in hits[:self.retrieve_k]]
             f["chunks"] = self._backfill(cids)
             return f
 
@@ -126,8 +156,9 @@ class AgenticSolver:
                 return list(ex.map(run, facts))
         return [run(f) for f in facts]
 
-    def _evidence_pool(self, facts: list[dict]) -> str:
-        """合并全部 fact 的 chunk → 去重 → 带 [id|doc|breadcrumb] 标签 → 截到 pool 上限。"""
+    def _evidence_pool(self, facts: list[dict], pos: dict | None = None) -> str:
+        """合并全部 fact 的 chunk → 去重 → 带 [(第N份·)主体名|breadcrumb] 标签 → 截到 pool 上限。
+        pos: doc_id→"第N份·"前缀(fc 题选项常说"第一份/第二份", 补位置标签治映射)。"""
         seen: set[str] = set()
         out, chars = [], 0
         for s in facts:
@@ -141,8 +172,9 @@ class AgenticSolver:
                 ch = self._cid2chunk.get(cid, {})
                 did = str(ch.get("doc_id"))
                 name = (self._ids.get(did) or did)[:40]      # 用产品/主体名而非不透明 doc_id, 让模型把证据归到对应选项
+                pre = (pos or {}).get(did, "")
                 bc = ch.get("breadcrumb") or ch.get("article_no") or ch.get("type") or ""
-                block = f"[{name} | {bc}] {t}"
+                block = f"[{pre}{name} | {bc}] {t}"
                 out.append(block)
                 chars += len(block)
                 if chars >= self.pool_max_chars:
@@ -151,7 +183,10 @@ class AgenticSolver:
 
     def _answer_llm(self, q: dict, facts: list[dict]) -> str:
         fmt = q.get("answer_format", "mcq")
-        pool = self._evidence_pool(facts)
+        pos = None
+        if q.get("domain") == "financial_contracts":        # fc 选项常用"第N份", 给证据补位置前缀治映射
+            pos = {str(d): f"第{i+1}份·" for i, d in enumerate(q.get("doc_ids", []))}
+        pool = self._evidence_pool(facts, pos)
         msgs = _build_messages(q, pool)
         out = self.llm.complete(msgs, max_tokens=self.synth_max_tokens,
                                 enable_thinking=self.final_thinking)
@@ -169,6 +204,6 @@ class AgenticSolver:
 
     def answer(self, q: dict, doc_ids) -> AgenticAnswer:
         d = self.decomposer.decompose(q, doc_ids)
-        facts = self._gather_evidence(d, doc_ids)
+        facts = self._gather_evidence(d, doc_ids, q.get("domain", ""))
         ans = self._answer_llm(q, facts)
         return AgenticAnswer(q["qid"], ans, "merge", d["archetype"], facts)
