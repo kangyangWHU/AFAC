@@ -319,13 +319,16 @@ def run_one_split(im, timeout=240):
                 txt = _strip_html(p)
                 if txt:
                     items.append(["text", txt, None])
-    merged = []                    # 表头小条/碎块合并:相邻表 小cells<大/8 且 列差≤6 → 拼行
+    merged = []                    # 表头小条合并:只「上面的小条 并入 下面的表身」(单向)
     for it in items:
         if it[0] == "table" and merged and merged[-1][0] == "table":
             prev = merged[-1][1]
-            sm, lg = sorted((_grid_cells(prev), _grid_cells(it[1])))
-            if sm < lg / 8 and abs(_grid_cols(prev) - _grid_cols(it[1])) <= 6:
-                merged[-1] = ["table", prev + it[1], None]    # 上+下拼行,重渲染
+            # 方向:表头小条恒在表身【上方】→ 只有 prev(上)是小条、it(下)是表身才并。
+            # 反向(下面的小表并入上面)不合理:最下面的真子表(532 seg2)/读崩的子表(90a 表1)
+            # 都在后面,prev 是大表 → 不会被误吃。
+            if _grid_cells(prev) < _grid_cells(it[1]) / 8 \
+                    and abs(_grid_cols(prev) - _grid_cols(it[1])) <= 6:
+                merged[-1] = ["table", prev + it[1], None]    # 小条(上)+表身(下)拼行
                 continue
         merged.append(it)
     parts, ntab = [], 0
