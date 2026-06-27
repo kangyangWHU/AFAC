@@ -55,10 +55,11 @@ class Decomposer:
         return hits[0] if len(hits) == 1 else None
 
     def _doc_rank(self, text: str, cand: list[str]) -> list[tuple[str, float]]:
-        """每篇内最佳块对【选项文本】的 BM25 分, 降序。绝不掺题干(题干跨多篇会拽偏所有选项)。"""
+        """每篇内最佳块对【选项文本】的 BM25 分, 降序。绝不掺题干(题干跨多篇会拽偏所有选项)。
+        用【全局 IDF】(search 而非 search_local): 排篇是跨篇比分, per-doc IDF 不可比(篇内常见词被虚高)。"""
         if self.index is None:
             return [(c, 0.0) for c in cand]
-        out = [(c, (h[0].score if (h := self.index.search_local(text, [c], k=1)) else 0.0))
+        out = [(c, (h[0].score if (h := self.index.search(text, k=1, doc_ids=[c])) else 0.0))
                for c in cand]
         out.sort(key=lambda x: x[1], reverse=True)
         return out
