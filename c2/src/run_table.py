@@ -238,8 +238,8 @@ def _call_text_blocks(im, blocks, timeout):
     return b, a
 
 
-def run_one(im, timeout=240):
-    tiles, meta = slice_table(im)
+def run_one(im, timeout=240, peel=True):
+    tiles, meta = slice_table(im, peel=peel)
     up = meta.get("upsample", 1)
     cdir = api.CACHE_UP_DIR if up > 1 else None      # 上采样 tile 缓存与原始分离
     outs = _call_grid(tiles, timeout, upsample=up, cache_dir=cdir)
@@ -303,7 +303,8 @@ def run_one_split(im, timeout=240):
             if txt:
                 items.append(["text", txt, None])
         else:                                  # seg: run_one 后按 td 数判表/标题
-            p, nc, _ = run_one(im.crop(bb), timeout)
+            # peel=False:子表裁块已是独立子表,不再剥表外文字(否则矮子表薄数据行被误剥)
+            p, nc, _ = run_one(im.crop(bb), timeout, peel=False)
             ncalls += nc
             if p.lower().count("<td") >= _MIN_TABLE_CELLS:
                 grids = [g for _, g in parse_tile_segments(p) if g]

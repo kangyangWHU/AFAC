@@ -301,7 +301,7 @@ def split_table_texts(im, hi_frac=0.05, wd_frac=0.40):
     return tb, [b[:4] for b in texts]
 
 
-def slice_table(im, tile_max=TILE_MAX, blank_ink=BLANK_INK):
+def slice_table(im, tile_max=TILE_MAX, blank_ink=BLANK_INK, peel=True):
     """密度自适应 + 严格网格线 2D 切分。
 
     返回:
@@ -312,11 +312,16 @@ def slice_table(im, tile_max=TILE_MAX, blank_ink=BLANK_INK):
         'blank'                   : 2D bool，True=空白块
         'grid'                    : 网格线是否可靠
       }
+
+    peel: 是否跑 split_table_texts 剥离表外文字。仅整页图需要(剥页眉页脚水印)。
+    **run_one_split 切出的子表裁块要传 peel=False**——子表已被 subtables 剥过页垃圾、
+    已切好,这里再剥会把矮子表的薄数据行误判成"窄+矮"文字整片剥掉(90a4388e 表1 被剥 79%
+    墨量、只剩表头)。子表标题不必剥,API 会当 caption 识别。
     """
     # 先切出主表、剥离表外孤立文字块（页眉/页脚/水印/页码）：否则它们会被当成多出来的
     # 列/行污染网格（实测列虚增，整图 slice 比真值多 3 列）。文字块坐标记进 meta，由 runner
     # 单独识别后按位置拼回表格前/后。无文字块时等价于裁到内容 bbox（兼顾原 margin 裁剪职责）。
-    tb, _texts = split_table_texts(im)
+    tb, _texts = split_table_texts(im) if peel else (None, [])
     text_blocks = []
     if tb is not None:
         x0, y0, x1, y1 = tb
