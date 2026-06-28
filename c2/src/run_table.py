@@ -323,6 +323,8 @@ def run_one_split(im, timeout=240):
                         items.append(["table", g, None])
             else:
                 txt = _strip_html(p)
+                if not txt:                       # run_one 读空(细长标题条 table-OCR 读不出)
+                    txt = _recognize_text(im, bb, timeout)   # → 直接文字识别补读,救回标题块
                 if txt:
                     items.append(["text", txt, None])
     merged = []                    # 表头小条合并:只「上面的小条 并入 下面的表身」(单向)
