@@ -12,7 +12,7 @@ import numpy as np
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
-from PIL import Image
+from PIL import Image, ImageDraw
 Image.MAX_IMAGE_PIXELS = None
 
 import api_client as api
@@ -302,8 +302,29 @@ def run_one_split(im, timeout=240):
         x0, y0, x1, y1 = bb
         return g0[y0:y1, x0:x1].mean() if y1 > y0 and x1 > x0 else 0.0
     dense = [bb for k, bb in blocks if k == "seg" and _seg_ink(bb) >= 0.01]
-    if len(dense) <= 1:                              # 密集真表≤1 → 单表,退整图 fallback
-        return run_one(im, timeout)
+    texts = [bb for k, bb in blocks if k == "text"]
+    if len(dense) <= 1:                              # 密集真表≤1 → 单表(表身不拆)
+        if not texts:
+            return run_one(im, timeout)              # 无独立页眉页脚 → 原样整图
+        # 有独立 text 块(页眉/页脚/标题):**白化它们的区域**后整图 run_one 读纯表身,
+        # 再把 text 块按 (y,x) 顺序插回。修旧 fallback 直接 return 整图、丢弃 subtables 已
+        # 识别的 text 块致页脚被并块(790bec64 '3'+代码 并成一块、RO 67)。表身=去掉页眉
+        # 页脚的整图,而非字面全图。
+        im2 = im.copy()
+        dr = ImageDraw.Draw(im2)
+        for bb in texts:
+            dr.rectangle(bb, fill=(255, 255, 255))
+        p, ncalls0, _ = run_one(im2, timeout)
+        segs = [bb for k, bb in blocks if k == "seg"]
+        ty0 = min((bb[1] for bb in segs), default=0)
+        ty0x = min((bb[0] for bb in segs), default=0)
+        seq = [(ty0, ty0x, p)]                       # 表身
+        for bb in texts:
+            t = _recognize_text(im, bb, timeout)
+            if t:
+                seq.append((bb[1], bb[0], t))        # 页眉页脚按 (y,x) 归位
+        seq.sort(key=lambda s: (s[0], s[1]))
+        return "\n\n".join(s for _, _, s in seq), ncalls0, {"subs": 1}
     items, ncalls = [], 0          # item: ["table", grid, html|None] | ["text", str, None]
     for kind, bb in blocks:
         if kind == "text":
