@@ -203,8 +203,14 @@ def _call_grid(tiles, timeout=240, upsample=1, cache_dir=None):
 
 
 def _strip_html(s):
-    """表外文字块按纯文本拼回：剥掉模型可能裹上的 HTML 标签，折叠空白。"""
-    return " ".join(re.sub(r"<[^>]+>", " ", s or "").split())
+    """表外文字块按纯文本拼回：剥 HTML 标签，**保留逻辑行**(表行 </tr> / <br> / 空行 →
+    段落断),仅段内折叠空白。GT 把多行标题(主标题/副标题/单位)拆成独立逻辑块按阅读流计分,
+    若把多行折成一行→pred 1 块 vs GT N 块、RO 腰斩(e3e19b92/051fa323 等 TEDS≈100 却 RO50)。"""
+    s = re.sub(r"<\s*br\s*/?>", "\n\n", s or "", flags=re.I)
+    s = re.sub(r"</\s*tr\s*>", "\n\n", s, flags=re.I)        # 表行边界 → 段落断
+    s = re.sub(r"<[^>]+>", " ", s)
+    paras = [" ".join(p.split()) for p in re.split(r"\n\s*\n", s)]
+    return "\n\n".join(p for p in paras if p)
 
 
 def _recognize_text(im, bbox, timeout, pad=6):
@@ -338,7 +344,7 @@ def run_one_split(im, timeout=240):
             ntab += 1
         else:
             parts.append(val)
-    return "\n".join(parts), ncalls, {"subs": ntab}
+    return "\n\n".join(parts), ncalls, {"subs": ntab}
 
 
 def main():
