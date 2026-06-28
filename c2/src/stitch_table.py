@@ -418,12 +418,27 @@ def rows_to_html(rows, panel_n=1):
 # ---------------------------------------------------------------------------
 # 多子表重组主入口
 # ---------------------------------------------------------------------------
+def _filled(row):
+    return [x for x in row if (x or "").strip()]
+
+
+def _mode_len(grid):
+    """grid 各非空行填充格数的众数 = 这块数据的满列宽。"""
+    L = [len(_filled(r)) for r in grid if _filled(r)]
+    return Counter(L).most_common(1)[0][0] if L else 0
+
+
 def _peel_ragged_top(bands):
     """band0 的最左 tile 若比其它 tile 多出【顶部短行】(标签只出现在最左 tile)→ 弹出作
     caption、从 grid 去掉。修「标签揉进表头致对角错位」:子表标签"男性 3年交"是只占左 2-3
     格的半行,只在最左列 tile,stitch 按 nrows=max 逐行对齐时它和其它 tile 的表头对齐 →
     整表每行=上行左半+下行右半、对角劈裂(a4924b6d 12子表 TEDS 48)。弹掉后行对齐、表去
-    错位 + 标签成 caption(对 ro)。判据:最左 tile 行数 > 其它 tile,且多出的顶行格数 ≤3。"""
+    错位 + 标签成 caption(对 ro)。判据:最左 tile 行数 > 其它 tile,且多出的顶行格数 ≤3。
+
+    **向下合并**:遇到单格文字行(如 API 把表头角"年度/年龄"单独成行)、且其下一行恰比
+    数据满宽少一列(== 满宽-1)→ 不剥进 caption,而把这格 prepend 回下一行补回首列、停。
+    修 API 把表头角单独成行致年龄整体左移一列(a4924b6d 男性10年交)。仅此一格、条件严格
+    (下行须正好缺一列),有框正常表(下行=满宽,不缺列)不触发。"""
     if not bands or not bands[0]:
         return ""
     row0 = bands[0]
@@ -433,8 +448,15 @@ def _peel_ragged_top(bands):
     left = grids[0]
     base = min(len(g) for g in grids[1:])           # 其它 tile 的行数
     caps = []
-    while len(left) > base and left and len([x for x in left[0] if (x or "").strip()]) <= 3:
-        caps.append(" ".join(x for x in left[0] if (x or "").strip()))
+    while len(left) > base and left and len(_filled(left[0])) <= 3:
+        cell = _filled(left[0])
+        if len(cell) == 1 and len(left) >= 2 and not cell[0].strip().replace(".", "").isdigit():
+            full = _mode_len(left[1:])              # 下方数据满列宽
+            if full >= 3 and len(_filled(left[1])) == full - 1:
+                left[1] = [cell[0]] + left[1]       # 向下合并:补回缺的首列
+                left.pop(0)
+                break
+        caps.append(" ".join(cell))
         left.pop(0)                                 # 原地改 bands → 下游对齐
     return "\n".join(caps)
 
