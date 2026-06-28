@@ -22,6 +22,7 @@ C. text 块单独识别成纯文本；seg 块走 run_one，**按识别出的 td 
 import numpy as np
 
 from slicer_table import split_table_texts, _runlen_lines
+from imcache import cached
 
 
 def _panel_seam_xs(g):
@@ -150,6 +151,7 @@ def _row_bounds(dark, dark180=None, k=_SEAM_K, vmax=_SEAM_VMAX):
     return [0] + merged + [H]
 
 
+@cached("subtables", __file__)
 def subtables(im, pad=4):
     """把整图切成**有序块**列表 `[(kind, bbox), ...]`（阅读顺序，先上后下）。
 

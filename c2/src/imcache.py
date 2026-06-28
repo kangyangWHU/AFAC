@@ -1,0 +1,52 @@
+# -*- coding: utf-8 -*-
+"""prep / subtables 的磁盘缓存。
+
+这些是纯 CPU 重算(解码大图、几何分表/连通域/线检测),不依赖外部、对同一图确定。
+重跑评测时 API 结果由 api_client 缓存命中、不再调模型,但 prep/subtables 仍每图从头算
+→ CPU-bound 慢。这里把它们的结果按【输入图内容哈希 + 源文件 mtime】落盘:
+  - 内容哈希:同一图命中;
+  - 源文件 mtime 进键:一旦改了 preprocess.py / split_table.py,键变 → 自动失效重算,
+    无陈旧风险(不必手动清缓存)。
+"""
+import os
+import pickle
+import hashlib
+import functools
+from PIL import Image
+from config import CACHE_DIR
+
+_DIR = os.path.join(CACHE_DIR, "imcache")
+os.makedirs(_DIR, exist_ok=True)
+
+
+def _img_fp(im):
+    """廉价图像指纹:尺寸 + NEAREST 缩到 48×48 后哈希。PIL C 级快速采样,不物化全图
+    (避免对巨图 np.asarray/tobytes 的 ~1s 开销)。尺寸+缩略已唯一区分真实文档图。"""
+    thumb = im.resize((48, 48), Image.NEAREST).tobytes()
+    return "%dx%dx%s_%s" % (im.width, im.height, getattr(im, "mode", "?"),
+                            hashlib.sha1(thumb).hexdigest())
+
+
+def cached(name, srcfile):
+    ver = str(int(os.path.getmtime(srcfile)))           # 源码变 → 键变 → 自动失效
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrap(im, *args, **kw):
+            raw = "%s|%s|%s|%s|%s" % (
+                name, ver, _img_fp(im), repr(args), repr(sorted(kw.items())))
+            path = os.path.join(_DIR, hashlib.sha1(raw.encode()).hexdigest() + ".pkl")
+            if os.path.exists(path):
+                try:
+                    with open(path, "rb") as f:
+                        return pickle.load(f)
+                except Exception:
+                    pass
+            r = fn(im, *args, **kw)
+            try:
+                with open(path, "wb") as f:
+                    pickle.dump(r, f, protocol=pickle.HIGHEST_PROTOCOL)
+            except Exception:
+                pass
+            return r
+        return wrap
+    return deco
