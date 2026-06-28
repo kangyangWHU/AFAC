@@ -12,6 +12,7 @@ import os
 import pickle
 import hashlib
 import functools
+import threading
 from PIL import Image
 from config import CACHE_DIR
 
@@ -42,9 +43,11 @@ def cached(name, srcfile):
                 except Exception:
                     pass
             r = fn(im, *args, **kw)
-            try:
-                with open(path, "wb") as f:
+            try:                                        # 临时文件 + 原子 rename:并发写不互相撕裂
+                tmp = "%s.%d.%d.tmp" % (path, os.getpid(), threading.get_ident())
+                with open(tmp, "wb") as f:
                     pickle.dump(r, f, protocol=pickle.HIGHEST_PROTOCOL)
+                os.replace(tmp, path)
             except Exception:
                 pass
             return r
