@@ -112,15 +112,20 @@ def table_teds(pred, gt):
 # ---------------------------------------------------------------------------
 def _doc_blocks(doc):
     """把文档切成逻辑块序列（用于阅读流）：
-    - 表格整体作为一个块，签名 'TBL#<cell数>'
+    - 表格整体作为一个块，签名 'TBL#<出现序号>'（按位置区分,贴近官方"逻辑块序列编辑距离"）
     - 文本按空行分段，每段归一化后作为一个块（取前 80 字符做匹配键）
-    """
+
+    表签名为何带序号:旧版所有表都用同一个 '__TABLE__'。文档里【多表与文字块交错】时,
+    pred 的每个表都 fuzzy 匹配到 GT 的第一个 __TABLE__(同签名),matched 里反复出现同一
+    index 把 LIS 打断 → ro 被严重低估(a4924b6d 真值92、旧版给48;2358594b 88→50)。改成
+    'TBL#0/1/2…' 后,第 k 个表匹配第 k 个表(exact=100 > 邻号≈80,extractOne 选对),按位置
+    对齐 → 贴近官方。单表文档(gt/pred 都只 TBL#0)行为不变。"""
     blocks = []
+    nt = 0
     for b in split_blocks(doc):
         if b["type"] == "table":
-            # 表格作为一个逻辑块；签名不含单元格数（数量不必精确匹配，
-            # 否则单表文档的阅读流会被误判为 0）
-            blocks.append("__TABLE__")
+            blocks.append("TBL#%d" % nt)
+            nt += 1
         else:
             txt = normalize_text(b["raw"])
             for para in re.split(r"\n\s*\n", txt):

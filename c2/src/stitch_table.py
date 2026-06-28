@@ -418,6 +418,27 @@ def rows_to_html(rows, panel_n=1):
 # ---------------------------------------------------------------------------
 # 多子表重组主入口
 # ---------------------------------------------------------------------------
+def _peel_ragged_top(bands):
+    """band0 的最左 tile 若比其它 tile 多出【顶部短行】(标签只出现在最左 tile)→ 弹出作
+    caption、从 grid 去掉。修「标签揉进表头致对角错位」:子表标签"男性 3年交"是只占左 2-3
+    格的半行,只在最左列 tile,stitch 按 nrows=max 逐行对齐时它和其它 tile 的表头对齐 →
+    整表每行=上行左半+下行右半、对角劈裂(a4924b6d 12子表 TEDS 48)。弹掉后行对齐、表去
+    错位 + 标签成 caption(对 ro)。判据:最左 tile 行数 > 其它 tile,且多出的顶行格数 ≤3。"""
+    if not bands or not bands[0]:
+        return ""
+    row0 = bands[0]
+    grids = [g for g in row0 if g]
+    if len(grids) < 2:
+        return ""                                   # 单 tile 无法判"只在最左"
+    left = grids[0]
+    base = min(len(g) for g in grids[1:])           # 其它 tile 的行数
+    caps = []
+    while len(left) > base and left and len([x for x in left[0] if (x or "").strip()]) <= 3:
+        caps.append(" ".join(x for x in left[0] if (x or "").strip()))
+        left.pop(0)                                 # 原地改 bands → 下游对齐
+    return "\n".join(caps)
+
+
 def stitch_multi(tile_outputs, meta, single=False):
     """按 API 自带的多 <table> 边界拆子表、各自重建、拼回。单表走单表路径。
 
@@ -506,15 +527,18 @@ def stitch_multi(tile_outputs, meta, single=False):
 
     # 单表：API 未自带拆分。再用"纯文字表头行"做一次泛化拆分（多子表被合并的兜底）
     if len(subtables) <= 1:
-        rows = _reconstruct_grid(cur_bands if subtables else [], col_cells, col_cuts,
+        bands = cur_bands if subtables else []
+        lead = _peel_ragged_top(bands)              # 弹掉最左tile多出的顶部标签行→caption(去对角错位)
+        rows = _reconstruct_grid(bands, col_cells, col_cuts,
                                  overlap_x=overlap_x, overlap_y=overlap_y, framed=framed)
         segs = [rows] if (single and rows) else _split_at_headers(rows)
         if len(segs) >= 2:
             html = "\n\n".join(rows_to_html(s, panel_n) for s in segs)
         else:
             html = rows_to_html(rows, panel_n)
-        if first_caption:
-            html = first_caption + "\n\n" + html
+        cap = (first_caption + "\n\n" + lead).strip("\n") if (first_caption and lead) else (first_caption or lead)
+        if cap:
+            html = cap + "\n\n" + html
         return html
 
     # 多子表：逐个重建 + 拼标题。每个 API 子表再用"纯文字表头行"递归拆（重复表头=内部边界）
