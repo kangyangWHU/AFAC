@@ -322,9 +322,12 @@ def run_one_split(im, timeout=240):
                     for g in grids:                           # 一段多表(碎块):待合并,重渲染
                         items.append(["table", g, None])
             else:
-                txt = _strip_html(p)
-                if not txt:                       # run_one 读空(细长标题条 table-OCR 读不出)
-                    txt = _recognize_text(im, bb, timeout)   # → 直接文字识别补读,救回标题块
+                # 判为非表(标题/文字):run_one 把宽标题区竖切成多列、左→右拼会打乱阅读顺序
+                # (产品名居中落 col1、metadata 落 col0 → 顺序反;2827031b/051fa323)。改整块
+                # _recognize_text 单次重读,API 按自然顺序返回。兼修旧"读空"丢标题。
+                txt = _recognize_text(im, bb, timeout)
+                if not txt:                       # 整块也读空 → 退回竖切结果兜底
+                    txt = _strip_html(p)
                 if txt:
                     items.append(["text", txt, None])
     merged = []                    # 表头小条合并:只「上面的小条 并入 下面的表身」(单向)
