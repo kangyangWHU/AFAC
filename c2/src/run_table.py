@@ -209,6 +209,7 @@ def _strip_html(s):
     s = re.sub(r"<\s*br\s*/?>", "\n\n", s or "", flags=re.I)
     s = re.sub(r"</\s*tr\s*>", "\n\n", s, flags=re.I)        # 表行边界 → 段落断
     s = re.sub(r"<[^>]+>", " ", s)
+    s = re.sub(r"(?m)^\s*[#＃*]+\s*", "", s)                 # 去 markdown 标记(API 偶给标题加 #)
     paras = [" ".join(p.split()) for p in re.split(r"\n\s*\n", s)]
     return "\n\n".join(p for p in paras if p)
 
@@ -238,6 +239,7 @@ def _recognize_text(im, bbox, timeout, pad=6):
     x0, y0, x1, y1 = bbox
     crop = im.crop((max(0, x0 - pad), max(0, y0 - pad),
                     min(im.width, x1 + pad), min(im.height, y1 + pad)))
+    crop = _up(crop, 2)                              # 2x 上采样:标题/页脚小字 OCR 提精度
     return _strip_html(api.call_safe(crop, timeout=timeout))
 
 
@@ -281,6 +283,7 @@ def run_one(im, timeout=240, peel=True, col_tile_max=None, max_rows=None):
 
 
 _MIN_TABLE_CELLS = 10   # 段识别出 td≥此数=真子表;否则=标题(转文本)。实测真子表td≥72、标题≤5
+_TRACE = None           # 调试可视化:置为 list 时,run_one_split 记录每block真实去向 (kind,bbox)
 
 
 def _grid_cells(g):
@@ -315,6 +318,7 @@ def run_one_split(im, timeout=240):
     多子表**,稀疏薄条不计入——避免 94352240(1密集+2稀疏尾)被当 3 子表切进 split 路径、稀疏
     尾读成 1 列假表顶歪索引(98→68)。阈值 1% 边际极大(实测薄条≤0.72%、真表≥4.13%),真小
     子表(19a15357 顶部 9.71%)稳算密集、不误退。"""
+    tr = _TRACE if isinstance(_TRACE, list) else None   # 调试:记录每block真实去向
     blocks = subtables(im)
     g0 = np.asarray(im.convert("L")) < 128
     def _seg_ink(bb):
@@ -324,6 +328,9 @@ def run_one_split(im, timeout=240):
     texts = [bb for k, bb in blocks if k == "text"]
     if len(dense) <= 1:                              # 密集真表≤1 → 单表(表身不拆)
         if not texts:
+            if tr is not None:
+                for k, bb in blocks:
+                    tr.append(("table" if k == "seg" else "text", bb))
             md, nc, meta = run_one(im, timeout)      # 无独立页眉页脚 → 原样整图
             return _merge_text_blocks(md), nc, meta
         # 有独立 text 块(页眉/页脚/标题):**白化它们的区域**后整图 run_one 读纯表身,
@@ -339,10 +346,15 @@ def run_one_split(im, timeout=240):
         ty0 = min((bb[1] for bb in segs), default=0)
         ty0x = min((bb[0] for bb in segs), default=0)
         seq = [(ty0, ty0x, p)]                       # 表身
+        if tr is not None:
+            for bb in [b for k, b in blocks if k == "seg"]:
+                tr.append(("table", bb))
         for bb in texts:
             t = _recognize_text(im, bb, timeout)
             if t:
                 seq.append((bb[1], bb[0], t))        # 页眉页脚按 (y,x) 归位
+                if tr is not None:
+                    tr.append(("text", bb))
         seq.sort(key=lambda s: (s[0], s[1]))
         return _merge_text_blocks("\n\n".join(s for _, _, s in seq)), ncalls0, {"subs": 1}
     items, ncalls = [], 0          # item: ["table", grid, html|None] | ["text", str, None]
@@ -351,11 +363,15 @@ def run_one_split(im, timeout=240):
             txt = _recognize_text(im, bb, timeout)
             if txt:
                 items.append(["text", txt, None])
+                if tr is not None:
+                    tr.append(("text", bb))
         else:                                  # seg: run_one 后按 td 数判表/标题
             # peel=False:子表裁块已是独立子表,不再剥表外文字(否则矮子表薄数据行被误剥)
             p, nc, _ = run_one(im.crop(bb), timeout, peel=False)
             ncalls += nc
             if p.lower().count("<td") >= _MIN_TABLE_CELLS:
+                if tr is not None:
+                    tr.append(("table", bb))
                 grids = [g for _, g in parse_tile_segments(p) if g]
                 if len(grids) == 1:
                     items.append(["table", grids[0], p])      # 整段一表:留原始 HTML
@@ -363,6 +379,8 @@ def run_one_split(im, timeout=240):
                     for g in grids:                           # 一段多表(碎块):待合并,重渲染
                         items.append(["table", g, None])
             else:
+                if tr is not None:
+                    tr.append(("text", bb))
                 # 判为非表(标题/文字):run_one 把宽标题区竖切成多列、左→右拼会打乱阅读顺序
                 # (产品名居中落 col1、metadata 落 col0 → 顺序反;2827031b/051fa323)。改整块
                 # _recognize_text 单次重读,API 按自然顺序返回。兼修旧"读空"丢标题。

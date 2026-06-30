@@ -428,7 +428,7 @@ def _mode_len(grid):
     return Counter(L).most_common(1)[0][0] if L else 0
 
 
-def _peel_ragged_top(bands):
+def _peel_ragged_top(bands, framed=False):
     """band0 的最左 tile 若比其它 tile 多出【顶部短行】(标签只出现在最左 tile)→ 弹出作
     caption、从 grid 去掉。修「标签揉进表头致对角错位」:子表标签"男性 3年交"是只占左 2-3
     格的半行,只在最左列 tile,stitch 按 nrows=max 逐行对齐时它和其它 tile 的表头对齐 →
@@ -450,10 +450,19 @@ def _peel_ragged_top(bands):
     caps = []
     while len(left) > base and left and len(_filled(left[0])) <= 3:
         cell = _filled(left[0])
+        # 结构判据①:下一行首格(角格)为空 → 候选本身就是被 API 劈开的【角格】(投保年龄\
+        # 保单年度 之类)→ 填回角格、不剥。区分"子表标签 vs 角格轴表头":标签下方是合规表头
+        # (年度/年龄|18…,角格非空)→剥;角格下方是裸数据行(|1|2…,角格空)→塞回。纯结构、
+        # 不靠词表。修无框多子表把角格剥成 caption 的泄漏(1de69d49/225fb899/583ac07b/06364357)。
+        if not framed and len(left) >= 2 and left[1] and not (left[1][0] or "").strip():
+            left[1][0] = " ".join(cell)
+            left.pop(0)
+            break
+        # 判据②(原向下合并):单格文字 + 下行恰缺一列 → prepend 补首列
         if len(cell) == 1 and len(left) >= 2 and not cell[0].strip().replace(".", "").isdigit():
             full = _mode_len(left[1:])              # 下方数据满列宽
             if full >= 3 and len(_filled(left[1])) == full - 1:
-                left[1] = [cell[0]] + left[1]       # 向下合并:补回缺的首列
+                left[1] = [cell[0]] + left[1]
                 left.pop(0)
                 break
         caps.append(" ".join(cell))
@@ -550,7 +559,7 @@ def stitch_multi(tile_outputs, meta, single=False):
     # 单表：API 未自带拆分。再用"纯文字表头行"做一次泛化拆分（多子表被合并的兜底）
     if len(subtables) <= 1:
         bands = cur_bands if subtables else []
-        lead = _peel_ragged_top(bands)              # 弹掉最左tile多出的顶部标签行→caption(去对角错位)
+        lead = _peel_ragged_top(bands, framed=framed)  # 无框:空角格→填回(去泄漏);剥标签去对角错位
         rows = _reconstruct_grid(bands, col_cells, col_cuts,
                                  overlap_x=overlap_x, overlap_y=overlap_y, framed=framed)
         segs = [rows] if (single and rows) else _split_at_headers(rows)
