@@ -148,15 +148,39 @@ def _lnds(seq):
     return len(tails)
 
 
-def read_order_loss(pred, gt, match_thresh=75.0):
-    """阅读流损失 ∈[0,1]，**与分段方式解耦**：
-    1) 把 pred / gt 切成逻辑块；
-    2) 每个 pred 块用模糊匹配找最相似的 gt 块索引（达阈值才算命中）；
-       —— 用 token_set_ratio：对"标题被切成两段/合成一段"等分段差异鲁棒
-          （只看词集合重叠），避免把"顺序正确但分段不同"误判为乱序；
-    3) 命中的 gt 索引按 pred 顺序排列，取最长非降子序列 L（**顺序由 LIS 严格把关**）；
-    4) read_score = L / len(gt块)，同时惩罚乱序与缺块；loss = 1 − score。
+def read_order_loss(pred, gt, eq_thresh=90.0):
+    """阅读流损失 ∈[0,1] —— 官方"逻辑块层面先后顺序编辑距离"的近似（已与 A 榜校准）。
+
+    块序列(文字块 + TBL#n)做 **Levenshtein 编辑距离**(增/删/替),块相等判据
+    `fuzz.ratio >= 90`(字符级,容 OCR 噪声;表块 'TBL#k' 按序号区分)。loss = 距离/max(块数)。
+
+    为何换掉旧 LIS+token_set_ratio 版(见 read_order_loss_lenient):旧版只取"最长有序匹配
+    子序列/GT块数",对**多出的块视而不见**、且 token_set_ratio 靠词集合重叠**过度宽容** →
+    本地虚高(table 本地 RO 93 vs A榜实际≈56)。edit-distance 把 pred 多出的块计为插入、
+    缺的计为删除、错位计为替换,与官方一致:本地 table RO≈56、Overall≈81，对上 A榜 table≈80。
     """
+    from rapidfuzz import fuzz
+    gb = _doc_blocks(gt)
+    pb = _doc_blocks(pred)
+    if len(gb) == 0:
+        return 0.0 if len(pb) == 0 else 1.0
+    if len(pb) == 0:
+        return 1.0
+    n, m = len(pb), len(gb)
+    prev = list(range(m + 1))                    # Levenshtein 滚动行
+    for i in range(1, n + 1):
+        cur = [i] + [0] * m
+        a = pb[i - 1]
+        for j in range(1, m + 1):
+            c = 0 if fuzz.ratio(a, gb[j - 1]) >= eq_thresh else 1
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + c)
+        prev = cur
+    return prev[m] / max(n, m)
+
+
+def read_order_loss_lenient(pred, gt, match_thresh=75.0):
+    """[已弃用,虚高] 旧 LIS + token_set_ratio 版,对多出块视而不见、对词重叠过度宽容。
+    保留仅作对照。正式评测用 read_order_loss(edit-distance)。"""
     from rapidfuzz import process, fuzz
     gb = _doc_blocks(gt)
     pb = _doc_blocks(pred)
@@ -169,7 +193,7 @@ def read_order_loss(pred, gt, match_thresh=75.0):
         hit = process.extractOne(blk, gb, scorer=fuzz.token_set_ratio,
                                  score_cutoff=match_thresh)
         if hit is not None:
-            matched.append(hit[2])               # gt 块索引
+            matched.append(hit[2])
     if not matched:
         return 1.0
     L = _lnds(matched)
