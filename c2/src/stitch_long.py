@@ -61,6 +61,52 @@ def _is_split_table_seam(acc, lines):
         bool(_TABLE_OPEN_LEAD.match(lines[0]))
 
 
+def _split_table_seam_loose(acc, lines, max_orphan=2):
+    """上条以 </table> 收口；下条在【前 max_orphan 个非空行内】重新 <table> 起头,
+    中间只夹极少量非标题短文字 ⇒ 切点穿过同一张表、且把被切断的表头/单元格读成了散行。
+
+    返回下条 <table> 起头的行号(>0 表命中)；否则 -1。
+    与 _is_split_table_seam(下条必须裸 <table> 起头)互补:那个要求中间无任何文字,
+    这个容忍极少量"孤儿散行"(被切断的表头),但遇到标题/结构行/过多散行即判为两张表
+    (避免把 over-tabularize 的正文误并:正文块散行多、且不会紧接 <table>)。"""
+    if not _TABLE_CLOSE.search(acc[-1]):
+        return -1
+    cnt = 0
+    for i, ln in enumerate(lines):
+        if not ln.strip():
+            continue
+        if _TABLE_OPEN_LEAD.match(ln):
+            return i if cnt else -1        # cnt==0 时归 _is_split_table_seam 处理
+        if _STRUCT_LINE.match(ln) or ln.lstrip().startswith(("#", "＃")):
+            return -1                      # 标题/结构 ⇒ 新表,不续
+        cnt += 1
+        if cnt > max_orphan:
+            return -1
+    return -1
+
+
+def _splice_table_loose(acc, lines, idx, max_overlap, sim_thresh):
+    """续表拼接(下条 <table> 前夹孤儿散行版):去内侧边界标签,孤儿散行包成 <tr><td> 行
+    插回两段表之间,再行级去重。"""
+    a = acc[:]
+    a[-1] = _TABLE_CLOSE.sub("", a[-1]).rstrip()
+    if not a[-1].strip():
+        a.pop()
+    orphan_rows = ["<tr><td>%s</td></tr>" % ln.strip()
+                   for ln in lines[:idx] if ln.strip()]
+    b = lines[idx:]
+    if _TABLE_OPEN_FULL.match(b[0]):
+        b.pop(0)
+    else:
+        b[0] = _TABLE_OPEN_LEAD.sub("", b[0], count=1)
+        if not b[0].strip():
+            b.pop(0)
+    if not a or not b:
+        return acc + lines
+    k = _seam_overlap(a, b, max_overlap, sim_thresh)
+    return a + orphan_rows + b[k:]
+
+
 def _splice_table(acc, lines, max_overlap, sim_thresh):
     """把被切开的两段表拼成一张：去内侧边界标签 + 行级去重。
 
@@ -106,6 +152,8 @@ def merge_strips(outputs, max_overlap_lines=8, sim_thresh=0.85):
             continue
         if _is_split_table_seam(acc, lines):
             acc = _splice_table(acc, lines, max_overlap_lines, sim_thresh)
+        elif (idx := _split_table_seam_loose(acc, lines)) > 0:
+            acc = _splice_table_loose(acc, lines, idx, max_overlap_lines, sim_thresh)
         else:
             k = _guarded_overlap(acc, lines, max_overlap_lines, sim_thresh)
             acc.extend(lines[k:])
