@@ -148,17 +148,41 @@ def _lnds(seq):
     return len(tails)
 
 
-def read_order_loss(pred, gt, eq_thresh=90.0):
-    """阅读流损失 ∈[0,1] —— 官方"逻辑块层面先后顺序编辑距离"的近似（已与 A 榜校准）。
+def _reading_text(doc):
+    """非表文字按阅读序拼成【完整】一串、归一化(NFKC + 去所有空白)。表格不计入。
 
-    块序列(文字块 + TBL#n)做 **Levenshtein 编辑距离**(增/删/替),块相等判据
-    `fuzz.ratio >= 90`(字符级,容 OCR 噪声;表块 'TBL#k' 按序号区分)。loss = 距离/max(块数)。
+    用 split_blocks 全文,**不走 _doc_blocks 的 [:80] 截断**——那截断是给旧 lenient 块匹配的,
+    对 char 级 read_order 会失真:long 长段落被截成 80 字,且 pred 过度切块(291 vs GT 11)→
+    截断块数×80 假性膨胀 → char-RO 虚低(long 假象 55,实则文字 1.0x 对得上)。table 块本就<80,不受影响。"""
+    import unicodedata
+    parts = [normalize_text(b["raw"]) for b in split_blocks(doc) if b["type"] != "table"]
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", " ".join(parts)))
 
-    为何换掉旧 LIS+token_set_ratio 版(见 read_order_loss_lenient):旧版只取"最长有序匹配
-    子序列/GT块数",对**多出的块视而不见**、且 token_set_ratio 靠词集合重叠**过度宽容** →
-    本地虚高(table 本地 RO 93 vs A榜实际≈56)。edit-distance 把 pred 多出的块计为插入、
-    缺的计为删除、错位计为替换,与官方一致:本地 table RO≈56、Overall≈81，对上 A榜 table≈80。
-    """
+
+def read_order_loss(pred, gt):
+    """阅读流损失 ∈[0,1] —— 官方 read_order 的【字符级】近似(已用 A 榜 gradient 校准)。
+
+    取非表文字块按阅读序拼成串,pred 与 gt 算**字符级归一化 Levenshtein 距离**。
+    loss = dist / max(len)。
+
+    为何是字符级而非块级:实测官方度量对"块边界(合并/拆分)"几乎不敏感
+    —— 合并连续文字块,A榜 Δ 仅 +0.27,而块级 edit-distance Δ +18.7(过敏感、误导),
+    字符级 Δ +0.30 与 A 榜吻合。即官方按字符比对阅读序文本、不在乎我们怎么分块;
+    真正能动它的是【字符内容准确度 + 顺序】(OCR、角格、漏标签),非块边界。
+    块级版见 read_order_loss_blocklevel,LIS 版见 read_order_loss_lenient(均不准,仅对照)。"""
+    from rapidfuzz.distance import Levenshtein
+    a = _reading_text(pred)
+    b = _reading_text(gt)
+    if not b:
+        return 0.0 if not a else 1.0
+    if not a:
+        return 1.0
+    return Levenshtein.distance(a, b) / max(len(a), len(b))
+
+
+def read_order_loss_blocklevel(pred, gt, eq_thresh=90.0):
+    """[不准,仅对照] 块级 Levenshtein(文字块+TBL#n,块相等 fuzz.ratio>=90)。
+    对块边界过敏感(合并块本地+18.7 但 A榜仅+0.27),已被字符级 read_order_loss 取代。"""
     from rapidfuzz import fuzz
     gb = _doc_blocks(gt)
     pb = _doc_blocks(pred)
