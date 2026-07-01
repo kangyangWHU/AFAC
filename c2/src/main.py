@@ -26,7 +26,7 @@ from preprocess import prep
 from classify import classify
 from run_long import run_smart
 from run_table import run_one as run_table_one
-from heading_norm import to_halfwidth_punct, roman_to_unicode, subscript_to_latex
+from heading_norm import roman_to_unicode, subscript_to_latex
 
 
 def process_image(path, target_h=5000, timeout=240):
@@ -37,7 +37,9 @@ def process_image(path, target_h=5000, timeout=240):
         md, ncalls = run_smart(im, target_h=target_h, timeout=timeout)
     else:
         md, ncalls, _ = run_table_one(im, timeout=timeout)
-    md = subscript_to_latex(roman_to_unicode(to_halfwidth_punct(md)))
+    # 不转半角:VLM 与 GT 都用中文全角标点(，。：；),转半角反而拉低分。
+    # 仅保留 GT 确用的规范:罗马数字→unicode、下标→LaTeX。
+    md = subscript_to_latex(roman_to_unicode(md))
     return md, kind, ncalls
 
 
