@@ -22,6 +22,28 @@ _TABLE_OPEN_FULL = re.compile(r"^\s*<table[^>]*>\s*$", re.I)
 _TABLE_OPEN_LEAD = re.compile(r"^\s*<table[^>]*>", re.I)
 _STRUCT_LINE = re.compile(r"^\s*</?(table|tr|thead|tbody)\b", re.I)
 
+# 续行判据:下段首行是不是"新块"(标题/列表/编号/表格/引用)
+_BLOCK_START = re.compile(
+    r"^\s*(#|＃|[-*+]\s|>|\||<|第[一二三四五六七八九十百]|[（(]|"
+    r"[一二三四五六七八九十]+\s*[、.]|\d+\s*[).、]|[①②③④⑤⑥⑦⑧⑨⑩])")
+_TERMINAL = "。.；;！!？?：:」』）)】》\"'"    # 末行以此结尾=写完了,不续
+
+
+def _is_line_continuation(a, b):
+    """接缝处 a(上段末行) 与 b(下段首行) 是否是被切断的同一行 → 应直接接上。"""
+    a, b = a.rstrip(), b.strip()
+    if not a or not b:
+        return False
+    if a.lstrip().startswith(("#", "＃")):        # 标题不与正文续
+        return False
+    if _STRUCT_LINE.match(a) or _STRUCT_LINE.match(b):
+        return False
+    if a[-1] in _TERMINAL:                         # 末行已收尾
+        return False
+    if _BLOCK_START.match(b):                      # 下段首行是新块
+        return False
+    return True
+
 
 def _trim_blanks(lines):
     i, j = 0, len(lines)
@@ -156,7 +178,12 @@ def merge_strips(outputs, max_overlap_lines=8, sim_thresh=0.85):
             acc = _splice_table_loose(acc, lines, idx, max_overlap_lines, sim_thresh)
         else:
             k = _guarded_overlap(acc, lines, max_overlap_lines, sim_thresh)
-            acc.extend(lines[k:])
+            rest = lines[k:]
+            if acc and rest and _is_line_continuation(acc[-1], rest[0]):
+                acc[-1] = acc[-1].rstrip() + rest[0].strip()   # 被切断的行接回一行
+                acc.extend(rest[1:])
+            else:
+                acc.extend(rest)
     # 规整：连续空行压成一个
     out_lines = []
     blank = False

@@ -20,6 +20,7 @@ from config import TRAIN_LONG_DIR, API_USER_IDS
 from preprocess import prep
 from slicer_long import slice_long
 from stitch_long import merge_strips
+from heading_norm import relevel_strips, toc_bullets_to_headings
 from evaluate import text_edit_loss, read_order_loss
 
 
@@ -51,6 +52,8 @@ def _call_strips(strips, timeout=240):
 def run_smart(im, target_h=5000, timeout=240):
     strips, _ = slice_long(im, target_h=target_h)
     outs = _call_strips(strips, timeout)
+    outs = [toc_bullets_to_headings(o) for o in outs]   # 目录列表项→标题(在定级前)
+    outs = relevel_strips(outs)
     return merge_strips(outs), len(strips)
 
 
