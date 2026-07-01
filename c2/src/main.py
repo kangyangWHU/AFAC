@@ -25,7 +25,7 @@ from config import (A_LONG_DIR, A_TABLE_DIR, TRAIN_LONG_DIR, TRAIN_TABLE_DIR,
 from preprocess import prep
 from classify import classify
 from run_long import run_smart
-from run_table import run_one as run_table_one
+from run_table import run_one_split as run_table_one   # 切子表(多子表 +0.07 TEDS)
 from heading_norm import roman_to_unicode, subscript_to_latex
 
 
