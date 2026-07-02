@@ -7,6 +7,19 @@ import numpy as np
 
 from config import BIN_FAINT, BIN_LINE
 
+# ---- 框线/行列检测阈值(几何常量,与图像内容自适应量区分) ----
+FRAME_MIN_RUN = 120     # 框线判定:竖直/横向连续墨段 ≥此px(文字碎段最长~10px,12×余量)
+FRAME_GATE = 0.5        # 框线路门控:框线数 ≥ GATE×白缝数 才走框线路(否则残线劫持)
+LINE_COVER = 0.5        # 一行/列的均墨 ≥此 = 贯穿框线(横线检测/去竖线列共用)
+ROW_WHITE_ABS = 3       # 白行判定:绝对墨量下限px(一条行号扫描线~6-10px,不会误白)
+ROW_NOISE_FRAC = 0.0005  # 白行噪声地板:允许 0.05%×宽 的二值化噪点(逐像素累积随宽缩放)
+ROW_GAP_MIN = 3         # 真行缝最小高度px:字符内假白缝(细笔画扫描线)仅1~2px
+FRAME_HFRAC = 0.6       # 矮表框线阈值:min(FRAME_MIN_RUN, HFRAC×表高)(救框线<120px矮表)
+DATA_SPAN_MIN = 0.40    # 真数据行:墨迹横向跨度 ≥此×表宽(数据常不填满,0.4 仍挡集中标题/注释)
+DATA_RUN_MIN = 3        # 真数据行:列向独立墨段 ≥此(多列);标题/注释=1~2 连续块
+COL_WHITE_FRAC = 0.01   # 白列判定:列均墨 <此 = 候选列缝
+COL_GAP_MIN = 10        # 真列缝最小宽度px(数字白河/中等假缝更窄;真列缝实测最小12px)
+
 
 def _content_segs(proj, gap, thr=0.002):
     """投影 proj 上按 >thr 的连续内容分段，相邻段间隔 ≤gap 合并。返回 [(s,e),...]。"""
@@ -130,18 +143,55 @@ def column_cuts(dark, dark180):
     **不做 Otsu**——Otsu 双峰会被超宽 margin 缝骗、把真列缝误当窄峰滤掉致塌缩;floor10 保守
     (真列缝实测最小 12px,10 不误杀),简单稳。"""
     H = dark.shape[0]
-    runl = _runlen_lines(dark180, min_run=min(120, int(0.6 * H)))
+    runl = _runlen_lines(dark180, min_run=min(FRAME_MIN_RUN, int(FRAME_HFRAC * H)))
     colf = dark.mean(axis=0)
-    idx = np.where(colf < 0.01)[0]
+    idx = np.where(colf < COL_WHITE_FRAC)[0]
     gap = []
     if len(idx):
         runs = [[idx[0]]]                    # 连续白列(≤2px 断)聚成缝
         for x in idx[1:]:
             (runs[-1].append(x) if x - runs[-1][-1] <= 2 else runs.append([x]))
-        gap = [int(np.mean(r)) for r in runs if r[-1] - r[0] + 1 >= 10]   # floor=10, 无 Otsu
-    if len(runl) > 1 and len(runl) >= 0.5 * len(gap):
+        gap = [int(np.mean(r)) for r in runs if r[-1] - r[0] + 1 >= COL_GAP_MIN]  # 无 Otsu
+    if len(runl) > 1 and len(runl) >= FRAME_GATE * len(gap):
         return runl, True                    # 有框:墨柱线=真单元格边界
-    return gap, False                        # 无框:白缝(floor10)
+    return gap, False                        # 无框:白缝(COL_GAP_MIN)
+
+
+def row_bnds(dark, dark180):
+    """行边界(单一行检测)。返回 (bnds, framed)；行数 = len(bnds) - 1。
+
+    有框:横框线**就是**行边界——框线数 = 行数 + 1,顶/底线已含在内,**不再补 0/H**
+    (旧 _boundaries 补 0/H 会在顶线上方/底线下方各造一条 1~2px 幽灵行,+2)。
+    无框:白行判据用**绝对墨量** < max(3, 0.0005W),不用相对占比(2%×全宽把稀疏行号行
+    稀释成"白",阶梯表下半几十行漏光,如 94352240 est54/gt107);0.0005W 是噪声地板
+    (二值化噪点逐像素累积、随宽度缩放),比行号行一条扫描线的墨(~6-10px)低。
+    算行墨前**先去掉贯穿竖线列**(列均墨>0.5)——列线墨会把真白行染成非白。
+    行 = 非白 run,内部边界 = 白 run 中心,首尾补 0/H(无框顶底无框线)。"""
+    H, W = dark.shape
+    runl = _runlen_lines(dark180.T, min_run=FRAME_MIN_RUN)
+    gapr = _gap_lines(dark.mean(axis=1), width_gate=False)
+    if len(runl) > 1 and len(runl) >= FRAME_GATE * len(gapr):
+        # 不做"开边补界":个别开放边版式(行上画线、末行不封底,如 9c7857f3)会少估 1 行,
+        # 但补界判据在"数据行/残条/表底注"间无稳判(三版实测 75/71/69%),不值复杂度——
+        # 末行是否存在交 OCR 定(裁块本含末行,只是行数估计少 1)。less is more。
+        return [int(y) for y in runl], True
+    keep = dark180.mean(axis=0) <= LINE_COVER        # 去贯穿竖线列
+    ink = dark[:, keep].sum(axis=1) if keep.any() else dark.sum(axis=1)
+    white = ink < max(ROW_WHITE_ABS, int(ROW_NOISE_FRAC * W))
+    bnds, y = [0], 0
+    while y < H:
+        if white[y]:
+            s = y
+            while y < H and white[y]:
+                y += 1
+            # 内部白带且高≥ROW_GAP_MIN → 边界取中心。更矮的是细笔画字符内的假白缝
+            # (如"7"斜杠段扫描线仅2px墨)——否则单个行号被劈成两行(090853cd +22)
+            if s > 0 and y < H and y - s >= ROW_GAP_MIN:
+                bnds.append((s + y) // 2)
+        else:
+            y += 1
+    bnds.append(H)
+    return bnds, False
 
 
 def _panel_seams(g):
@@ -220,7 +270,9 @@ def split_table_texts(im, hi_frac=0.05, wd_frac=0.40):
     texts = [b for b in blks
              if (b[3] - b[1]) < H * hi_frac and (b[2] - b[0]) < W * wd_frac and b[4] < big]
     tab = [b for b in blks if b not in texts]
+    # _content_segs 的 (s,e) 含端点,bbox 按排他约定 +1——否则下游 im.crop() 把内容最后
+    # 一行/列裁掉 1px(998ada4c 1px 底框线恰在最后一行,被裁 → 行数-1)
     tb = (min(b[0] for b in tab), min(b[1] for b in tab),
-          max(b[2] for b in tab), max(b[3] for b in tab))
+          max(b[2] for b in tab) + 1, max(b[3] for b in tab) + 1)
     texts.sort(key=lambda b: (b[1], b[0]))      # 先上后下、同行左到右
-    return tb, [b[:4] for b in texts]
+    return tb, [(b[0], b[1], b[2] + 1, b[3] + 1) for b in texts]

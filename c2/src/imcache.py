@@ -28,8 +28,10 @@ def _img_fp(im):
                             hashlib.sha1(thumb).hexdigest())
 
 
-def cached(name, srcfile):
-    ver = str(int(os.path.getmtime(srcfile)))           # 源码变 → 键变 → 自动失效
+def cached(name, *srcfiles):
+    """srcfiles: 结果依赖的**全部**源文件(含被调模块,如 subtables 依赖 crop.py+geom.py)。
+    漏传依赖文件 → 改了依赖、键不变 → 陈旧缓存(998ada4c off-by-one 修复曾被旧缓存吞掉)。"""
+    ver = "-".join(str(int(os.path.getmtime(f))) for f in srcfiles)  # 任一源码变 → 失效
     def deco(fn):
         @functools.wraps(fn)
         def wrap(im, *args, **kw):

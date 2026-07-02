@@ -16,7 +16,8 @@ import json
 import numpy as np
 from PIL import ImageDraw
 
-from geom import split_table_texts, _runlen_lines, _content_segs
+from geom import (split_table_texts, _runlen_lines, _content_segs,
+                  LINE_COVER, FRAME_MIN_RUN, DATA_SPAN_MIN, DATA_RUN_MIN)
 from config import BIN_INK, BIN_FAINT, BIN_LINE
 from imcache import cached
 
@@ -71,6 +72,9 @@ def _panel_seam_xs(g):
 
 _SEAM_K = 2.0
 _SEAM_VMAX = 2
+_SEAM_WHITE_FRAC = 0.003   # 找子表缝的白行判据(墨<此×W)。**刻意比 geom 数行的白判据松**:
+#                            缝高要量'近空白带'的高度,稀疏行也该并入白带;数行则相反,行号行
+#                            不能算白(ROW_NOISE_FRAC=0.0005)。两者语义不同,不共用值。
 
 
 def _vline_break_ys(dark180):
@@ -85,7 +89,7 @@ def _vline_break_ys(dark180):
     无法区分,故仍按<20%判断裂——宁可 88c6dbb4 多切一刀(td 判后 table 仍=1、无害),也不能
     漏切 1c9ac6d2(漏切=table 数错、TEDS 崩)。"""
     H = dark180.shape[0]
-    vlines = _runlen_lines(dark180, min_run=120)
+    vlines = _runlen_lines(dark180, min_run=FRAME_MIN_RUN)
     if len(vlines) < 3:
         return []
     cov = np.zeros(H)
@@ -122,7 +126,7 @@ def _row_bounds(dark, dark180=None, k=_SEAM_K, vmax=_SEAM_VMAX):
       条竖线=仍在表内),真子表缝处框线断开(db515/1de69 = 0 条)。
     这条按"完全空白才是缝"替掉原魔数"段数<4"。"""
     H, W = dark.shape
-    white = dark.sum(1) < max(2, 0.003 * W)          # 连续白线（纯白行）
+    white = dark.sum(1) < max(2, _SEAM_WHITE_FRAC * W)   # 连续白线(纯白行,松判据见常量注释)
     bands = []                                        # 连续白带 (起,止,高)
     y = 0
     while y < H:
@@ -156,7 +160,7 @@ def _row_bounds(dark, dark180=None, k=_SEAM_K, vmax=_SEAM_VMAX):
     return [0] + merged + [H]
 
 
-@cached("subtables", __file__)
+@cached("subtables", __file__, os.path.join(os.path.dirname(os.path.abspath(__file__)), "geom.py"))
 def subtables(im, pad=4):
     """把整图切成**有序块**列表 `[(kind, bbox), ...]`(阅读顺序,先上后下)。
 
@@ -180,13 +184,13 @@ def subtables(im, pad=4):
         for ra, rbb in zip(rb[:-1], rb[1:]):
             i128 = dark[ra:rbb, cx0:cx1].mean()
             i180 = dark180[ra:rbb, cx0:cx1].mean()
-            if i180 < 0.002:                         # 松二值化都近空 → 真空白带,丢
+            if i180 < _BLANK_INK:                    # 松二值化都近空 → 真空白带,丢
                 continue
             bb = (x0 + cx0, y0 + max(0, ra - pad), x0 + cx1, y0 + min(H, rbb + pad))
             # kind='text'(表外标题/说明,交 Stage III 当文本) 的两类:① 矮段(<20px,如首标题
             # 12px);② **淡段**(g128 近空但 g180 有墨 = 灰度 130~180 的淡标题/说明,如
             # f64061da 首标题灰度177 g128墨0.0008被误当空丢)。其余浓段=子表 'seg'。
-            kind = 'text' if (i128 < 0.002 or rbb - ra < 20) else 'seg'
+            kind = 'text' if (i128 < _BLANK_INK or rbb - ra < 20) else 'seg'
             items.append((y0 + ra, kind, bb))
     items.sort(key=lambda t: t[0])                     # 阅读顺序
     return [(k, bb) for _, k, bb in items] or [('seg', tb)]
@@ -198,6 +202,13 @@ def subtables(im, pad=4):
 _DENSE_INK = 0.01   # seg 墨量≥此=密集真表;<此=稀疏薄条,不计入子表计数
 _TEXT_H_RATIO = 0.02  # seg 高 < 此×图高 → 判文本(标题/说明,单行级),不当表,免 API 判 td
 #                       实测标题簇 r≤0.017、最小真表段 r≥0.022,0.02 落 gap 不误伤真表
+_BLANK_INK = 0.002   # 块墨率 <此 = 空白(subtables 丢空段 / 淡段判 text 共用)
+_TIGHT_INK = 0.001   # _tighten:行/列均墨 >此 = 有内容(抗单点噪,空区≈0)
+_PAD_GUARD = 8       # pad 残余滤除带px:0<y<此 的框线是上一 seg 重叠带入的底框
+_TOP_TEXT_PEAK = 0.003  # 贴顶判据:最上框线上方行墨峰值 <此 = 无文字行(无标题)
+_BAND_THR = 0.004    # _peel 行段判定:行均墨 >此 = 内容行(_content_segs thr)
+_BAND_GAP = 6        # _peel 行段合并间隔px
+_BAND_MINH = 4       # _peel 行段最小高px(更矮=噪线)
 
 
 def _ink(g, bb):
@@ -219,19 +230,18 @@ def _tighten(im, bb):
     所以有框空单元格不丢。mean>0.001 判该行/列有内容(抗单点噪,空区≈0 不过)。"""
     x0, y0, x1, y1 = bb
     d = np.asarray(im.crop(bb).convert("L")) < BIN_FAINT
-    dc = d.copy(); dc[d.mean(1) > 0.5, :] = False    # 去横线行 → 定左右界
-    dr = d.copy(); dr[:, d.mean(0) > 0.5] = False    # 去竖线列 → 定上下界
-    cols = np.where(dc.mean(0) > 0.001)[0]
-    rows = np.where(dr.mean(1) > 0.001)[0]
+    dc = d.copy(); dc[d.mean(1) > LINE_COVER, :] = False   # 去横线行 → 定左右界
+    dr = d.copy(); dr[:, d.mean(0) > LINE_COVER] = False   # 去竖线列 → 定上下界
+    cols = np.where(dc.mean(0) > _TIGHT_INK)[0]
+    rows = np.where(dr.mean(1) > _TIGHT_INK)[0]
     if len(rows) == 0 or len(cols) == 0:
         return bb
     return (x0 + int(cols[0]), y0 + int(rows[0]),
             x0 + int(cols[-1]) + 1, y0 + int(rows[-1]) + 1)
 
 
-_SPAN_MIN = 0.40    # 真数据行:墨迹横向跨度 ≥此比例表宽。0.4 而非"铺满全宽"——数据常不填满
-#                     (右半空/列号未排满,如 4f27636c 数据 span0.54),0.4 仍能挡集中标题(span~0.05)
-_RUN_MIN = 3        # 真数据行:列向独立墨段数 ≥此(多列数字);标题=1~2 连续块
+_SPAN_MIN = DATA_SPAN_MIN   # 真数据行判据与 geom 共用(0.4:数据常不填满,如 4f27636c span0.54)
+_RUN_MIN = DATA_RUN_MIN     # 列向独立墨段 ≥3;标题=1~2 连续块
 _PEEL_MAX = 3       # 保数据底线:最多剥 ~3 行标题,剥超过=判据出错,宁可不剥
 
 
@@ -253,20 +263,20 @@ def _peel_title(im, bb):
     W = g.shape[1]
     # 横框线检测:松二值化 g180(框线常淡灰,灰度128~180,严二值化会漏,如 4df76a25 淡线 y251)
     hl, prev = [], -99
-    for y in np.where(g180.mean(axis=1) > 0.5)[0]:
+    for y in np.where(g180.mean(axis=1) > LINE_COVER)[0]:
         if y - prev > 3:
             hl.append(int(y))
         prev = int(y)
-    hl = [y for y in hl if y == 0 or y >= 8]      # 滤 pad 残余(0<y<8, seg重叠带入上一seg底框线)
+    hl = [y for y in hl if y == 0 or y >= _PAD_GUARD]   # 滤 pad 残余(seg重叠带入上一seg底框线)
     # 路① 有横框线(≥2,含密集网格):最上一条=表顶,其上=标题(框线多≠无标题)
     if len(hl) >= 2:
         top = hl[0]
-        if top < 8 or g180[:top].mean(1).max() < 0.003:  # 上方无文字行(行墨峰值) → 无标题
+        if top < _PAD_GUARD or g180[:top].mean(1).max() < _TOP_TEXT_PEAK:  # 上方无文字行 → 无标题
             return [], bb
         return [(x0, y0, x1, y0 + top)], (x0, y0 + top, x1, y1)
     # 路② 无框/单框:按行墨迹横向分布判数据行(不依赖列格)
-    bands = [(s, e + 1) for s, e in _content_segs(g.mean(axis=1), gap=6, thr=0.004)
-             if e - s >= 4]
+    bands = [(s, e + 1) for s, e in _content_segs(g.mean(axis=1), gap=_BAND_GAP, thr=_BAND_THR)
+             if e - s >= _BAND_MINH]
     if len(bands) < 3:
         return [], bb
 
