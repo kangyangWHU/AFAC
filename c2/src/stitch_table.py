@@ -473,7 +473,7 @@ def _peel_ragged_top(bands, framed=False):
 def stitch_multi(tile_outputs, meta, single=False):
     """按 API 自带的多 <table> 边界拆子表、各自重建、拼回。单表走单表路径。
 
-    single=True(全宽模式用):**不做任何子表检测** —— 几何层 subtables/run_one_split 已把子表
+    single=True(全宽模式用):**不做任何子表检测** —— 几何层 subtables/run 已把子表
     切好,进来的 unit 就是单张子表。关掉 band 边界(caption 误判)和 _split_at_headers(表头行
     误判),只把所有带重建成一张表(列重建/稀疏补位仍走 _reconstruct_grid)。修「全宽单列tile
     被 stitch 误拆成多表」(8a4 被拆4张→11.3)。"""

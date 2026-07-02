@@ -18,7 +18,7 @@ import config as cfg
 cfg.MAX_CONCURRENCY = 16
 from config import TRAIN_TABLE_DIR, OUT_DIR
 from preprocess import prep
-from run_table import run_one
+from run_table import ocr_table
 from evaluate import table_teds, text_edit_loss
 
 
@@ -43,7 +43,7 @@ def main():
         gt = open(md, encoding="utf-8").read()
         im = prep(Image.open(img))
         W, H = im.size
-        pred, ncalls, meta = run_one(im)
+        pred, ncalls, meta = ocr_table(im)
         teds = table_teds(pred, gt)
         teds = teds if teds is not None else 0.0
         te = text_edit_loss(pred, gt, include_tables=True)

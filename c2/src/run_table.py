@@ -8,18 +8,17 @@ import os
 import re
 import glob
 import argparse
-import numpy as np
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
-from PIL import Image, ImageDraw
+from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
 import api_client as api
 from config import TRAIN_TABLE_DIR, API_USER_IDS
 from preprocess import prep
 from slicer_table import slice_table
-from split_table import subtables
+from crop import crop
 from stitch_table import stitch_table, parse_tile, parse_tile_segments, rows_to_html
 from evaluate import table_teds, text_edit_loss
 
@@ -233,9 +232,9 @@ def _merge_text_blocks(md):
     return "\n\n".join(out)
 
 
-def _recognize_text(im, bbox, timeout, pad=6):
-    """裁一个小文字块 → 单独 API 识别 → 剥成纯文本。表外文字块与子表上方的标题段
-    共用这一套（裁剪→识别→拼接），不让小文字被 stitch 包成空 <table>。"""
+def ocr_text(im, bbox, timeout, pad=6):
+    """Stage II — 裁一个文字块 → 单独 API 识别 → 剥成纯文本。表外 furniture 与子表上方
+    的标题段共用这一套(裁剪→识别→拼接),不让小文字被 stitch 包成空 <table>。"""
     x0, y0, x1, y1 = bbox
     crop = im.crop((max(0, x0 - pad), max(0, y0 - pad),
                     min(im.width, x1 + pad), min(im.height, y1 + pad)))
@@ -243,29 +242,9 @@ def _recognize_text(im, bbox, timeout, pad=6):
     return _strip_html(api.call_safe(crop, timeout=timeout))
 
 
-def _call_text_blocks(im, blocks, timeout):
-    """表外孤立文字块(页眉/页脚/水印/页码)单独识别，按位置返回拼到表格前/后的文本。
-    放在主表之后调(query 最后)；CACHE_ONLY 离线评测下未缓存→空，不影响既有评测。"""
-    if not blocks:
-        return "", ""
-    from config import MAX_CONCURRENCY
-    pad = 6
-    imgs = [im.crop((max(0, x0 - pad), max(0, y0 - pad),
-                     min(im.width, x1 + pad), min(im.height, y1 + pad)))
-            for _where, (x0, y0, x1, y1) in blocks]
-    with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENCY, max(1, len(imgs)))) as ex:
-        outs = list(ex.map(lambda t: api.call_safe(t, timeout=timeout), imgs))
-    before, after = [], []
-    for (where, _box), o in zip(blocks, outs):
-        txt = _strip_html(o)
-        if txt:
-            (before if where == "before" else after).append(txt)
-    b = ("\n".join(before) + "\n") if before else ""
-    a = ("\n" + "\n".join(after)) if after else ""
-    return b, a
-
-
-def run_one(im, timeout=240, peel=True, col_tile_max=None, max_rows=None):
+def ocr_table(im, timeout=240, peel=True, col_tile_max=None, max_rows=None):
+    """Stage II — 读单张表格裁块:切片→并发OCR→补差tile→2D重组。
+    不处理表外文字(Stage I 已把 furniture 分成独立 text 块,Stage III 用 ocr_text 读)。"""
     tiles, meta = slice_table(im, peel=peel, col_tile_max=col_tile_max, max_rows=max_rows)
     up = meta.get("upsample", 1)
     cdir = api.CACHE_UP_DIR if up > 1 else None      # 上采样 tile 缓存与原始分离
@@ -275,15 +254,11 @@ def run_one(im, timeout=240, peel=True, col_tile_max=None, max_rows=None):
     # 全宽模式:走 stitch 的单表模式(关子表检测,保留列重建/稀疏补位)。子表已在几何层切好,
     # stitch 不该再拆——否则全宽单列tile被它的 caption 边界/表头行检测误拆成多表(8a4 11.3)。
     pred = stitch_table(outs, meta, single=bool(meta.get("fullwidth")))
-    # 表外文字块：单独识别后按位置拼回表格前/后(query 放最后)
-    before, after = _call_text_blocks(im, meta.get("text_blocks", []), timeout)
-    pred = before + pred + after
-    ncalls = sum(1 for row in tiles for t in row if t is not None) + len(meta.get("text_blocks", []))
+    ncalls = sum(1 for row in tiles for t in row if t is not None)
     return pred, ncalls, meta
 
 
 _MIN_TABLE_CELLS = 10   # 段识别出 td≥此数=真子表;否则=标题(转文本)。实测真子表td≥72、标题≤5
-_TRACE = None           # 调试可视化:置为 list 时,run_one_split 记录每block真实去向 (kind,bbox)
 
 
 def _grid_cells(g):
@@ -295,101 +270,44 @@ def _grid_cols(g):
     return Counter(ws).most_common(1)[0][0] if ws else 0
 
 
-def run_one_split(im, timeout=240):
-    """多子表：subtables 把整图切成有序块 [(kind,bbox)]。'text' 块(表外文字)单独识别；
-    'seg' 块走 run_one，**按识别出的 td 数判**:多格(≥10)=真子表(保留 table)、单格/几格
-    =标题(转纯文本)。按阅读顺序拼接。单表(只 1 个 seg)退回 run_one 整图。
+def ocr(im, blocks, timeout=240):
+    """Stage II — 逐块 OCR + 就地定表/标题。返回 (items, ncalls)。
+      item = ["table", grid, html|None]  |  ["text", str, None]
 
-    table_teds 按出现顺序逐表配对,切成 N 个独立 <table> 逐个对齐 GT[i]——避免旧 stitch
-    把 N 子表读成 1 大 table。按 td 数(识别结果)判表/标题,不靠几何段高,矮的真子表(ec745
-    147px、td=306)不会被误当标题合并掉。
-
-    **表头小条合并**:竖线断裂(③)有时把单表的「列号表头行」从表身剥下来切成两段——表头
-    小条(td≈220)+表身大表(td≈6000),列数几乎相同。这会让 pred 表数>GT、索引错位 TEDS 崩
-    (945e8fe9/88c6dbb4/1f4293f3 89→3.5)。判据:相邻两表,小表 cells < 大表/8 **且** 列数差
-    ≤6 → 判表头小条,行拼接(上+下)归一表。两条 AND 缺一不可:只看列数会误并真子表(97c4c182
-    列72≈67);只看 td 小会误并真小子表(19a15357 顶部 td80 但列10≠68)。真子表(列不同)一律
-    不动。同一合并顺手修「一段被 run_one 多吐碎块」(c713916a td=39 碎块顶歪索引)。
-    **未合并的表沿用 run_one 原始 HTML 输出,与改动前逐字节一致,不影响其它表。**
-
-    **稀疏薄条退 fallback**:稀疏尾行(只剩行号、数据空)被白缝切下来后,墨量低(<1%),
-    本身不是子表;若除它之外只剩 1 个密集真表(墨≥1%),整图其实是单表 → 退回整图 run_one
-    (整图能把稀疏尾正确补成满列宽,如 80995347 读全 107/107 行)。**只数密集 seg 决定是否
-    多子表**,稀疏薄条不计入——避免 94352240(1密集+2稀疏尾)被当 3 子表切进 split 路径、稀疏
-    尾读成 1 列假表顶歪索引(98→68)。阈值 1% 边际极大(实测薄条≤0.72%、真表≥4.13%),真小
-    子表(19a15357 顶部 9.71%)稳算密集、不误退。"""
-    tr = _TRACE if isinstance(_TRACE, list) else None   # 调试:记录每block真实去向
-    blocks = subtables(im)
-    g0 = np.asarray(im.convert("L")) < 128
-    def _seg_ink(bb):
-        x0, y0, x1, y1 = bb
-        return g0[y0:y1, x0:x1].mean() if y1 > y0 and x1 > x0 else 0.0
-    dense = [bb for k, bb in blocks if k == "seg" and _seg_ink(bb) >= 0.01]
-    texts = [bb for k, bb in blocks if k == "text"]
-    if len(dense) <= 1:                              # 密集真表≤1 → 单表(表身不拆)
-        if not texts:
-            if tr is not None:
-                for k, bb in blocks:
-                    tr.append(("table" if k == "seg" else "text", bb))
-            md, nc, meta = run_one(im, timeout)      # 无独立页眉页脚 → 原样整图
-            return _merge_text_blocks(md), nc, meta
-        # 有独立 text 块(页眉/页脚/标题):**白化它们的区域**后整图 run_one 读纯表身,
-        # 再把 text 块按 (y,x) 顺序插回。修旧 fallback 直接 return 整图、丢弃 subtables 已
-        # 识别的 text 块致页脚被并块(790bec64 '3'+代码 并成一块、RO 67)。表身=去掉页眉
-        # 页脚的整图,而非字面全图。
-        im2 = im.copy()
-        dr = ImageDraw.Draw(im2)
-        for bb in texts:
-            dr.rectangle(bb, fill=(255, 255, 255))
-        p, ncalls0, _ = run_one(im2, timeout)
-        segs = [bb for k, bb in blocks if k == "seg"]
-        ty0 = min((bb[1] for bb in segs), default=0)
-        ty0x = min((bb[0] for bb in segs), default=0)
-        seq = [(ty0, ty0x, p)]                       # 表身
-        if tr is not None:
-            for bb in [b for k, b in blocks if k == "seg"]:
-                tr.append(("table", bb))
-        for bb in texts:
-            t = _recognize_text(im, bb, timeout)
-            if t:
-                seq.append((bb[1], bb[0], t))        # 页眉页脚按 (y,x) 归位
-                if tr is not None:
-                    tr.append(("text", bb))
-        seq.sort(key=lambda s: (s[0], s[1]))
-        return _merge_text_blocks("\n\n".join(s for _, _, s in seq)), ncalls0, {"subs": 1}
-    items, ncalls = [], 0          # item: ["table", grid, html|None] | ["text", str, None]
+    'text' 块 → ocr_text 纯文本。'seg' 块 → ocr_table;td<阈值=标题,整块 ocr_text 重读
+    (避免宽标题被竖切、左→右拼乱阅读顺序)。td≥阈值=表,一段多吐的碎块拆成多 item 待合并。"""
+    items, ncalls = [], 0
     for kind, bb in blocks:
-        if kind == "text":
-            txt = _recognize_text(im, bb, timeout)
+        if kind in ("text", "title"):     # title = 从表顶剥下的标题,当纯文本读(GT 主流:标题=表外文本)
+            txt = ocr_text(im, bb, timeout)
             if txt:
                 items.append(["text", txt, None])
-                if tr is not None:
-                    tr.append(("text", bb))
-        else:                                  # seg: run_one 后按 td 数判表/标题
-            # peel=False:子表裁块已是独立子表,不再剥表外文字(否则矮子表薄数据行被误剥)
-            p, nc, _ = run_one(im.crop(bb), timeout, peel=False)
-            ncalls += nc
-            if p.lower().count("<td") >= _MIN_TABLE_CELLS:
-                if tr is not None:
-                    tr.append(("table", bb))
-                grids = [g for _, g in parse_tile_segments(p) if g]
-                if len(grids) == 1:
-                    items.append(["table", grids[0], p])      # 整段一表:留原始 HTML
-                else:
-                    for g in grids:                           # 一段多表(碎块):待合并,重渲染
-                        items.append(["table", g, None])
+            continue
+        # peel=False:子表裁块已是独立子表,不再剥表外文字(否则矮子表薄数据行被误剥)
+        p, nc, _ = ocr_table(im.crop(bb), timeout, peel=False)
+        ncalls += nc
+        if p.lower().count("<td") >= _MIN_TABLE_CELLS:
+            grids = [g for _, g in parse_tile_segments(p) if g]
+            if len(grids) == 1:
+                items.append(["table", grids[0], p])      # 整段一表:留原始 HTML
             else:
-                if tr is not None:
-                    tr.append(("text", bb))
-                # 判为非表(标题/文字):run_one 把宽标题区竖切成多列、左→右拼会打乱阅读顺序
-                # (产品名居中落 col1、metadata 落 col0 → 顺序反;2827031b/051fa323)。改整块
-                # _recognize_text 单次重读,API 按自然顺序返回。兼修旧"读空"丢标题。
-                txt = _recognize_text(im, bb, timeout)
-                if not txt:                       # 整块也读空 → 退回竖切结果兜底
-                    txt = _strip_html(p)
-                if txt:
-                    items.append(["text", txt, None])
-    merged = []                    # 表头小条合并:只「上面的小条 并入 下面的表身」(单向)
+                for g in grids:                           # 一段多表(碎块):待合并,重渲染
+                    items.append(["table", g, None])
+        else:                                             # td 少=标题:整块重读成纯文本
+            txt = ocr_text(im, bb, timeout) or _strip_html(p)
+            if txt:
+                items.append(["text", txt, None])
+    return items, ncalls
+
+
+def merge(items):
+    """Stage III — 表头小条合并 + 按阅读顺序拼接成 md。返回 (md, nsubtables)。
+
+    表头小条合并(单向,只上面小条并入下面表身):相邻两表,若上表是小条(cells<下表/8
+    **且** 列数差≤6)→ 行拼接归一表。两条 AND 缺一不可:只看列数会误并真子表(97c4c182
+    列72≈67);只看 cells 小会误并真小子表(19a15357 顶 td80 但列10≠68)。修竖线断裂把
+    表头行从表身剥下来的碎裂(945e8fe9/88c6dbb4/1f4293f3 89→3.5),顺手并一段多吐的碎块。"""
+    merged = []
     for it in items:
         if it[0] == "table" and merged and merged[-1][0] == "table":
             prev = merged[-1][1]
@@ -408,7 +326,15 @@ def run_one_split(im, timeout=240):
             ntab += 1
         else:
             parts.append(val)
-    return _merge_text_blocks("\n\n".join(parts)), ncalls, {"subs": ntab}
+    return _merge_text_blocks("\n\n".join(parts)), ntab
+
+
+def parse_table(im, timeout=240):
+    """表格图 → md,三段式:crop(纯几何裁块) → ocr(逐块识别) → merge(合并+拼接)。"""
+    blocks = crop(im)                        # Stage I
+    items, ncalls = ocr(im, blocks, timeout)  # Stage II
+    md, ntab = merge(items)                    # Stage III
+    return md, ncalls, {"subs": ntab}
 
 
 def main():
@@ -417,8 +343,6 @@ def main():
     ap.add_argument("--timeout", type=int, default=240)
     ap.add_argument("--pick", choices=["median", "small", "spread"],
                     default="median")
-    ap.add_argument("--split", action="store_true",
-                    help="多子表先几何切分再各自 run_one")
     args = ap.parse_args()
 
     files = sorted(glob.glob(os.path.join(TRAIN_TABLE_DIR, "mds", "*.md")),
@@ -440,14 +364,12 @@ def main():
             continue
         gt = open(md, encoding="utf-8").read()
         im = prep(Image.open(img))
-        pred, ncalls, meta = run_one(im, args.timeout)
+        pred, ncalls, meta = parse_table(im, args.timeout)
         teds = table_teds(pred, gt)
         te = text_edit_loss(pred, gt, include_tables=True)
         teds_list.append(teds if teds is not None else 0.0)
-        nr, nc = len(meta["row_cuts"]) - 1, len(meta["col_cuts"]) - 1
-        print(f"[{uuid[:8]}] gt_len={len(gt):>7} 网格={nr}x{nc}={ncalls}块 "
-              f"grid={meta['grid']} | TEDS={teds:.4f} textScore={(1-te)*100:.1f} "
-              f"pred_len={len(pred)}")
+        print(f"[{uuid[:8]}] gt_len={len(gt):>7} subs={meta.get('subs')} calls={ncalls} "
+              f"| TEDS={teds:.4f} textScore={(1-te)*100:.1f} pred_len={len(pred)}")
 
     if teds_list:
         print(f"\n===== 均值 TEDS = {sum(teds_list)/len(teds_list):.4f} "

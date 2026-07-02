@@ -5,7 +5,7 @@
 重跑评测时 API 结果由 api_client 缓存命中、不再调模型,但 prep/subtables 仍每图从头算
 → CPU-bound 慢。这里把它们的结果按【输入图内容哈希 + 源文件 mtime】落盘:
   - 内容哈希:同一图命中;
-  - 源文件 mtime 进键:一旦改了 preprocess.py / split_table.py,键变 → 自动失效重算,
+  - 源文件 mtime 进键:一旦改了 preprocess.py / crop.py,键变 → 自动失效重算,
     无陈旧风险(不必手动清缓存)。
 """
 import os
