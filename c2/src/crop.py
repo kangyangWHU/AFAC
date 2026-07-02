@@ -16,8 +16,7 @@ import json
 import numpy as np
 from PIL import ImageDraw
 
-from geom import (split_table_texts, _runlen_lines, _content_segs,
-                  _boundaries, column_cuts)
+from geom import split_table_texts, _runlen_lines, _content_segs
 from config import BIN_INK, BIN_FAINT, BIN_LINE
 from imcache import cached
 
@@ -197,6 +196,8 @@ def subtables(im, pad=4):
 # 裁块规划:单表折叠 + 表顶标题剥离
 # ---------------------------------------------------------------------------
 _DENSE_INK = 0.01   # seg 墨量≥此=密集真表;<此=稀疏薄条,不计入子表计数
+_TEXT_H_RATIO = 0.02  # seg 高 < 此×图高 → 判文本(标题/说明,单行级),不当表,免 API 判 td
+#                       实测标题簇 r≤0.017、最小真表段 r≥0.022,0.02 落 gap 不误伤真表
 
 
 def _ink(g, bb):
@@ -209,62 +210,80 @@ def _union(bbs):
     return (min(xs0), min(ys0), max(xs1), max(ys1))
 
 
-_COV_MIN = 0.50     # 真数据行:命中 ≥此比例 的列格
-_CROSS_MAX = 0.30   # 真数据行:落在列切线上的墨 ≤此比例(标题连续跨列会超)
+def _tighten(im, bb):
+    """把裁块收紧到实际内容边界(去四周空白 margin)。用松二值化 g180。
+
+    关键:定**左右界**时先去掉跨全宽的横线行(mean>0.5),定**上下界**时去掉贯穿全高的
+    竖线列——否则一条延伸到空白区的框线(只上/下边线、无数据)会把边界撑大(如 1c9ac6d2
+    上框线延伸到 x2685,数据实际只到 1672)。去线后仍保留的竖框线(带数据列)照常算边界,
+    所以有框空单元格不丢。mean>0.001 判该行/列有内容(抗单点噪,空区≈0 不过)。"""
+    x0, y0, x1, y1 = bb
+    d = np.asarray(im.crop(bb).convert("L")) < BIN_FAINT
+    dc = d.copy(); dc[d.mean(1) > 0.5, :] = False    # 去横线行 → 定左右界
+    dr = d.copy(); dr[:, d.mean(0) > 0.5] = False    # 去竖线列 → 定上下界
+    cols = np.where(dc.mean(0) > 0.001)[0]
+    rows = np.where(dr.mean(1) > 0.001)[0]
+    if len(rows) == 0 or len(cols) == 0:
+        return bb
+    return (x0 + int(cols[0]), y0 + int(rows[0]),
+            x0 + int(cols[-1]) + 1, y0 + int(rows[-1]) + 1)
+
+
+_SPAN_MIN = 0.40    # 真数据行:墨迹横向跨度 ≥此比例表宽。0.4 而非"铺满全宽"——数据常不填满
+#                     (右半空/列号未排满,如 4f27636c 数据 span0.54),0.4 仍能挡集中标题(span~0.05)
+_RUN_MIN = 3        # 真数据行:列向独立墨段数 ≥此(多列数字);标题=1~2 连续块
+_PEEL_MAX = 3       # 保数据底线:最多剥 ~3 行标题,剥超过=判据出错,宁可不剥
 
 
 def _peel_title(im, bb):
     """剥 seg 顶部标题/副标题,返回 (title_bboxes, trimmed_seg_bbox)。剥出块由调用方标
-    'title'(mark),Stage III 定去留。分两路(与列检测对称):
+    'title'(mark),Stage III 按 td 数定去留(整块无 td → 当标题/文本)。分两路:
 
-    · **有横框线**(全宽横墨线≥2条):表格上边界=最上一条横框线,标题必在其上方(框外)。
-      cut=上边框——明确几何,不依赖列估计;数据在框内(cut下方)天然**不会被切**。
-    · **无横框线**:用 column_cuts 的列切线判「真数据行」(cov 填多列 且 cross 不跨列缝),
-      从顶剥到第一真数据行,cut 落其上——遇数据行即停,也**不切数据**。
-
-    去掉了旧的 _PEEL_CAP(高度占比上限):它对"标题占大半的矮碎片"误挡;不切数据已由
-    "框线上边界 / 遇数据行即停"两路各自保证。"""
+    · **有横框线**(≥2,含密集网格表):最上一条=表格上边界,其上方(框外)=标题;cut=上边框,
+      框内表头/数据在 cut 下方天然不被切。框线多≠无标题——标题就在最上框线之上。
+      **最上框线上方无文字行** → 表从顶开始=无标题,不切;判据用上方**行墨峰值**(不用相对
+      表高:大表 3%H 达数百px 会把顶部真标题误判贴顶,如 0e8a501f 标题229px<3%H;也不用
+      全宽均值:淡/短标题会被稀释,如 1b8718d0 标题行墨0.0066 但全宽均值仅0.0017)。
+    · **无框/单框**(难点):不靠列格(鸡生蛋),直接看行墨迹**横向分布**——数据行墨迹横跨
+      全宽(span 大)且分成多列墨段(runs 多);标题墨迹局部集中(左/中/右)或单一连续块。
+      从顶剥到第一数据行;剥 > _PEEL_MAX 行则判据可疑 → 不剥(保数据,不误切)。"""
     x0, y0, x1, y1 = bb
     gray = np.asarray(im.crop(bb).convert("L"))
     g, g180 = gray < BIN_INK, gray < BIN_FAINT
     W = g.shape[1]
-    # 路① 有横框线:最上横框线=表格上边,其上方有内容=标题。
-    # 用**松二值化 g180**(g<180)检横线——框线常是淡灰线(灰度128~180),严二值化 g<128 会
-    # 漏掉最外框上边(如 4df76a25 淡线 y251 严0.02/松0.82),致误把框内表头当框上方标题剥。
+    # 横框线检测:松二值化 g180(框线常淡灰,灰度128~180,严二值化会漏,如 4df76a25 淡线 y251)
     hl, prev = [], -99
     for y in np.where(g180.mean(axis=1) > 0.5)[0]:
         if y - prev > 3:
             hl.append(int(y))
         prev = int(y)
     hl = [y for y in hl if y == 0 or y >= 8]      # 滤 pad 残余(0<y<8, seg重叠带入上一seg底框线)
-    if len(hl) >= 6:                              # **大量横框线=密集网格表** → 不 peel:
-        return [], bb                            #   框线已定表结构(表头/数据/框内标题都在框里),
-        #   交 ocr_table 读, 避免误剥表头/框内标题(有框不重要;"有框"指大量框线而非几根)
-    # 路② 少量框线(<6,几根)/无框:列对齐判「真数据行」,从顶剥标题到第一真数据行
+    # 路① 有横框线(≥2,含密集网格):最上一条=表顶,其上=标题(框线多≠无标题)
+    if len(hl) >= 2:
+        top = hl[0]
+        if top < 8 or g180[:top].mean(1).max() < 0.003:  # 上方无文字行(行墨峰值) → 无标题
+            return [], bb
+        return [(x0, y0, x1, y0 + top)], (x0, y0 + top, x1, y1)
+    # 路② 无框/单框:按行墨迹横向分布判数据行(不依赖列格)
     bands = [(s, e + 1) for s, e in _content_segs(g.mean(axis=1), gap=6, thr=0.004)
              if e - s >= 4]
     if len(bands) < 3:
         return [], bb
-    col_bnd = _boundaries(column_cuts(g, g180)[0], W)
-    cells = list(zip(col_bnd[:-1], col_bnd[1:]))   # 列格
-    cuts = col_bnd[1:-1]                           # 内部列切线(白缝中心)
-    if len(cells) < 4 or not cuts:
-        return [], bb
 
     def is_data_row(s, e):
-        rowink = g[s:e].any(axis=0)
-        cov = sum(rowink[a:b].any() for a, b in cells) / len(cells)
-        cross = rowink[cuts].mean()                # 墨落在列切线上 = 连续跨列(标题)
-        return cov >= _COV_MIN and cross <= _CROSS_MAX
+        cols = g[s:e].any(axis=0)                  # 该行各列是否有墨
+        xs = np.where(cols)[0]
+        if len(xs) == 0:
+            return False
+        span = (xs[-1] - xs[0] + 1) / W            # 横向跨度:数据行首列→末列≈1,标题局部小
+        runs = int((np.diff(np.r_[np.int8(0), cols.view(np.int8), np.int8(0)]) == 1).sum())
+        return span >= _SPAN_MIN and runs >= _RUN_MIN   # 铺满全宽 且 多列墨段 = 数据行
 
     k = 0
-    while k < len(bands) and not is_data_row(*bands[k]):   # 剥到第一真数据行
+    while k < len(bands) and not is_data_row(*bands[k]):   # 从顶剥到第一数据行
         k += 1
-    if k == 0 or k >= len(bands):                  # 无前导标题 / 全非数据行 → 不剥
+    if k == 0 or k >= len(bands) or k > _PEEL_MAX:         # 无标题/全非数据/剥超上限 → 不剥
         return [], bb
-    if k > 3:                                       # **保数据底线**:标题最多~3行,剥超过=列估计
-        return [], bb                              #   出错误把大块数据判成非数据(如 f23fb56f
-        #   1483px 数据被剥) → 宁可不剥标题,绝不切数据
     return [(x0, y0, x1, y0 + bands[k][0])], (x0, y0 + bands[k][0], x1, y1)
 
 
@@ -288,6 +307,10 @@ def crop(im):
         seg_items += [('title', tb) for tb in titles]
         seg_items.append(('seg', seg))
     items = [('text', bb) for bb in texts] + seg_items
+    Himg = im.height                                     # 矮 seg(高<2%图高)=标题/说明,非表
+    items = [('text', bb) if k == 'seg' and bb[3] - bb[1] < _TEXT_H_RATIO * Himg else (k, bb)
+             for k, bb in items]                         #   → 直接当文本,免 API 判 td
+    items = [(k, _tighten(im, bb)) for k, bb in items]   # 每块收紧到内容边界(去 margin)
     items = [(k, bb) for k, bb in items if bb[2] > bb[0] and bb[3] > bb[1]]  # 丢退化空块
     items.sort(key=lambda kb: (kb[1][1], kb[1][0]))      # 阅读顺序 (y, x)
     return items or [('seg', (0, 0, im.width, im.height))]
