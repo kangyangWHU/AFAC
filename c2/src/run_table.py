@@ -340,9 +340,8 @@ def _grid_html(grid):
         return rows_to_html(grid)
     C = max(len(r) for r in grid)
     grid = [list(r) + [""] * (C - len(r)) for r in grid]
-    keep = [j for j in range(C) if any(r[j].strip() for r in grid)]
-    if keep:
-        grid = [[r[j] for j in keep] for r in grid]
+    # 不剔全空列:有框表的空列由框线定义、真实存在(90c8cdb9 尾部10列全空,GT保留为
+    # 空td,剔除致td-690);无框赝品列(1674392a"）"列)代价仅一个空格,两害相权留着
     row0 = grid[0]
     n = len(row0)
     if len(grid) < 2 or not any(not c.strip() for c in row0) \

@@ -385,7 +385,8 @@ def _trim_trailing_empty_cols(rows):
 
 
 def _one_table(rows):
-    rows = _trim_trailing_empty_cols(rows)
+    # 不修剪尾空列:有框表的尾空列由框线定义、GT保留为空td(90c8cdb9尾部10列全空,
+    # 修剪致td-690);自由读时代的补齐残留不值得为它杀真列
     out = [_GT_TABLE_OPEN]
     for row in rows:
         tds = "".join("<td>%s</td>" % (c if c is not None else "") for c in row)
