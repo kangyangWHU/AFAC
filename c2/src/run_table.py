@@ -329,6 +329,69 @@ def ocr(im, blocks, timeout=240):
     return items, ncalls
 
 
+def _grid_html(grid):
+    """网格 → HTML,两步增强(治多表头族,GT 19/226 张表首行用合并单元格):
+    ① 全空列剔除:整列全空 = 骨架赝品(列带边界空列),留着会撑坏 colspan 宽度
+    ② 表头 span 合成(row1 证据驱动):row1 有字的连续列段 = colspan 表头覆盖区
+       (子表头 1..30);段内 row0 文字 → colspan=段宽;段外 row0 文字 → rowspan=2。
+       门槛:row0 既有文字又有空格、行数≥2、模式典型(段内仅一个 row0 文字,
+       rowspan 候选的 row1 同列为空),否则放弃合成、平面输出——普通表不受影响。"""
+    if not grid:
+        return rows_to_html(grid)
+    C = max(len(r) for r in grid)
+    grid = [list(r) + [""] * (C - len(r)) for r in grid]
+    keep = [j for j in range(C) if any(r[j].strip() for r in grid)]
+    if keep:
+        grid = [[r[j] for j in keep] for r in grid]
+    row0 = grid[0]
+    n = len(row0)
+    if len(grid) < 2 or not any(not c.strip() for c in row0) \
+            or not any(c.strip() for c in row0):
+        return rows_to_html(grid)
+    row1 = grid[1]
+    runs = []
+    j = 0
+    while j < n:
+        if row1[j].strip():
+            k = j + 1
+            while k < n and row1[k].strip():
+                k += 1
+            runs.append((j, k))
+            j = k
+        else:
+            j += 1
+    # 典型多表头模式:恰一个宽段(≥4列)覆盖子表头,其余 row0 文字都在段外
+    wide = [r for r in runs if r[1] - r[0] >= 4]
+    if len(wide) != 1:
+        return rows_to_html(grid)
+    a, b = wide[0]
+    texts_in = [t for t in range(a, b) if row0[t].strip()]
+    if len(texts_in) > 1:
+        return rows_to_html(grid)
+    outside = [j for j in range(n) if not (a <= j < b)]
+    if any(row1[j].strip() and not row0[j].strip() for j in outside):
+        return rows_to_html(grid)               # 段外 row1 有字但 row0 没有 → 非典型
+    parts = ['<table border="1" cellpadding="8" cellspacing="0">', "      <tr>"]
+    for j in range(n):
+        if j == a:
+            cap = row0[texts_in[0]] if texts_in else ""
+            parts.append(f'<td colspan="{b - a}">{cap}</td>')
+        elif a < j < b:
+            continue
+        elif row0[j].strip():
+            span = ' rowspan="2"' if not row1[j].strip() else ""
+            parts.append(f"<td{span}>{row0[j]}</td>")
+        else:
+            parts.append("<td></td>")
+    parts.append("</tr>")
+    parts.append("<tr>" + "".join(f"<td>{row1[j]}</td>" for j in range(n)
+                                  if a <= j < b or row1[j].strip()) + "</tr>")
+    for r in grid[2:]:
+        parts.append("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>")
+    parts.append("</table>")
+    return "\n".join(parts)
+
+
 def merge(items):
     """Stage III — 表头小条合并 + 按阅读顺序拼接成 md。返回 (md, nsubtables)。
 
@@ -385,7 +448,7 @@ def merge(items):
     parts, ntab = [], 0
     for kind, val, html in merged:
         if kind == "table":
-            parts.append(html if html is not None else rows_to_html(val))
+            parts.append(html if html is not None else _grid_html(val))
             ntab += 1
         else:
             parts.append(val)
