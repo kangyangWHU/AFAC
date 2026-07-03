@@ -17,7 +17,8 @@ import numpy as np
 from PIL import ImageDraw
 
 from geom import (split_table_texts, _runlen_lines, _content_segs,
-                  LINE_COVER, FRAME_MIN_RUN, DATA_SPAN_MIN, DATA_RUN_MIN)
+                  LINE_COVER, FRAME_MIN_RUN, DATA_SPAN_MIN, DATA_RUN_MIN,
+                  rows_misaligned)
 from config import BIN_INK, BIN_FAINT, BIN_LINE
 from imcache import cached
 
@@ -70,12 +71,10 @@ def _panel_seam_xs(g):
     return seams
 
 
-_SEAM_K = 2.5   # 真子表缝实测=行缝2.5~10倍(ce5799a7 7.4×);2.0 会把阶梯稀疏区的
-#                 2.1~2.3× 假缝(aef3bf0c h23,墨0.17 贯穿判据擦边不过)放进候选
+_SEAM_K = 2.4   # 真子表缝(严格白域)下界 2.5×(225fb899/583ac07b/c2c78d42 密排小表);
+#                 有害假带天花板 2.29×(e8b578eb)——2.4 居中。标题-表之间的 3.0~3.2× 空隙
+#                 (f23fb56f/5fdf46b0)切开无害:产生的标题段由分类收编为 text。
 _SEAM_VMAX = 2
-_SEAM_WHITE_FRAC = 0.003   # 找子表缝的白行判据(墨<此×W)。**刻意比 geom 数行的白判据松**:
-#                            缝高要量'近空白带'的高度,稀疏行也该并入白带;数行则相反,行号行
-#                            不能算白(ROW_NOISE_FRAC=0.0005)。两者语义不同,不共用值。
 
 
 def _vline_break_ys(dark180):
@@ -127,7 +126,19 @@ def _row_bounds(dark, dark180=None, k=_SEAM_K, vmax=_SEAM_VMAX):
       条竖线=仍在表内),真子表缝处框线断开(db515/1de69 = 0 条)。
     这条按"完全空白才是缝"替掉原魔数"段数<4"。"""
     H, W = dark.shape
-    white = dark.sum(1) < max(2, _SEAM_WHITE_FRAC * W)   # 连续白线(纯白行,松判据见常量注释)
+    # **严格白**(与 geom 行估计同一把尺子:0.05%×宽+floor3):行号/标签行有墨→不算白,
+    # 天然被排除在带外——阶梯稀疏区的空隙只剩 1.4~2.3×(行号不再被吞),缝中标签自动把
+    # 带劈开、大空独立成缝、标签随下表。旧松白(0.3%W)需要整套"贯穿否决"来补救,已删。
+    # 算行墨前**先去贯穿竖线列**(对称 geom.row_bnds):有框表的框线给每行贡献~10px墨,
+    # 不去则没有一行能过严格白、bands 全空(1c9ac6d2 白带0条,B探测器被早退跳过)。
+    keep = None
+    if dark180 is not None:
+        km = dark180.mean(axis=0) <= 0.5
+        if km.any():
+            keep = km
+    d2 = dark[:, keep] if keep is not None else dark
+    W2 = d2.shape[1]
+    white = d2.sum(1) < max(3, 0.0005 * W2)
     bands = []                                        # 连续白带 (起,止,高)
     y = 0
     while y < H:
@@ -138,34 +149,26 @@ def _row_bounds(dark, dark180=None, k=_SEAM_K, vmax=_SEAM_VMAX):
             bands.append((s, y, y - s))
         else:
             y += 1
-    if not bands:
-        return [0, H]
-    row_gap = float(np.median([h for _, _, h in bands]))   # 典型行缝高
     cuts = []
-    for s, e, h in bands:
-        if h < k * row_gap or not (20 < (s + e) // 2 < H - 20):
-            continue
-        band = dark[s:e]
-        col = band.mean(0)
-        # 内容列贯穿 = 同表延续,不切。主证:**列墨出现在带的首末两端**(表格延续=行按
-        # 节奏流过整条带,任意窗口上下沿附近必有行;缝里的孤立标签只占一处,物理上到不了
-        # 两端)——三分段按比例,无尺度常数,鲁棒。旁证:均墨≥0.3,只管"带矮到只吞进一个
-        # 行号"的单簇残例(单行号在矮带占比 0.35+ vs 标签在高缝 ≤0.22,两侧余量宽)。
-        # 单阈值已证不可行:aef 需保带 0.23 与 2554 需切标签 0.22 重叠。<0.8 框线归下条。
-        third = max(1, (e - s) // 3)
-        pierce = band[:third].any(0) & band[-third:].any(0)
-        if bool(((pierce | (col >= 0.3)) & (col < 0.8)).any()):
-            continue                                       # 内容列贯穿 = 同表延续,非子表缝
-        if int((col > 0.8).sum()) > vmax:                  # 框线竖线贯穿 → 表内，非缝
-            continue
-        cuts.append((s + e) // 2)
-    if dark180 is not None:                                # 判据三:竖线断裂(有框表)
-        cuts += _vline_break_ys(dark180)
+    if bands:
+        row_gap = float(np.median([h for _, _, h in bands]))   # 典型行缝高
+        for s, e, h in bands:
+            if h < k * row_gap or not (20 < (s + e) // 2 < H - 20):
+                continue
+            col = dark[s:e].mean(0)
+            if int((col > 0.8).sum()) > vmax:              # 框线竖线贯穿 → 表内，非缝
+                continue
+            cuts.append((s + e) // 2)
+    if dark180 is not None:                                # 判据三:竖线断裂(有框表)——
+        cuts += _vline_break_ys(dark180)                   # 不因 bands 空而跳过
     cuts = sorted(set(cuts))
     merged = []                                            # 相邻(<40px)缝合并=同一缝去重
     for c in cuts:                                         # (40=同缝两探测器的抖动幅度;
         if not merged or c - merged[-1] >= 40:             #  120会吞相距114px的两条真缝,
             merged.append(c)                               #  a1aaef73 小表高仅~115px)
+    if len(merged) > 15:                                   # 碎尸护栏:正常多子表≤11刀;
+        return [0, H]                                      #  列错位表(b326)行缝被行号劈成
+    #                                                        上百条过阈假缝 → 整栏不切,交OCR
     return [0] + merged + [H]
 
 
@@ -289,8 +292,13 @@ def _peel_title(im, bb):
             return [], bb
         return [(x0, y0, x1, y0 + top)], (x0, y0 + top, x1, y1)
     # 路② 无框/单框:按行墨迹横向分布判数据行(不依赖列格)
-    bands = [(s, e + 1) for s, e in _content_segs(g.mean(axis=1), gap=_BAND_GAP, thr=_BAND_THR)
-             if e - s >= _BAND_MINH]
+    # 行带用 row_bnds(与行计数**同一把尺子**,绝对墨判白):相对阈 _content_segs(0.4%×宽
+    # ≈15px/行)看不见小标签("X岁"每行十几px墨)——标签对 peel 隐形、却被行计数数进去,
+    # 堆叠小表家族全部 +1 行(ce5799a7×6/1de69d49×5/225fb899×4…)。row_bnds 的行带里
+    # 标签作为 band0 现身 → is_data 判非数据 → 剥走。
+    from geom import row_bnds as _rb
+    rbnd, _fr = _rb(g, g180)
+    bands = [(rbnd[i], rbnd[i + 1]) for i in range(len(rbnd) - 1)]
     if len(bands) < 3:
         return [], bb
 
