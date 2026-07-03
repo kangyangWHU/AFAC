@@ -147,17 +147,14 @@ def _row_bounds(dark, dark180=None, k=_SEAM_K, vmax=_SEAM_VMAX):
             continue
         band = dark[s:e]
         col = band.mean(0)
-        # 内容列贯穿 = 列的墨出现在带的**首末两端**(首1/3 且 末1/3)——"延续"的物理含义:
-        # 内容从带前延续到带后。aef3bf0c 阶梯稀疏区行号周期性铺满整带(首末都有,均墨0.27,
-        # 但单段仅~12px) → 贯穿 ✓ 不切;ce5799a7 块间短标签单簇集中带内一处(只占一端)
-        # → 非贯穿 → 切 ✓。均墨阈会放过标签(0.15-0.17 恰过线),连续墨柱阈会漏周期性行号
-        # ——两个旧判据各错一边,首末两端判据同时对两家。
+        # 内容列贯穿 = 同表延续,不切。主证:**列墨出现在带的首末两端**(表格延续=行按
+        # 节奏流过整条带,任意窗口上下沿附近必有行;缝里的孤立标签只占一处,物理上到不了
+        # 两端)——三分段按比例,无尺度常数,鲁棒。旁证:均墨≥0.3,只管"带矮到只吞进一个
+        # 行号"的单簇残例(单行号在矮带占比 0.35+ vs 标签在高缝 ≤0.22,两侧余量宽)。
+        # 单阈值已证不可行:aef 需保带 0.23 与 2554 需切标签 0.22 重叠。<0.8 框线归下条。
         third = max(1, (e - s) // 3)
-        head = band[:third].any(0)
-        tail = band[-third:].any(0)
-        # 双保险:均墨≥0.2(aef 深部稀疏带行号周期铺满,均墨0.27~0.62;ce 标签仅0.15~0.17)
-        # 或 首末两端有墨(周期行号带的一般形态;标签单簇只占一处两条都不过)
-        if bool((((col >= 0.2) | (head & tail)) & (col < 0.8)).any()):
+        pierce = band[:third].any(0) & band[-third:].any(0)
+        if bool(((pierce | (col >= 0.3)) & (col < 0.8)).any()):
             continue                                       # 内容列贯穿 = 同表延续,非子表缝
         if int((col > 0.8).sum()) > vmax:                  # 框线竖线贯穿 → 表内，非缝
             continue
@@ -165,10 +162,10 @@ def _row_bounds(dark, dark180=None, k=_SEAM_K, vmax=_SEAM_VMAX):
     if dark180 is not None:                                # 判据三:竖线断裂(有框表)
         cuts += _vline_break_ys(dark180)
     cuts = sorted(set(cuts))
-    merged = []                                            # 相邻(<120px)缝合并=同一缝
-    for c in cuts:
-        if not merged or c - merged[-1] >= 120:
-            merged.append(c)
+    merged = []                                            # 相邻(<40px)缝合并=同一缝去重
+    for c in cuts:                                         # (40=同缝两探测器的抖动幅度;
+        if not merged or c - merged[-1] >= 40:             #  120会吞相距114px的两条真缝,
+            merged.append(c)                               #  a1aaef73 小表高仅~115px)
     return [0] + merged + [H]
 
 
