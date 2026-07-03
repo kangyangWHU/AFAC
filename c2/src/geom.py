@@ -144,8 +144,10 @@ def column_cuts(dark, dark180):
     (真列缝实测最小 12px,10 不误杀),简单稳。"""
     H = dark.shape[0]
     runl = _runlen_lines(dark180, min_run=min(FRAME_MIN_RUN, int(FRAME_HFRAC * H)))
-    colf = dark.mean(axis=0)
-    idx = np.where(colf < COL_WHITE_FRAC)[0]
+    keep = dark180.mean(axis=1) <= LINE_COVER      # 去横框线行(对称 row_bnds 去竖线列):
+    colf = (dark[keep] if keep.any() else dark).mean(axis=0)   # 横线横贯全宽,不去则每列
+    idx = np.where(colf < COL_WHITE_FRAC)[0]       # 都被线墨填满,白缝全灭(32799493 gap=0
+    #                                                → FRAME_GATE 空虚通过,4根局部竖线误判有框)
     gap = []
     if len(idx):
         runs = [[idx[0]]]                    # 连续白列(≤2px 断)聚成缝
@@ -155,6 +157,19 @@ def column_cuts(dark, dark180):
     if len(runl) > 1 and len(runl) >= FRAME_GATE * len(gap):
         return runl, True                    # 有框:墨柱线=真单元格边界
     return gap, False                        # 无框:白缝(COL_GAP_MIN)
+
+
+def col_bnds(dark, dark180):
+    """列边界(对称于 row_bnds)。返回 (bnds, framed)；列数 = len(bnds) - 1。
+
+    有框:竖框线**就是**列边界——竖线数 = 列数 + 1,左右边框已含在内,不补 0/W
+    (补了在边框外各造一条幽灵列,+2:实测有框列精确 0%→93%)。
+    无框:白缝(column_cuts 的 gap 路)本身是缝中心、非边框,首尾需补 0/W。
+    单侧开边(边框缺一侧,如 d9a99684 -1 列)不补——与行的决策一致,交 OCR 定。"""
+    lines, framed = column_cuts(dark, dark180)
+    if framed and len(lines) > 1:
+        return [int(x) for x in lines], True
+    return _boundaries(lines, dark.shape[1]), False
 
 
 def row_bnds(dark, dark180):

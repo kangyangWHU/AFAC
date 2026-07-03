@@ -17,28 +17,37 @@ Image.MAX_IMAGE_PIXELS = None
 from config import TRAIN_TABLE_DIR, OUT_DIR, BIN_INK, BIN_FAINT
 from preprocess import prep
 from crop import crop
-from geom import column_cuts, row_bnds, _boundaries
+from geom import row_bnds, col_bnds
 
 
 def grid_lines(sub):
-    """我们的几何行列估计(与 Stage I 同源): column_cuts 定列线、row_bnds 定行边界。
+    """我们的几何行列估计(与 Stage I 同源): col_bnds 定列边界、row_bnds 定行边界。
     返回 (row_bnd, col_bnd) 局部像素边界。"""
     g = np.asarray(sub.convert("L"))
-    W = g.shape[1]
     dark, dark180 = g < BIN_INK, g < BIN_FAINT
-    col_lines, _ = column_cuts(dark, dark180)
-    rb, _framed = row_bnds(dark, dark180)
-    return rb, _boundaries(col_lines, W)
+    rb, _ = row_bnds(dark, dark180)
+    cb, _ = col_bnds(dark, dark180)
+    return rb, cb
 
 
 def gt_tables(gt):
-    """解析 GT 每个 <table> 的 (行数, 列数)。列数=某行最多 td 数。"""
+    """解析 GT 每个 <table> 的 (行数, 列数)。列数=各行 **colspan 求和** 的最大值——
+    数原始 td 标签会把 <td colspan=46> 当 1 列(d9a99684 表头行 4+colspan46 数成 51,
+    真实网格宽 50)。"""
     out = []
     for tb in re.findall(r"<table.*?</table>", gt, re.S | re.I):
-        trs = re.findall(r"<tr.*?</tr>", tb, re.S | re.I)
+        # 按 <tr 开标签切行——GT 存在未闭合 <tr>(d9a99684 表头行),要求 </tr> 会把
+        # 两行并一行:行数少 1、colspan 求和翻倍(4+46+46=96)
+        trs = re.split(r"<tr[^>]*>", tb, flags=re.I)[1:]
         if not trs:
             continue
-        cols = max(len(re.findall(r"<t[dh][ >]", tr, re.I)) for tr in trs)
+        cols = 0
+        for tr in trs:
+            w = 0
+            for td in re.findall(r"<t[dh][^>]*>", tr, re.I):
+                m = re.search(r'colspan\s*=\s*"?(\d+)', td, re.I)
+                w += int(m.group(1)) if m else 1
+            cols = max(cols, w)
         out.append((len(trs), cols))
     return out
 
