@@ -356,6 +356,22 @@ def merge(items):
     items = fused
     merged = []
     for it in items:
+        # [表A, 短文本, 表B] 且 A 是 B 的表头小条 → 文本当成一行(colspan行)三合一:
+        # peel 从表身剥出的组表头行 OCR 成文本后会挡在 A/B 之间,使"相邻两表"合并失效
+        # (88c6dbb4 subs=2,TEDS 0.027);GT 恰好把该行算表内 colspan 行(4+1+107=112=GT)
+        if (it[0] == "table" and len(merged) >= 2
+                and merged[-1][0] == "text" and "\n" not in merged[-1][1]
+                and len(merged[-1][1]) <= 80
+                and merged[-2][0] == "table"):
+            prev = merged[-2][1]
+            if _grid_cells(prev) < _grid_cells(it[1]) / 8 \
+                    and abs(_grid_cols(prev) - _grid_cols(it[1])) <= 6:
+                C = _grid_cols(it[1])
+                trow = [merged[-1][1]] + [""] * max(0, C - 1)
+                fusedg = prev + [trow] + it[1]
+                merged.pop(); merged.pop()
+                merged.append(["table", fusedg, None])
+                continue
         if it[0] == "table" and merged and merged[-1][0] == "table":
             prev = merged[-1][1]
             # 方向:表头小条恒在表身【上方】→ 只有 prev(上)是小条、it(下)是表身才并。
