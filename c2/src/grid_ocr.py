@@ -10,7 +10,7 @@
 - 列错位表(rows_misaligned)是唯一例外:骨架不可信,回退整段自由读(交上层 ocr_table)。
 """
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 import api_client as api
 from config import MAX_CONCURRENCY, API_USER_IDS, BIN_INK, BIN_FAINT
@@ -48,10 +48,11 @@ def slice_grid(im):
           upsample, misaligned(True=骨架不可信,调用方回退自由读)。"""
     g = np.asarray(im.convert("L"))
     dark, dark180 = g < BIN_INK, g < BIN_FAINT
-    rb, _rf = row_bnds(dark, dark180)
-    cb, _cf = col_bnds(dark, dark180)
+    rb, rf = row_bnds(dark, dark180)
+    cb, cf = col_bnds(dark, dark180)
     R, C = len(rb) - 1, len(cb) - 1
-    meta = {"rows": R, "cols": C, "rb": rb, "cb": cb, "misaligned": False}
+    meta = {"rows": R, "cols": C, "rb": rb, "cb": cb, "misaligned": False,
+            "col_framed": bool(cf)}
     if R < 1 or C < 1 or rows_misaligned(dark, dark180):
         meta["misaligned"] = True
         return None, meta
@@ -84,7 +85,17 @@ def slice_grid(im):
             y0, y1 = max(0, rb[ri] - _EDGE_PAD), min(H, rb[rj] + _EDGE_PAD)
             x0, x1 = max(0, cb[ci] - _EDGE_PAD), min(W, cb[cj] + _EDGE_PAD)
             ink = dark[y0:y1, x0:x1].mean()
-            row.append(None if ink < _BLANK_TILE_INK else im.crop((x0, y0, x1, y1)))
+            if ink < _BLANK_TILE_INK:
+                row.append(None)
+                continue
+            t = im.crop((x0, y0, x1, y1))
+            if not rf:                             # **无框表画骨架行线进 tile**:VLM 看见
+                t = t.convert("RGB")               # 显式行分隔→高格不再拆行(5年交)、行不
+                dr = ImageDraw.Draw(t)             # 漏读(21→22);内部线 only,顶/底边不画。
+                for i in range(ri + 1, rj):        # 有框表已有线,不叠画。
+                    dr.line([(0, rb[i] - y0), (t.width, rb[i] - y0)],
+                            fill=(0, 0, 0), width=2)
+            row.append(t)
         tiles.append(row)
     return tiles, meta
 
@@ -95,19 +106,33 @@ def _up(t, factor):
     return t
 
 
-def _fit(cells_rows, nr, nc):
-    """强制对齐骨架 (nr×nc):列补 ""/截断(稀疏区补零),行多裁少补空行。"""
-    rows = [r[:nc] + [""] * max(0, nc - len(r)) for r in cells_rows[:nr]]
-    return rows + [[""] * nc for _ in range(nr - len(rows))]
+def _parse_cap(raw):
+    """解析 tile 输出 → (caption, rows)。tile 是从表内切出的,**不存在表外文字**——
+    API 把跨列表头(colspan行,如"保单年度")当 caption 放在 <table> 前,必须回收。"""
+    rows = parse_tile(raw) if raw else []
+    cap = ""
+    if raw and "<table" in raw.lower():
+        head = raw[:raw.lower().index("<table")]
+        cap = " ".join(head.split())
+    return cap, rows
 
 
 def ocr_seg(im, timeout=240):
-    """单个 seg 的骨架 OCR。返回 (grid, ncalls, meta);grid=None 表示骨架不可信需回退。"""
+    """单个 seg 的骨架 OCR。返回 (grid, ncalls, meta);grid=None 表示骨架不可信需回退。
+
+    组装 = **骨架行级墨证据 × tile 读数逐行核销**(替代 tile 级补零/众数):
+    · tile 的期望行 = 该 tile 列范围内**有文字墨**的骨架行(排除纯横线行——OCR 不输出
+      空行/线行,右侧 tile 因 colspan 区顶部空白整体上移一行的错位由此消除,1674392a)
+    · caption 回填:实读=期望-1 且有 caption → caption 是首个有墨行的内容(跨列表头)
+    · 差额核销:实读<期望 → 信骨架补空(OCR漏行是常态);实读>期望 → 需同带≥2 tile
+      佐证(或单tile带)才在带尾加一行,孤证=幻觉裁掉。"""
     tiles, meta = slice_grid(im)
     if meta["misaligned"]:
         return None, 0, meta
     up = meta["upsample"]
     row_bands, col_bands = meta["row_bands"], meta["col_bands"]
+    rb, cb = meta["rb"], meta["cb"]
+    dark = np.asarray(im.convert("L")) < BIN_INK
     flat = [(r, c) for r in range(len(tiles)) for c in range(len(tiles[r]))
             if tiles[r][c] is not None]
     from concurrent.futures import ThreadPoolExecutor
@@ -120,25 +145,110 @@ def ocr_seg(im, timeout=240):
         with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENCY, len(flat))) as ex:
             for (r, c), o in zip(flat, ex.map(call, list(enumerate(flat)))):
                 outs[(r, c)] = o
-    # 组装:先定每带行数(仅首/末带容 ±1:各 tile 实读行数取多数,与骨架差 1 时信实读——
-    # 开边末行/表头两行等几何已知偏差),再逐 tile 强制对齐 → 拼成全表。
+
+    # 格级墨证据:cell_ink[i][j] = 骨架格(i,j)内部(收缩2px避开框线)文字墨≥3px。
+    # 行对齐(哪些行有内容)和列摆放(哪些格有内容)共用——空白判定要求极低墨。
+    R, C = meta["rows"], meta["cols"]
+    cell_ink = np.zeros((R, C), dtype=bool)
+    for i in range(R):
+        y0, y1 = rb[i] + 2, rb[i + 1] - 2
+        if y1 <= y0:
+            y0, y1 = rb[i], rb[i + 1]
+        for j in range(C):
+            x0, x1 = cb[j] + 2, cb[j + 1] - 2
+            if x1 <= x0:
+                x0, x1 = cb[j], cb[j + 1]
+            sub = dark[y0:y1, x0:x1]
+            cnt = sub.sum(1)
+            frac = sub.mean(1)
+            line = frac > 0.5                      # 穿过格内的横线主体行
+            lm = line.copy()                       # ±2px 膨胀:线的反锯齿灰边(frac
+            for s in (1, 2):                       #  0.2~0.5,几十px)也一并排除,否则
+                lm[:-s] |= line[s:]                #  保单年度底线的灰边使 row0 被误判
+                lm[s:] |= line[:-s]                #  有字,数据行错进表头(1674392a)
+            cell_ink[i, j] = bool(((cnt >= 3) & ~lm).any())
+
+    # 先解析全部 tile
+    parsed = {}
+    for r in range(len(row_bands)):
+        for c in range(len(col_bands)):
+            parsed[(r, c)] = _parse_cap(outs.get((r, c)))
+
+    # **列校准**(行列职责不对称:行估计=真值,列在稀疏区/标签区可能少):非空 tile 的行
+    # 格数众数若一致 = 骨架列数+k(k>0),且 ≥2 个行带的 tile 同票(或该列带只有 1 个非空
+    # tile) → 采纳 nc+k(5fdf46b0 三标签列被并 1 列,429 行每行一致多读 2 格=最强信号;
+    # 稀疏空 tile 不投票)。
+    from collections import Counter
+    band_nc = []
+    for c, (ci, cj) in enumerate(col_bands):
+        nc = cj - ci
+        votes = []
+        if not meta.get("col_framed"):             # **只校准无框表**:有框列=框线,本就精确;
+            for r in range(len(row_bands)):        # 且有框 tile 切点在框线上,±3px pad 带进
+                _, rws = parsed[(r, c)]            # 框线+邻列残影,VLM 每行一致幻觉出一个
+                if not rws:                        # 边缘格(9c7857f3 五个带全被投成+1,
+                    continue                       # 数据中间散布假空格)——一致性骗过佐证
+                cnts = [len(x) for x in rws if any(s.strip() for s in x)]
+                if cnts:
+                    votes.append(Counter(cnts).most_common(1)[0][0])
+        if votes:
+            top, n = Counter(votes).most_common(1)[0]
+            if top > nc and (n >= 2 or len(votes) == 1):
+                nc = top
+        band_nc.append(nc)
+
     grid = []
-    nR = len(row_bands)
     for r, (ri, rj) in enumerate(row_bands):
-        nr = rj - ri
-        if r in (0, nR - 1):
-            reads = [len(parse_tile(outs[(r, c)])) for c in range(len(col_bands))
-                     if (r, c) in outs]
-            if reads:
-                from collections import Counter
-                real = Counter(reads).most_common(1)[0][0]
-                if abs(real - nr) == 1:
-                    nr = real
-        band_rows = [[] for _ in range(nr)]
+        band_idx = list(range(ri, rj))
+        aligned = {}
         for c, (ci, cj) in enumerate(col_bands):
-            nc = cj - ci
-            cells = _fit(parse_tile(outs[(r, c)]) if (r, c) in outs else [], nr, nc)
-            for k in range(nr):                   # 空白 tile → _fit([]) = 全空 cell(补零)
-                band_rows[k].extend(cells[k])
-        grid.extend(band_rows)
+            cap, rows = parsed[(r, c)]
+            E = [i for i in band_idx if cell_ink[i, ci:cj].any()]
+            if cap and len(rows) == len(E) - 1:
+                rows = [[cap]] + rows              # caption = 首个有墨行(跨列表头)
+            while len(rows) > len(E):              # 实读超期望时先丢**全空行**:±3px pad
+                empt = [k for k, x in enumerate(rows)          # 带进邻带行的底边残影,VLM
+                        if not any(s.strip() for s in x)]      # 输出全空行,按序对齐会把
+                if not empt:                                   # 整tile内容挤移一行(9c7857f3
+                    break                                      # 多tile整块错位,0.78病根)。
+                rows.pop(empt[0])                              # 全空行零信息,丢之必无害
+            if r == 0 and len(rows) >= len(E) + 1 and len(rows) >= 2:
+                a, b = rows[0], rows[1]            # 斜线表头:一个高格斜线分写两行,OCR
+                ov = [t for t in range(min(len(a), len(b)))   # 拆成两行且仅第0格重叠
+                      if a[t].strip() and b[t].strip()]       # → 合并,格0='下\上'
+                if ov == [0]:                                 # (GT 口径:保单年度末\投保年龄)
+                    m = [b[0] + "\\" + a[0]] + [x if x.strip() else y
+                         for x, y in zip(a[1:] + [""] * (len(b) - len(a)),
+                                         b[1:] + [""] * (len(a) - len(b)))]
+                    rows = [m] + rows[2:]
+            if len(rows) == len(E) + 1:
+                # 拆行合并(行线/墨测试,非打分):拆出的两行本是同一条骨架行——相邻互补对
+                # 合并后的非空格数须**恰等**该骨架行墨格数;真表头两行合并后对不上。
+                # 通过者唯一才合并,否则保守裁尾。行是真值,读数必须与骨架一致。
+                hits = []
+                for k in range(len(rows) - 1):
+                    a, b = rows[k], rows[k + 1]
+                    L = max(len(a), len(b))
+                    aa = a + [""] * (L - len(a))
+                    bb = b + [""] * (L - len(b))
+                    if not (any(x.strip() for x in aa) and any(x.strip() for x in bb)):
+                        continue
+                    if any(x.strip() and y.strip() for x, y in zip(aa, bb)):
+                        continue
+                    merged = [x if x.strip() else y for x, y in zip(aa, bb)]
+                    nz = sum(1 for x in merged if x.strip())
+                    if k < len(E) and nz == int(cell_ink[E[k], ci:cj].sum()):
+                        hits.append((k, merged))
+                if len(hits) == 1:
+                    k, merged = hits[0]
+                    rows = rows[:k] + [merged] + rows[k + 2:]
+            aligned[c] = (E, rows)
+        for i in band_idx:                         # 行强制一致:骨架行数即真值,多裁少补
+            rowcells = []
+            for c, (ci, cj) in enumerate(col_bands):
+                E, rows = aligned[c]
+                cells = rows[E.index(i)] if i in E and E.index(i) < len(rows) else []
+                nc = band_nc[c]
+                rowcells += list(cells[:nc]) + [""] * max(0, nc - len(cells))
+            grid.append(rowcells)
     return grid, len(flat), meta
