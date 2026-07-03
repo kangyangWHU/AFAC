@@ -11,7 +11,10 @@ from config import BIN_FAINT, BIN_LINE
 FRAME_MIN_RUN = 120     # 框线判定:竖直/横向连续墨段 ≥此px(文字碎段最长~10px,12×余量)
 FRAME_GATE = 0.5        # 框线路门控:框线数 ≥ GATE×白缝数 才走框线路(否则残线劫持)
 LINE_COVER = 0.5        # 一行/列的均墨 ≥此 = 贯穿框线(横线检测/去竖线列共用)
-ROW_WHITE_ABS = 3       # 白行判定:绝对墨量下限px(一条行号扫描线~6-10px,不会误白)
+ROW_WHITE_ABS = 3       # 白行判定:绝对墨量<此=白(一条行号扫描线~6-10px,不会误白)
+ROW_CLEAN_ABS = 2       # 净行:墨<此(0~1px)。真行缝内必有净行;字符内假白缝(细笔画中段
+#                         恰 2px,笔画贯穿)到不了 0——白段须含净行才算真缝(790bec64 劈数字);
+#                         全局降白阈到 2 反而害 4 张(真缝中 2px 噪点行墨化→两行粘连)
 ROW_NOISE_FRAC = 0.0005  # 白行噪声地板:允许 0.05%×宽 的二值化噪点(逐像素累积随宽缩放)
 ROW_GAP_MIN = 3         # 真行缝最小高度px:字符内假白缝(细笔画扫描线)仅1~2px
 FRAME_HFRAC = 0.6       # 矮表框线阈值:min(FRAME_MIN_RUN, HFRAC×表高)(救框线<120px矮表)
@@ -193,18 +196,51 @@ def row_bnds(dark, dark180):
     keep = dark180.mean(axis=0) <= LINE_COVER        # 去贯穿竖线列
     ink = dark[:, keep].sum(axis=1) if keep.any() else dark.sum(axis=1)
     white = ink < max(ROW_WHITE_ABS, int(ROW_NOISE_FRAC * W))
-    bnds, y = [0], 0
+    hline = dark180.mean(axis=1) > LINE_COVER       # 残余横线行=分隔符非内容,按白并入缝
+    white |= hline                                   # (横线墨≥thr 会自成4px假行→缝里两条线)
+    y = 0                                            # 墨段高<ROW_GAP_MIN=噪点,按白(对称:
+    while y < H:                                     #   真行缝≥3px,真字行同样≥3px——空白带
+        if not white[y]:                             #   中 1 行 3px 噪墨自成假行,0ed86277)
+            s = y
+            while y < H and not white[y]:
+                y += 1
+            if y - s < ROW_GAP_MIN:
+                white[s:y] = True
+        else:
+            y += 1
+    bnds, runs, y = [0], [], 0
     while y < H:
         if white[y]:
             s = y
             while y < H and white[y]:
                 y += 1
-            # 内部白带且高≥ROW_GAP_MIN → 边界取中心。更矮的是细笔画字符内的假白缝
-            # (如"7"斜杠段扫描线仅2px墨)——否则单个行号被劈成两行(090853cd +22)
-            if s > 0 and y < H and y - s >= ROW_GAP_MIN:
+            # 内部白带且高≥ROW_GAP_MIN,且 [含横线行 或 含净行] → 边界取中心。
+            # 高不足=字符内假白缝(090853cd +22);横线=分隔证据(字符内绝不含横线,
+            # 且线周常有2~7px脏噪、无净行,cc1ea3a3);无横线时须含净行(min<CLEAN)——
+            # 细笔画中段2px假缝到不了净(790bec64 劈数字)
+            if s > 0 and y < H and y - s >= ROW_GAP_MIN \
+                    and (hline[s:y].any() or int(ink[s:y].min()) < ROW_CLEAN_ABS):
                 bnds.append((s + y) // 2)
+                runs.append((s, y))                  # 记边界所在白段(近邻对杀弱用)
         else:
             y += 1
+    # 近邻边界对:间距 < 0.5×行距中位 → 物理上不可能都真(表内行距均匀),必有一条穿字——
+    # 斜线字形内的真 0 墨 dip 连净行检查都过(如"7"斜杠尾被隔成假行,790bec64/aef3bf0c)。
+    # 杀弱者:白段含横线行的赢(分隔铁证);否则白段更高的赢;平手杀后者。迭代至无近邻对。
+    # pitch 取表自身边界间距中位——上百个间隔混 1~2 个假的中位不动,表内自适应无外部常数。
+    changed = True
+    while changed and len(bnds) >= 3:
+        changed = False
+        pitch = float(np.median(np.diff(bnds + [H])))
+        for j in range(1, len(bnds) - 1):
+            if bnds[j + 1] - bnds[j] < 0.5 * pitch:
+                a, b = runs[j - 1], runs[j]          # 近邻两条内部边界所在的白段
+                sa = (2 if hline[a[0]:a[1]].any() else 0) + (a[1] - a[0]) / max(1.0, pitch)
+                sb = (2 if hline[b[0]:b[1]].any() else 0) + (b[1] - b[0]) / max(1.0, pitch)
+                k = j if sa >= sb else j - 1         # 弱者(平手杀后者)
+                del bnds[k + 1], runs[k]
+                changed = True
+                break
     bnds.append(H)
     return bnds, False
 
