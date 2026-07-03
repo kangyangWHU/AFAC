@@ -219,6 +219,9 @@ def call(image, *, fmt="PNG", timeout=120, retries=8, use_cache=True,
             md, _ = _parse_response(resp)
             if _looks_like_error(md):            # 服务端错误信封 → 当失败，重试
                 last_err = md.strip()[:160]
+                if "Error code: 400" in md or "aspect ratio" in md:
+                    break                        # 永久性错误(参数/图形不合法):重试无意义,
+                #                                  fail-fast(此前 8 次重试×4 轮白烧几分钟)
                 time.sleep(min(2 ** attempt, 30) + random.uniform(0, 2))
                 continue
             # 截断（输出超 ~12k 上限）**不写缓存**：避免半截结果污染缓存，交由

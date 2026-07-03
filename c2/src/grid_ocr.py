@@ -66,6 +66,15 @@ def slice_grid(im):
     row_cap = max(MAX_TILE_ROWS, _CELL_BUDGET // max(1, eff_c))
     row_bands = _chunk(rb, row_cap)
     col_bands = _chunk(cb, col_cap)
+    # 像素长宽比约束:API 拒收 >200:1(400)。矮表单tile可到 241:1(1de69d49 尾表 2行
+    # 7000×29px)——列带宽 > 180×最矮行带高 时对半加密列带(切在列边界上,骨架拼接原生
+    # 支持多tile;不垫白,内容无损)
+    min_bh = min(rb[j] - rb[i] for i, j in row_bands)
+    while col_bands:
+        wmax = max(cb[j] - cb[i] for i, j in col_bands)
+        if wmax <= 180 * max(1, min_bh) or all(j - i <= 1 for i, j in col_bands):
+            break
+        col_bands = _chunk(cb, max(1, -(-max(j - i for i, j in col_bands) // 2)))
     meta["row_bands"], meta["col_bands"] = row_bands, col_bands
     H, W = g.shape
     tiles = []

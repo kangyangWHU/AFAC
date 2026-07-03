@@ -318,7 +318,10 @@ def _peel_title(im, bb):
         k += 1
     if k == 0 or k >= len(bands) or k > _PEEL_MAX:         # 无标题/全非数据/剥超上限 → 不剥
         return [], bb
-    return [(x0, y0, x1, y0 + bands[k][0])], (x0, y0 + bands[k][0], x1, y1)
+    cut = bands[k][0]
+    if cut < 8:            # <8px 的"标题"是上段字脚残余(pad重叠带入,如 945e8fe9 4px屑,
+        return [], bb      #  4473×4=1118:1 被API 400拒)——真标题行至少一个字高
+    return [(x0, y0, x1, y0 + cut)], (x0, y0 + cut, x1, y1)
 
 
 def crop(im):
@@ -363,6 +366,9 @@ def crop(im):
              for k, bb in items]
     items = [(k, _tighten(im, bb)) for k, bb in items]   # 每块收紧到内容边界(去 margin)
     items = [(k, bb) for k, bb in items if bb[2] > bb[0] and bb[3] > bb[1]]  # 丢退化空块
+    # title 出口统一过滤:tighten 后高 <12px = 字脚残屑(pad 重叠带入上段末行底,如
+    # 945e8fe9 4px屑,4473×4=1118:1 被 API 400 拒;真标题最矮 17px)——不论出生路径一律丢
+    items = [(k, bb) for k, bb in items if not (k == 'title' and bb[3] - bb[1] < 12)]
     items.sort(key=lambda kb: (kb[1][1], kb[1][0]))      # 阅读顺序 (y, x)
     return items or [('seg', (0, 0, im.width, im.height))]
 
