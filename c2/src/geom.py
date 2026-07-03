@@ -11,17 +11,24 @@ from config import BIN_FAINT, BIN_LINE
 FRAME_MIN_RUN = 120     # 框线判定:竖直/横向连续墨段 ≥此px(文字碎段最长~10px,12×余量)
 FRAME_GATE = 0.5        # 框线路门控:框线数 ≥ GATE×白缝数 才走框线路(否则残线劫持)
 LINE_COVER = 0.5        # 一行/列的均墨 ≥此 = 贯穿框线(横线检测/去竖线列共用)
-ROW_WHITE_ABS = 3       # 白行判定:绝对墨量<此=白(一条行号扫描线~6-10px,不会误白)
+WHITE_NOISE_FRAC = 0.0005  # 白线噪声地板:允许 0.05%×线长 的噪点墨(逐像素累积随长度缩放)。
+#                            白判据统一为: 绝对墨 < max(floor, WHITE_NOISE_FRAC×线长),
+#                            行 floor=3 / 列 floor=0——行缝里常有真实脏墨(噪点行/水印/线周
+#                            残渣,floor降2实测4张两行粘连),列缝近乎绝对干净(加容忍反而放
+#                            脏假缝,0.01→0.0005 列精确 19→58)
+ROW_WHITE_FLOOR = 3     # 行白 floor(见上)
+COL_WHITE_FLOOR = 0     # 列白 floor(见上)
 ROW_CLEAN_ABS = 2       # 净行:墨<此(0~1px)。真行缝内必有净行;字符内假白缝(细笔画中段
 #                         恰 2px,笔画贯穿)到不了 0——白段须含净行才算真缝(790bec64 劈数字);
 #                         全局降白阈到 2 反而害 4 张(真缝中 2px 噪点行墨化→两行粘连)
-ROW_NOISE_FRAC = 0.0005  # 白行噪声地板:允许 0.05%×宽 的二值化噪点(逐像素累积随宽缩放)
 ROW_GAP_MIN = 3         # 真行缝最小高度px:字符内假白缝(细笔画扫描线)仅1~2px
 FRAME_HFRAC = 0.6       # 矮表框线阈值:min(FRAME_MIN_RUN, HFRAC×表高)(救框线<120px矮表)
 DATA_SPAN_MIN = 0.40    # 真数据行:墨迹横向跨度 ≥此×表宽(数据常不填满,0.4 仍挡集中标题/注释)
 DATA_RUN_MIN = 3        # 真数据行:列向独立墨段 ≥此(多列);标题/注释=1~2 连续块
-COL_WHITE_FRAC = 0.01   # 白列判定:列均墨 <此 = 候选列缝
-COL_GAP_MIN = 10        # 真列缝最小宽度px(数字白河/中等假缝更窄;真列缝实测最小12px)
+COL_GAP_MIN = 10        # 真列缝最小宽度px。10 而非 12:不误伤未见过的窄真缝(鲁棒),
+#                         10-11px 白河交给近邻缝对删(白河在列内、间距亚列距);15 过头
+#                         (6ab6b885/a300a942 家族 13-14px 真缝团灭,107列塌到个位)
+MISALIGN_RATIO = 1.4    # 列错位判定:全宽行数 >此×单列带最大行数 = 各列行交错(不可靠)
 
 
 def _content_segs(proj, gap, thr=0.002):
@@ -148,15 +155,51 @@ def column_cuts(dark, dark180):
     H = dark.shape[0]
     runl = _runlen_lines(dark180, min_run=min(FRAME_MIN_RUN, int(FRAME_HFRAC * H)))
     keep = dark180.mean(axis=1) <= LINE_COVER      # 去横框线行(对称 row_bnds 去竖线列):
-    colf = (dark[keep] if keep.any() else dark).mean(axis=0)   # 横线横贯全宽,不去则每列
-    idx = np.where(colf < COL_WHITE_FRAC)[0]       # 都被线墨填满,白缝全灭(32799493 gap=0
-    #                                                → FRAME_GATE 空虚通过,4根局部竖线误判有框)
-    gap = []
+    d2 = dark[keep] if keep.any() else dark        # 横线横贯全宽,不去则每列都被线墨填满,
+    #                                                白缝全灭(32799493 gap=0 → FRAME_GATE
+    #                                                空虚通过,4根局部竖线误判有框)
+    ink = d2.sum(axis=0)                           # 白列=统一公式(floor=0,见常量注释)
+    white = ink < max(COL_WHITE_FLOOR, WHITE_NOISE_FRAC * d2.shape[0])
+    for x in runl:                                 # 竖线列按白(对称行路"横线行按白"):线是
+        white[max(0, x - 3):x + 4] = True          # 分隔符非内容——边框线并入边距(边缘守卫
+    #                                                生效:0e8a501f 边框挡住白run贴边,守卫失灵
+    #                                                x338假列);内部竖线并入缝(一缝一界)
+    idx = np.where(white)[0]
+    gap, gw, gsp = [], [], []
     if len(idx):
         runs = [[idx[0]]]                    # 连续白列(≤2px 断)聚成缝
         for x in idx[1:]:
             (runs[-1].append(x) if x - runs[-1][-1] <= 2 else runs.append([x]))
-        gap = [int(np.mean(r)) for r in runs if r[-1] - r[0] + 1 >= COL_GAP_MIN]  # 无 Otsu
+        Wd0 = dark.shape[1]
+        for r in runs:
+            # 贴 0/W 边缘的白 run 是**边距**不是列间缝,不产界(对称 row_bnds 的 s>0/y<H
+            # 守卫;列此前漏了它——剔首行后标签列区整块变白、贴左缘,其中心被画成"列界",
+            # 凭空一个空列,90a4388e 两 seg 齐 +1 于 x321)
+            if r[0] == 0 or r[-1] >= Wd0 - 1:
+                continue
+            if r[-1] - r[0] + 1 >= COL_GAP_MIN:          # 无 Otsu
+                gap.append(int(np.mean(r)))
+                gw.append(r[-1] - r[0] + 1)
+                gsp.append((r[0], r[-1]))
+    # 近邻区间杀弱(白阈收严后候选集干净、列距中位不再被白河污染,行上验证过的判据可用):
+    # 任一区间(含 0/W 边缘区间)宽<0.5×列距中位 → 区间两侧必有一假缝——真缝被噪墨劈界、
+    # 标签列字间缝(宽标签列内,缝对间距不亚列距,只有"字条区间<半列距"能抓)、边缘小条
+    # (稀疏尾列)。杀相邻缝中白段窄者,迭代收敛。实测含边缘 52→73 精确(floor10 下)。
+    W = dark.shape[1]
+    changed = True
+    while changed and len(gap) >= 2:
+        changed = False
+        b = [0] + gap + [W]
+        pitch = float(np.median(np.diff(b)))
+        for j in range(len(b) - 1):
+            if b[j + 1] - b[j] < 0.5 * pitch:
+                cand = [k for k in (j - 1, j) if 0 <= k < len(gap)]   # 区间两侧的内部缝
+                if not cand:
+                    continue
+                k = min(cand, key=lambda k: gw[k])   # 杀白段窄者
+                del gap[k], gw[k]
+                changed = True
+                break
     if len(runl) > 1 and len(runl) >= FRAME_GATE * len(gap):
         return runl, True                    # 有框:墨柱线=真单元格边界
     return gap, False                        # 无框:白缝(COL_GAP_MIN)
@@ -168,10 +211,32 @@ def col_bnds(dark, dark180):
     有框:竖框线**就是**列边界——竖线数 = 列数 + 1,左右边框已含在内,不补 0/W
     (补了在边框外各造一条幽灵列,+2:实测有框列精确 0%→93%)。
     无框:白缝(column_cuts 的 gap 路)本身是缝中心、非边框,首尾需补 0/W。
-    单侧开边(边框缺一侧,如 d9a99684 -1 列)不补——与行的决策一致,交 OCR 定。"""
+    单侧开边(边框缺一侧,如 d9a99684 -1 列)不补——与行的决策一致,交 OCR 定。
+
+    **无条件剔除首行带**:首行常是跨列文本/表头(colspan 标题、说明),其字符间隙在主体
+    无墨区变成假列缝(5fdf46b0 首行字缝 273列/gt109;+1~+4 家族多为首行文字)。列结构由
+    **主体数据行**定——首行对齐时剔除无损,不对齐时剔除除害;个别真列只靠首行有墨会
+    少列,但少列比多列好(OCR 能把整行读全,多列会把单元格切碎)。"""
     lines, framed = column_cuts(dark, dark180)
     if framed and len(lines) > 1:
         return [int(x) for x in lines], True
+    rb, _rf = row_bnds(dark, dark180)
+    if len(rb) >= 4:                                  # ≥3行才剔首行(更小的表不折腾)
+        # 剔首行只剔**主体有数据的 x 范围**:三角/阶梯表右尾列只有表头行有字,全剔会让
+        # 尾列凭空消失(6950d267 -27/9723e972 -7);主体文本右界 xR 之外保留首行作列证据。
+        # xR 用去线列后的主体墨域(右边框线会把墨域撑到全宽,须除)。
+        H2 = dark.shape[0]
+        runl2 = _runlen_lines(dark180, min_run=min(FRAME_MIN_RUN, int(FRAME_HFRAC * H2)))
+        bd = dark[rb[1]:].copy()
+        for x in runl2:
+            bd[:, max(0, x - 3):x + 4] = False
+        bx = np.where(bd.any(axis=0))[0]
+        xR = int(bx[-1]) + 1 if len(bx) else dark.shape[1]
+        d_h = dark.copy(); d_h[:rb[1], :xR] = False
+        d180_h = dark180.copy(); d180_h[:rb[1], :xR] = False
+        lines, framed = column_cuts(d_h, d180_h)
+        if framed and len(lines) > 1:
+            return [int(x) for x in lines], True
     return _boundaries(lines, dark.shape[1]), False
 
 
@@ -195,7 +260,7 @@ def row_bnds(dark, dark180):
         return [int(y) for y in runl], True
     keep = dark180.mean(axis=0) <= LINE_COVER        # 去贯穿竖线列
     ink = dark[:, keep].sum(axis=1) if keep.any() else dark.sum(axis=1)
-    white = ink < max(ROW_WHITE_ABS, int(ROW_NOISE_FRAC * W))
+    white = ink < max(ROW_WHITE_FLOOR, int(WHITE_NOISE_FRAC * W))
     hline = dark180.mean(axis=1) > LINE_COVER       # 残余横线行=分隔符非内容,按白并入缝
     white |= hline                                   # (横线墨≥thr 会自成4px假行→缝里两条线)
     y = 0                                            # 墨段高<ROW_GAP_MIN=噪点,按白(对称:
@@ -243,6 +308,28 @@ def row_bnds(dark, dark180):
                 break
     bnds.append(H)
     return bnds, False
+
+
+def rows_misaligned(dark, dark180):
+    """列错位检测:各列的行没有横向对齐(如 b326dfb6 第一列与其余列错位) → 全宽行投影
+    把多套行交错叠加,行估计错乱且**无法修**——检测到就该放弃行估计(返回 True=不可靠)。
+
+    原理:行估计的前提是"行贯穿所有列且对齐"。检验:按列边界切成列带,各带独立数行。
+    列对齐 → 全宽行数 ≈ max(各带行数)(稀疏带只会更少);列错位 → 全宽行数 ≈ 各带之和
+    ≫ 单带最大(b326dfb6 各带~107、全宽 219)。阈 MISALIGN_RATIO=1.4(交错近 2×,余量大)。"""
+    full = len(row_bnds(dark, dark180)[0]) - 1
+    if full < 6:                                     # 行太少无从判(小表交错也读得动)
+        return False
+    cb, _ = col_bnds(dark, dark180)
+    if len(cb) < 3:
+        return False
+    best = 0
+    for a, b in zip(cb[:-1], cb[1:]):
+        if b - a < COL_GAP_MIN:
+            continue
+        n = len(row_bnds(dark[:, a:b], dark180[:, a:b])[0]) - 1
+        best = max(best, n)
+    return best >= 6 and full > MISALIGN_RATIO * best
 
 
 def _panel_seams(g):
