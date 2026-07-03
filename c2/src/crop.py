@@ -70,7 +70,8 @@ def _panel_seam_xs(g):
     return seams
 
 
-_SEAM_K = 2.0
+_SEAM_K = 2.5   # 真子表缝实测=行缝2.5~10倍(ce5799a7 7.4×);2.0 会把阶梯稀疏区的
+#                 2.1~2.3× 假缝(aef3bf0c h23,墨0.17 贯穿判据擦边不过)放进候选
 _SEAM_VMAX = 2
 _SEAM_WHITE_FRAC = 0.003   # 找子表缝的白行判据(墨<此×W)。**刻意比 geom 数行的白判据松**:
 #                            缝高要量'近空白带'的高度,稀疏行也该并入白带;数行则相反,行号行
@@ -146,15 +147,17 @@ def _row_bounds(dark, dark180=None, k=_SEAM_K, vmax=_SEAM_VMAX):
             continue
         band = dark[s:e]
         col = band.mean(0)
-        # 内容列贯穿 = 列在带内**连续墨柱 ≥ 半带高**(同表延续,如 aef3bf0c 行号列贯穿整带,
-        # 列墨0.62)。不用均墨阈:缝里的孤立短标签(ce5799a7 块间"X岁",只占带高23%)会把
-        # 均墨顶过阈值、6条完美子表缝全被否决(1seg vs 6GT);连续性才是"延续"的物理含义。
-        run = np.zeros(band.shape[1], dtype=np.int32)
-        best = np.zeros(band.shape[1], dtype=np.int32)
-        for rr in band:
-            run = (run + 1) * rr
-            best = np.maximum(best, run)
-        if bool(((best >= 0.5 * (e - s)) & (col < 0.8)).any()):
+        # 内容列贯穿 = 列的墨出现在带的**首末两端**(首1/3 且 末1/3)——"延续"的物理含义:
+        # 内容从带前延续到带后。aef3bf0c 阶梯稀疏区行号周期性铺满整带(首末都有,均墨0.27,
+        # 但单段仅~12px) → 贯穿 ✓ 不切;ce5799a7 块间短标签单簇集中带内一处(只占一端)
+        # → 非贯穿 → 切 ✓。均墨阈会放过标签(0.15-0.17 恰过线),连续墨柱阈会漏周期性行号
+        # ——两个旧判据各错一边,首末两端判据同时对两家。
+        third = max(1, (e - s) // 3)
+        head = band[:third].any(0)
+        tail = band[-third:].any(0)
+        # 双保险:均墨≥0.2(aef 深部稀疏带行号周期铺满,均墨0.27~0.62;ce 标签仅0.15~0.17)
+        # 或 首末两端有墨(周期行号带的一般形态;标签单簇只占一处两条都不过)
+        if bool((((col >= 0.2) | (head & tail)) & (col < 0.8)).any()):
             continue                                       # 内容列贯穿 = 同表延续,非子表缝
         if int((col > 0.8).sum()) > vmax:                  # 框线竖线贯穿 → 表内，非缝
             continue
