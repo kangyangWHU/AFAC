@@ -19,6 +19,7 @@ from config import TRAIN_TABLE_DIR, API_USER_IDS
 from preprocess import prep
 from slicer_table import slice_table
 from crop import crop
+from grid_ocr import ocr_seg
 from stitch_table import stitch_table, parse_tile, parse_tile_segments, rows_to_html
 from evaluate import table_teds, text_edit_loss
 
@@ -274,18 +275,46 @@ def ocr(im, blocks, timeout=240):
     """Stage II — 逐块 OCR + 就地定表/标题。返回 (items, ncalls)。
       item = ["table", grid, html|None]  |  ["text", str, None]
 
-    'text' 块 → ocr_text 纯文本。'seg' 块 → ocr_table;td<阈值=标题,整块 ocr_text 重读
-    (避免宽标题被竖切、左→右拼乱阅读顺序)。td≥阈值=表,一段多吐的碎块拆成多 item 待合并。"""
+    'text' 块 → ocr_text 纯文本。'title' 块(peel 的 mark) → OCR 判真身:读出表格行
+    (td≥阈值) = peel 误剥的数据/表头行 → 拼回紧随其后的 seg 表格(32799493 分节线上方
+    两行数据被剥,靠此救回);否则按纯文本。'seg' 块 → **骨架 OCR(grid_ocr.ocr_seg)**:
+    行列以几何估计为准切 tile、结果强制对齐骨架、稀疏区按骨架补空 cell;列错位表
+    (骨架不可信)回退 ocr_table 自由读。"""
     items, ncalls = [], 0
     for kind, bb in blocks:
-        if kind in ("text", "title"):     # title = 从表顶剥下的标题,当纯文本读(GT 主流:标题=表外文本)
+        if kind == "text":
             txt = ocr_text(im, bb, timeout)
             if txt:
                 items.append(["text", txt, None])
             continue
-        # peel=False:子表裁块已是独立子表,不再剥表外文字(否则矮子表薄数据行被误剥)
-        p, nc, _ = ocr_table(im.crop(bb), timeout, peel=False)
+        if kind == "title":               # mark:OCR 定真身——表格行 → 'tfrag'(Stage III 拼回)
+            x0, y0, x1, y1 = bb
+            raw = api.call_safe(_up(im.crop((max(0, x0 - 6), max(0, y0 - 6),
+                                             min(im.width, x1 + 6), min(im.height, y1 + 6))), 2),
+                                timeout=timeout)
+            ncalls += 1
+            rows = parse_tile(raw) if raw and raw.lower().count("<td") >= 6 else None
+            if rows:
+                items.append(["tfrag", rows, None])   # peel 误剥的表格行(mark),merge 定拼回
+            else:
+                txt = _strip_html(raw)
+                if txt:
+                    items.append(["text", txt, None])
+            continue
+        grid, nc, gmeta = ocr_seg(im.crop(bb), timeout)   # 骨架 OCR(一律以估计为准)
         ncalls += nc
+        if grid is not None:
+            cells = sum(1 for row in grid for v in row if v.strip())
+            if cells >= _MIN_TABLE_CELLS:
+                items.append(["table", grid, None])
+            else:                                         # 读出内容太少=标题/文本块
+                txt = ocr_text(im, bb, timeout)
+                if txt:
+                    items.append(["text", txt, None])
+            continue
+        # 列错位(rows_misaligned):骨架不可信 → 自由读回退(旧路)
+        p, nc2, _ = ocr_table(im.crop(bb), timeout, peel=False)
+        ncalls += nc2
         if p.lower().count("<td") >= _MIN_TABLE_CELLS:
             grids = [g for _, g in parse_tile_segments(p) if g]
             if len(grids) == 1:
@@ -307,6 +336,24 @@ def merge(items):
     **且** 列数差≤6)→ 行拼接归一表。两条 AND 缺一不可:只看列数会误并真子表(97c4c182
     列72≈67);只看 cells 小会误并真小子表(19a15357 顶 td80 但列10≠68)。修竖线断裂把
     表头行从表身剥下来的碎裂(945e8fe9/88c6dbb4/1f4293f3 89→3.5),顺手并一段多吐的碎块。"""
+    # tfrag(title mark 判为表格行) → 拼回紧随其后的 table 表顶;无后表则自成一表
+    fused = []
+    i = 0
+    while i < len(items):
+        it = items[i]
+        if it[0] == "tfrag":
+            if i + 1 < len(items) and items[i + 1][0] == "table":
+                g = items[i + 1][1]
+                C = len(g[0]) if g else 0
+                rows = [r[:C] + [""] * max(0, C - len(r)) for r in it[1]]
+                items[i + 1] = ["table", rows + g, None]
+            else:
+                fused.append(["table", it[1], None])
+            i += 1
+            continue
+        fused.append(it)
+        i += 1
+    items = fused
     merged = []
     for it in items:
         if it[0] == "table" and merged and merged[-1][0] == "table":

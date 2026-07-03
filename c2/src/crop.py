@@ -144,9 +144,18 @@ def _row_bounds(dark, dark180=None, k=_SEAM_K, vmax=_SEAM_VMAX):
     for s, e, h in bands:
         if h < k * row_gap or not (20 < (s + e) // 2 < H - 20):
             continue
-        col = dark[s:e].mean(0)
-        if bool(((col >= 0.15) & (col < 0.8)).any()):      # 内容列贯穿(行号列/稀疏数据列)
-            continue                                       # = 同表延续(阶梯/三角表),非子表缝
+        band = dark[s:e]
+        col = band.mean(0)
+        # 内容列贯穿 = 列在带内**连续墨柱 ≥ 半带高**(同表延续,如 aef3bf0c 行号列贯穿整带,
+        # 列墨0.62)。不用均墨阈:缝里的孤立短标签(ce5799a7 块间"X岁",只占带高23%)会把
+        # 均墨顶过阈值、6条完美子表缝全被否决(1seg vs 6GT);连续性才是"延续"的物理含义。
+        run = np.zeros(band.shape[1], dtype=np.int32)
+        best = np.zeros(band.shape[1], dtype=np.int32)
+        for rr in band:
+            run = (run + 1) * rr
+            best = np.maximum(best, run)
+        if bool(((best >= 0.5 * (e - s)) & (col < 0.8)).any()):
+            continue                                       # 内容列贯穿 = 同表延续,非子表缝
         if int((col > 0.8).sum()) > vmax:                  # 框线竖线贯穿 → 表内，非缝
             continue
         cuts.append((s + e) // 2)
@@ -200,8 +209,13 @@ def subtables(im, pad=4):
 # 裁块规划:单表折叠 + 表顶标题剥离
 # ---------------------------------------------------------------------------
 _DENSE_INK = 0.01   # seg 墨量≥此=密集真表;<此=稀疏薄条,不计入子表计数
-_TEXT_H_RATIO = 0.02  # seg 高 < 此×图高 → 判文本(标题/说明,单行级),不当表,免 API 判 td
-#                       实测标题簇 r≤0.017、最小真表段 r≥0.022,0.02 落 gap 不误伤真表
+_JUNK_CELLS = 30      # seg 骨架格数(行×列) < 此 = 文字(标题/说明),否则留 seg 交 API。
+#   格数=行列结构的直接证据。**不对称原则:表格归文字=致命(数据丢),文字归表格=无害
+#   (OCR 读出 td<10 → Stage II 降级纠正,代价 1 次调用)**——故阈值取"毫无疑义是文字"
+#   的下界 30(实测 junk 簇 ≤54、真表 ≥78;30~60 的模糊块留给 API 裁决)。
+#   无高度门槛(h298~413 高个说明块照抓)。曾试 2D熵(墨迹分散度):紧裁的大字标题填满
+#   自己的框(e3e19b92 熵0.95)会漏,块内熵量的是"填框"不是"结构",弃。
+#   薄宽真表(1de69d49 2×100=200格)天然保住;稀疏条由"单表折叠先于分类"保护。
 _BLANK_INK = 0.002   # 块墨率 <此 = 空白(subtables 丢空段 / 淡段判 text 共用)
 _TIGHT_INK = 0.001   # _tighten:行/列均墨 >此 = 有内容(抗单点噪,空区≈0)
 _PAD_GUARD = 8       # pad 残余滤除带px:0<y<此 的框线是上一 seg 重叠带入的底框
@@ -317,9 +331,26 @@ def crop(im):
         seg_items += [('title', tb) for tb in titles]
         seg_items.append(('seg', seg))
     items = [('text', bb) for bb in texts] + seg_items
-    Himg = im.height                                     # 矮 seg(高<2%图高)=标题/说明,非表
-    items = [('text', bb) if k == 'seg' and bb[3] - bb[1] < _TEXT_H_RATIO * Himg else (k, bb)
-             for k, bb in items]                         #   → 直接当文本,免 API 判 td
+    Himg = im.height                                     # 矮 seg=标题/说明,非表 → 当文本。
+    #   但需**骨架行数<4**双重确认——高比例判据在"高图+多小表"版式失效(a1aaef73 图高
+    #   4676,真表 6 行仅 62px=1.3% 图高,单靠 2% 会把真小表误转文本);真表≥4行,标题/说明 1~3 行
+
+    def _is_texty(bb):
+        g2 = np.asarray(im.crop(bb).convert("L"))
+        d = g2 < BIN_INK
+        if d.shape[0] < 8 or d.shape[1] < 8 or not d.any():
+            return True
+        xs = np.where(d.any(0))[0]
+        if (xs[-1] - xs[0] + 1) < 0.5 * d.shape[1]:   # 墨迹x跨度<半块宽 = 文字(此处块仍是
+            return True                               #   主表全宽,未tighten:标签span 0.06~0.28,
+        #                                                 表格 p10=0.75,0.5 落天堑;表格必横跨)
+        from geom import row_bnds as _rb, col_bnds as _cb
+        d180 = g2 < BIN_FAINT
+        r = len(_rb(d, d180)[0]) - 1
+        c = len(_cb(d, d180)[0]) - 1
+        return r * c < _JUNK_CELLS
+    items = [('text', bb) if k == 'seg' and _is_texty(bb) else (k, bb)
+             for k, bb in items]
     items = [(k, _tighten(im, bb)) for k, bb in items]   # 每块收紧到内容边界(去 margin)
     items = [(k, bb) for k, bb in items if bb[2] > bb[0] and bb[3] > bb[1]]  # 丢退化空块
     items.sort(key=lambda kb: (kb[1][1], kb[1][0]))      # 阅读顺序 (y, x)

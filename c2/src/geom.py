@@ -165,7 +165,7 @@ def column_cuts(dark, dark180):
     #                                                生效:0e8a501f 边框挡住白run贴边,守卫失灵
     #                                                x338假列);内部竖线并入缝(一缝一界)
     idx = np.where(white)[0]
-    gap, gw, gsp = [], [], []
+    cand = []                                # (缝中心, 缝宽)
     if len(idx):
         runs = [[idx[0]]]                    # 连续白列(≤2px 断)聚成缝
         for x in idx[1:]:
@@ -177,29 +177,28 @@ def column_cuts(dark, dark180):
             # 凭空一个空列,90a4388e 两 seg 齐 +1 于 x321)
             if r[0] == 0 or r[-1] >= Wd0 - 1:
                 continue
-            if r[-1] - r[0] + 1 >= COL_GAP_MIN:          # 无 Otsu
-                gap.append(int(np.mean(r)))
-                gw.append(r[-1] - r[0] + 1)
-                gsp.append((r[0], r[-1]))
-    # 近邻区间杀弱(白阈收严后候选集干净、列距中位不再被白河污染,行上验证过的判据可用):
-    # 任一区间(含 0/W 边缘区间)宽<0.5×列距中位 → 区间两侧必有一假缝——真缝被噪墨劈界、
-    # 标签列字间缝(宽标签列内,缝对间距不亚列距,只有"字条区间<半列距"能抓)、边缘小条
-    # (稀疏尾列)。杀相邻缝中白段窄者,迭代收敛。实测含边缘 52→73 精确(floor10 下)。
+            if r[-1] - r[0] + 1 >= COL_GAP_MIN:
+                cand.append((int(np.mean(r)), r[-1] - r[0] + 1))
+    # **列距均匀性选阈**(替代近邻杀弱):真列缝集合产生近匀距的列;白河/标签字缝混入
+    # 会破坏匀距。在候选缝宽集合上枚举 floor(≥COL_GAP_MIN),取"区间落在中位±30% 占比
+    # 最高"(平手取列多)的 floor——逐表自适应,治**系统性宽白河**(大字号表 f23fb56f
+    # 白河 12-20px 全净、比小表真缝还宽,固定阈/净列/近邻中位全失灵,25列→9列=GT)。
     W = dark.shape[1]
-    changed = True
-    while changed and len(gap) >= 2:
-        changed = False
-        b = [0] + gap + [W]
-        pitch = float(np.median(np.diff(b)))
-        for j in range(len(b) - 1):
-            if b[j + 1] - b[j] < 0.5 * pitch:
-                cand = [k for k in (j - 1, j) if 0 <= k < len(gap)]   # 区间两侧的内部缝
-                if not cand:
-                    continue
-                k = min(cand, key=lambda k: gw[k])   # 杀白段窄者
-                del gap[k], gw[k]
-                changed = True
-                break
+    gap = [c for c, _ in cand]
+    if len(cand) >= 2:
+        best = None
+        for fl in sorted(set(w for _, w in cand)):
+            g = [c for c, w in cand if w >= fl]
+            if len(g) < 2:
+                continue
+            iv = np.diff([0] + g + [W])
+            med = float(np.median(iv))
+            frac = float(np.mean((iv >= 0.7 * med) & (iv <= 1.3 * med)))
+            key = (frac, len(g))
+            if best is None or key > best[0]:
+                best = (key, g)
+        if best is not None:
+            gap = best[1]
     if len(runl) > 1 and len(runl) >= FRAME_GATE * len(gap):
         return runl, True                    # 有框:墨柱线=真单元格边界
     return gap, False                        # 无框:白缝(COL_GAP_MIN)
