@@ -10,7 +10,7 @@
 - 列错位表(rows_misaligned)是唯一例外:骨架不可信,回退整段自由读(交上层 ocr_table)。
 """
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 import api_client as api
 from config import MAX_CONCURRENCY, API_USER_IDS, BIN_INK, BIN_FAINT
@@ -95,15 +95,6 @@ def slice_grid(im):
             t = Image.new("RGB", (core.width + 2 * _EDGE_PAD, core.height + 2 * _EDGE_PAD),
                           (255, 255, 255))
             t.paste(core, (_EDGE_PAD, _EDGE_PAD))
-            if not rf and np.median(np.diff(rb)) >= 12:
-                # **无框表画骨架行线进 tile**(行距≥12px):VLM 看见显式行分隔→高格不再
-                # 拆行(5年交)、行不漏读(21→22);内部线 only,顶/底边不画。行距<12px 的
-                # 密表不画——2px 线在 7px 行里吃字(5fdf46b0 画线 -1.1pt)。
-                dr = ImageDraw.Draw(t)
-                for i in range(ri + 1, rj):
-                    dr.line([(0, rb[i] - y0 + _EDGE_PAD),
-                             (t.width, rb[i] - y0 + _EDGE_PAD)],
-                            fill=(0, 0, 0), width=2)
             row.append(t)
         tiles.append(row)
     return tiles, meta
@@ -252,11 +243,24 @@ def ocr_seg(im, timeout=240):
                     k, merged = hits[0]
                     rows = rows[:k] + [merged] + rows[k + 2:]
             aligned[c] = (E, rows)
-        for i in band_idx:                         # 行强制一致:骨架行数即真值,多裁少补
+        extra_votes = sum(1 for c in range(len(col_bands))
+                          if len(aligned[c][1]) > len(aligned[c][0]))
+        for i in band_idx:                         # 行以骨架为准:多裁少补;唯一例外见下
             rowcells = []
             for c, (ci, cj) in enumerate(col_bands):
                 E, rows = aligned[c]
                 cells = rows[E.index(i)] if i in E and E.index(i) < len(rows) else []
+                nc = band_nc[c]
+                rowcells += list(cells[:nc]) + [""] * max(0, nc - len(cells))
+            grid.append(rowcells)
+        if extra_votes >= 2 or (extra_votes == 1 and len(col_bands) == 1):
+            # **佐证加行**:拆行墨测试没吃掉的多余实读行,≥2 tile 同票(或单tile带)=骨架
+            # 真欠一行(微距表 <3px 缝并行,a1aaef73 列号行+年1行挤在一个骨架行,API 实读
+            # 6>骨架5,0.00 末行被裁)→带尾补一行,实读顺序本身即正确顺序。孤证=幻觉仍裁
+            rowcells = []
+            for c, (ci, cj) in enumerate(col_bands):
+                E, rows = aligned[c]
+                cells = rows[len(E)] if len(rows) > len(E) else []
                 nc = band_nc[c]
                 rowcells += list(cells[:nc]) + [""] * max(0, nc - len(cells))
             grid.append(rowcells)
