@@ -19,17 +19,11 @@ from config import TRAIN_TABLE_DIR, API_USER_IDS
 from preprocess import prep
 from slicer_table import slice_table
 from crop import crop
-from grid_ocr import ocr_seg
+from grid_ocr import ocr_seg, _up, _ASPECT_SAFE
 from stitch_table import stitch_table, parse_tile, parse_tile_segments, rows_to_html
 from evaluate import table_teds, text_edit_loss
 
 
-def _up(t, factor):
-    """密集小字 tile 上采样：放大 factor 倍让 API 读得清(修行幻觉/列漂移)。
-    factor≤1 或 None → 原样返回。"""
-    if t is not None and factor and factor > 1:
-        return t.resize((round(t.width * factor), round(t.height * factor)), Image.LANCZOS)
-    return t
 
 
 def _is_truncated(o):
@@ -240,7 +234,7 @@ def _ocr_strip(img, timeout):
     内容无损。"""
     import numpy as np
     w, h = img.size
-    if w <= 180 * max(1, h):
+    if w <= _ASPECT_SAFE * max(1, h):
         return api.call_safe(img, timeout=timeout)
     g = np.asarray(img.convert("L"))
     lo, hi = int(w * 0.3), int(w * 0.7)
@@ -432,6 +426,12 @@ def _grid_html(grid):
     return "\n".join(parts)
 
 
+def _is_header_strip(prev, body):
+    """上表是下表的表头小条:cells<body/8 且 列差≤6(两条AND缺一不可,判据史见merge)。"""
+    return (_grid_cells(prev) < _grid_cells(body) / 8
+            and abs(_grid_cols(prev) - _grid_cols(body)) <= 6)
+
+
 def merge(items):
     """Stage III — 表头小条合并 + 按阅读顺序拼接成 md。返回 (md, nsubtables)。
 
@@ -472,8 +472,7 @@ def merge(items):
                 and len(merged[-1][1]) <= 80
                 and merged[-2][0] == "table"):
             prev = merged[-2][1]
-            if _grid_cells(prev) < _grid_cells(it[1]) / 8 \
-                    and abs(_grid_cols(prev) - _grid_cols(it[1])) <= 6:
+            if _is_header_strip(prev, it[1]):
                 C = _grid_cols(it[1])
                 trow = [merged[-1][1]] + [""] * max(0, C - 1)
                 fusedg = prev + [trow] + it[1]
@@ -485,8 +484,7 @@ def merge(items):
             # 方向:表头小条恒在表身【上方】→ 只有 prev(上)是小条、it(下)是表身才并。
             # 反向(下面的小表并入上面)不合理:最下面的真子表(532 seg2)/读崩的子表(90a 表1)
             # 都在后面,prev 是大表 → 不会被误吃。
-            if _grid_cells(prev) < _grid_cells(it[1]) / 8 \
-                    and abs(_grid_cols(prev) - _grid_cols(it[1])) <= 6:
+            if _is_header_strip(prev, it[1]):
                 merged[-1] = ["table", prev + it[1], None]    # 小条(上)+表身(下)拼行
                 continue
         merged.append(it)

@@ -16,7 +16,7 @@ import json
 import numpy as np
 from PIL import ImageDraw
 
-from geom import (split_table_texts, _runlen_lines, _content_segs,
+from geom import (split_table_texts, _runlen_lines, _content_segs, LINE_FULL,
                   LINE_COVER, FRAME_MIN_RUN, DATA_SPAN_MIN, DATA_RUN_MIN,
                   rows_misaligned)
 from config import BIN_INK, BIN_FAINT, BIN_LINE
@@ -200,10 +200,10 @@ def subtables(im, pad=4):
             # 空段判据=行投影(用户设计,与tile空白同一把尺):去线后每行墨<3px才是真空。
             # 旧均值判据尺度相关:全宽段里两行标题(~3000墨px/33万px≈0.009)被稀释成
             # "空白"静默吞掉,子表间标题整个从输出消失(A榜0cd74f08/3b243a83)
-            vk = band180.mean(axis=0) <= 0.9
+            vk = band180.mean(axis=0) <= LINE_FULL
             b2 = band180[:, vk] if vk.any() else band180
             rf_ = b2.mean(axis=1) if b2.size else np.zeros(1)
-            rowink = b2[rf_ <= 0.9].sum(axis=1) if (rf_ <= 0.9).any() else np.zeros(1)
+            rowink = b2[rf_ <= LINE_FULL].sum(axis=1) if (rf_ <= LINE_FULL).any() else np.zeros(1)
             if rowink.size == 0 or rowink.max() < 3:  # 真空白带,丢
                 continue
             bb = (x0 + cx0, y0 + max(0, ra - pad), x0 + cx1, y0 + min(H, rbb + pad))

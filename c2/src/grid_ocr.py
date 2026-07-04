@@ -14,12 +14,13 @@ from PIL import Image
 
 import api_client as api
 from config import MAX_CONCURRENCY, API_USER_IDS, BIN_INK, BIN_FAINT
-from geom import row_bnds, col_bnds, rows_misaligned
+from geom import row_bnds, col_bnds, rows_misaligned, LINE_FULL
 from slicer_table import MAX_TILE_ROWS, MAX_TILE_COLS, UP_EDGE, UP_TARGET, TILE_MAX
 from stitch_table import parse_tile
 
 _BLANK_TILE_INK = 0.001   # tile 墨率<此=空白,不调 API,按骨架补空 cell
 _EDGE_PAD = 3             # tile 四周留白px(边界在缝中心,±3 不吃邻格墨)
+_ASPECT_SAFE = 180   # API拒收>200:1(实测),安全边180(几何列带对半/_ocr_strip共用)
 _UP_CAP = 3.0             # 上采样上限(密集表实验:15列+自适应放大,cap3 兜住最小格)
 _UP_TARGET = 55           # 目标格边长(实证:edge27 在 2× 已 99.5~99.8%,55/27≈2.0 正中甜点;
 #                           slicer 的 75 在 cap2 时代从未生效,cap3 下会把 2.78× 强加给
@@ -77,7 +78,7 @@ def slice_grid(im):
     min_bh = min(rb[j] - rb[i] for i, j in row_bands)
     while col_bands:
         wmax = max(cb[j] - cb[i] for i, j in col_bands)
-        if wmax <= 180 * max(1, min_bh) or all(j - i <= 1 for i, j in col_bands):
+        if wmax <= _ASPECT_SAFE * max(1, min_bh) or all(j - i <= 1 for i, j in col_bands):
             break
         col_bands = _chunk(cb, max(1, -(-max(j - i for i, j in col_bands) // 2)))
     meta["row_bands"], meta["col_bands"] = row_bands, col_bands
@@ -94,10 +95,10 @@ def slice_grid(im):
             # 误杀(实测17tile/54格);有框表线墨也不再撑爆判据 → 框内空区照跳,省调用
             band = dark[y0:y1, x0:x1]
             band180 = dark180[y0:y1, x0:x1]
-            vkeep = band180.mean(axis=0) <= 0.9   # 线=贯通(frac≈1);密字行0.5~0.7有字缝,
+            vkeep = band180.mean(axis=0) <= LINE_FULL   # 线=贯通;密字行0.5~0.7有字缝,
             b2 = band[:, vkeep] if vkeep.any() else band   # 0.5阈会把整行密字当线剔掉
             rfrac = b2.mean(axis=1) if b2.size else np.zeros(1)   # (0e8a501f 30格被误跳)
-            hkeep = rfrac <= 0.9
+            hkeep = rfrac <= LINE_FULL
             rowink = b2[hkeep].sum(axis=1) if hkeep.any() else np.zeros(1)
             if rowink.size == 0 or rowink.max() < 3:
                 row.append(None)
