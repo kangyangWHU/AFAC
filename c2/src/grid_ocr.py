@@ -82,8 +82,18 @@ def slice_grid(im):
         for (ci, cj) in col_bands:
             y0, y1 = rb[ri], rb[rj]
             x0, x1 = cb[ci], cb[cj]
-            ink = dark[y0:y1, x0:x1].mean()
-            if ink < _BLANK_TILE_INK:
+            # 空白判据(用户设计:真空⟺①每行墨投影基本一样②每行都很低,合并实现为
+            # "去线后每行墨<3px"):先扣竖线列(线墨=每行常数基线)与横线行(frac>0.5),
+            # 剩余行墨 max<3px ⟺ 真空。旧均值判据尺度相关,孤零"0.00"被110万px稀释
+            # 误杀(实测17tile/54格);有框表线墨也不再撑爆判据 → 框内空区照跳,省调用
+            band = dark[y0:y1, x0:x1]
+            band180 = dark180[y0:y1, x0:x1]
+            vkeep = band180.mean(axis=0) <= 0.9   # 线=贯通(frac≈1);密字行0.5~0.7有字缝,
+            b2 = band[:, vkeep] if vkeep.any() else band   # 0.5阈会把整行密字当线剔掉
+            rfrac = b2.mean(axis=1) if b2.size else np.zeros(1)   # (0e8a501f 30格被误跳)
+            hkeep = rfrac <= 0.9
+            rowink = b2[hkeep].sum(axis=1) if hkeep.any() else np.zeros(1)
+            if rowink.size == 0 or rowink.max() < 3:
                 row.append(None)
                 continue
             # **白pad**:精确按边界裁剪,贴到四周留白的画布上——实pad(±3px)会带进邻带行
