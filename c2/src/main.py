@@ -50,6 +50,17 @@ def _iter_images(dirs):
                 yield f
 
 
+def _run_one(path, target_h, timeout):
+    name = os.path.basename(path)
+    try:
+        md, kind, ncalls = process_image(path, target_h, timeout)
+    except Exception as e:
+        print(f"  {name} 失败: {e}", flush=True)
+        traceback.print_exc()
+        md, kind, ncalls = "", "err", 0
+    return name, md, kind, ncalls
+
+
 def run_batch(image_dirs, out_csv, target_h=5000, timeout=240, limit=None):
     """处理一批目录里的图片，写 submission.csv（file_name, ground_truth）。"""
     files = list(_iter_images(image_dirs))
@@ -57,19 +68,18 @@ def run_batch(image_dirs, out_csv, target_h=5000, timeout=240, limit=None):
         files = files[:limit]
     print(f"待处理图片 {len(files)} 张 → {out_csv}")
 
-    rows = []
     t0 = time.time()
-    for i, path in enumerate(files):
-        name = os.path.basename(path)
-        try:
-            md, kind, ncalls = process_image(path, target_h, timeout)
-        except Exception as e:
-            print(f"  [{i+1}/{len(files)}] {name} 失败: {e}")
-            traceback.print_exc()
-            md, kind, ncalls = "", "err", 0
-        rows.append((name, md))
-        print(f"  [{i+1}/{len(files)}] {name} kind={kind} calls={ncalls} "
-              f"len={len(md)} 累计{time.time()-t0:.0f}s")
+    from multiprocessing import Pool
+    from functools import partial
+    done = {}
+    with Pool(6) as pool:                        # 图级进程并行(CPU段绕GIL);tile级API
+        results = pool.imap_unordered(           # 并发由 ocr_seg 内部线程池管
+            partial(_run_one, target_h=target_h, timeout=timeout), files)
+        for i, (name, md, kind, ncalls) in enumerate(results):
+            done[name] = md
+            print(f"  [{i+1}/{len(files)}] {name} kind={kind} calls={ncalls} "
+                  f"len={len(md)} 累计{time.time()-t0:.0f}s", flush=True)
+    rows = [(os.path.basename(p), done.get(os.path.basename(p), "")) for p in files]
 
     # 写 CSV：UTF-8，全引用，换行/逗号自动转义
     with open(out_csv, "w", encoding="utf-8", newline="") as f:

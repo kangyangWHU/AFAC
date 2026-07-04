@@ -30,31 +30,51 @@ def main():
                                key=os.path.getsize) if not f.endswith("_pred.md")]
     rows = []
     t_start = time.time()
-    for i, md in enumerate(files):
-        uuid = os.path.basename(md)[:-3]
-        img = os.path.join(TRAIN_TABLE_DIR, "images", uuid + ".jpg")
-        if not os.path.exists(img):
-            continue
-        gt = open(md, encoding="utf-8").read()
-        im = prep(Image.open(img))
-        t0 = time.time()
+    from multiprocessing import Pool
+    with Pool(12) as pool:                       # CPU批处理进程池(TEDS/编辑距离/PIL全是
+        results = pool.imap_unordered(_eval_one, files)   # CPU,GIL下线程池会串行)
+        for i, r in enumerate(results):
+            if r is None:
+                continue
+            rows.append(r)
+            print(f"[{len(rows):3}/{len(files)}] {r['uuid'][:8]} TEDS={r['teds']:.4f} "
+                  f"txt={r['text_score']:.1f} tr={r['pred_tr']}/{r['gt_tr']} "
+                  f"td={r['pred_td']}/{r['gt_td']} calls={r['ncalls']} {r['secs']:.0f}s",
+                  flush=True)
+    _summary(rows, t_start)
+
+
+def _eval_one(md):
+    uuid = os.path.basename(md)[:-3]
+    img = os.path.join(TRAIN_TABLE_DIR, "images", uuid + ".jpg")
+    if not os.path.exists(img):
+        return None
+    gt = open(md, encoding="utf-8").read()
+    im = prep(Image.open(img))
+    t0 = time.time()
+    try:
         pred, ncalls, meta = parse_table(im)
         teds = table_teds(pred, gt) or 0.0
         te = text_edit_loss(pred, gt, include_tables=True)
         gtr, gtd = _tr_td(gt)          # GT 行/单元格
         ptr, ptd = _tr_td(pred)        # 预测行/单元格(行列还原准确度)
-        rows.append({
+        return {
             "uuid": uuid, "teds": round(teds, 4),
             "text_score": round((1 - te) * 100, 1),
             "subs": meta.get("subs"), "ncalls": ncalls,
             "gt_tr": gtr, "gt_td": gtd, "pred_tr": ptr, "pred_td": ptd,
             "td_ratio": round(ptd / max(1, gtd), 3),
             "gt_len": len(gt), "pred_len": len(pred),
-        })
-        print(f"[{i+1:>3}/{len(files)}] {uuid[:8]} TEDS={teds:.4f} "
-              f"txt={(1-te)*100:5.1f} tr={ptr}/{gtr} td={ptd}/{gtd} "
-              f"subs={meta.get('subs')} calls={ncalls} {time.time()-t0:.0f}s", flush=True)
+            "secs": time.time() - t0,
+        }
+    except Exception as e:
+        print(f"  {uuid[:8]} 失败: {e}", flush=True)
+        return {"uuid": uuid, "teds": 0.0, "text_score": 0.0, "subs": 0, "ncalls": 0,
+                "gt_tr": 0, "gt_td": 0, "pred_tr": 0, "pred_td": 0,
+                "td_ratio": 0, "gt_len": len(gt), "pred_len": 0, "secs": time.time() - t0}
 
+
+def _summary(rows, t_start):
     rows.sort(key=lambda r: r["teds"])
     mean = sum(r["teds"] for r in rows) / len(rows)
     meantxt = sum(r["text_score"] for r in rows) / len(rows)

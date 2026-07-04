@@ -176,6 +176,12 @@ def ocr_seg(im, timeout=240):
             ci, cj = col_bands[c]
             cap, rows = _parse_cap(outs.get((r, c)))
             E_n = int(sum(1 for i in range(ri, rj) if cell_ink[i, ci:cj].any()))
+            if not rows and tiles[r][c] is not None and E_n > 0:
+                # 有墨tile实读0行 = API重试耗尽后的静默空响应(空不入缓存,直接重调)。
+                # 废品检测只抓行数超界,实读0是另一半洞——老slicer的空tile重试丢失于
+                # 重写,全量夜跑抽风受害十余张的病根
+                raw2 = api.call_safe(_up(tiles[r][c], up), timeout=timeout)
+                cap, rows = _parse_cap(raw2)
             if len(rows) > E_n + 1 and tiles[r][c] is not None:
                 raw2 = api.call_safe(_up(tiles[r][c], up), timeout=timeout, use_cache=False)
                 cap2, rows2 = _parse_cap(raw2)
