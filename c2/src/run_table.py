@@ -233,6 +233,24 @@ def _merge_text_blocks(md):
     return "\n\n".join(out)
 
 
+def _ocr_strip(img, timeout):
+    """细长条(>180:1)分段 OCR:API 拒收 >200:1(400)。子表间被 peel 剥出的表头小条
+    (a1aaef73 4300×17≈250:1)是**真内容**,读不到 → tfrag 判不成 → 子表首行丢失
+    (tr56/60)。不垫白:在中部±20%找最白列切开,递归读两半,文本拼接——切在真实白缝,
+    内容无损。"""
+    import numpy as np
+    w, h = img.size
+    if w <= 180 * max(1, h):
+        return api.call_safe(img, timeout=timeout)
+    g = np.asarray(img.convert("L"))
+    lo, hi = int(w * 0.3), int(w * 0.7)
+    colf = (g < 180).mean(axis=0)[lo:hi]
+    cut = lo + int(colf.argmin())
+    left = _ocr_strip(img.crop((0, 0, cut, h)), timeout)
+    right = _ocr_strip(img.crop((cut, 0, w, h)), timeout)
+    return " ".join(x for x in (left, right) if x)
+
+
 def ocr_text(im, bbox, timeout, pad=6):
     """Stage II — 裁一个文字块 → 单独 API 识别 → 剥成纯文本。表外 furniture 与子表上方
     的标题段共用这一套(裁剪→识别→拼接),不让小文字被 stitch 包成空 <table>。"""
@@ -240,7 +258,7 @@ def ocr_text(im, bbox, timeout, pad=6):
     crop = im.crop((max(0, x0 - pad), max(0, y0 - pad),
                     min(im.width, x1 + pad), min(im.height, y1 + pad)))
     crop = _up(crop, 2)                              # 2x 上采样:标题/页脚小字 OCR 提精度
-    return _strip_html(api.call_safe(crop, timeout=timeout))
+    return _strip_html(_ocr_strip(crop, timeout))
 
 
 def ocr_table(im, timeout=240, peel=True, col_tile_max=None, max_rows=None):
@@ -289,9 +307,9 @@ def ocr(im, blocks, timeout=240):
             continue
         if kind == "title":               # mark:OCR 定真身——表格行 → 'tfrag'(Stage III 拼回)
             x0, y0, x1, y1 = bb
-            raw = api.call_safe(_up(im.crop((max(0, x0 - 6), max(0, y0 - 6),
-                                             min(im.width, x1 + 6), min(im.height, y1 + 6))), 2),
-                                timeout=timeout)
+            raw = _ocr_strip(_up(im.crop((max(0, x0 - 6), max(0, y0 - 6),
+                                          min(im.width, x1 + 6), min(im.height, y1 + 6))), 2),
+                             timeout)
             ncalls += 1
             rows = parse_tile(raw) if raw and raw.lower().count("<td") >= 6 else None
             if rows:
