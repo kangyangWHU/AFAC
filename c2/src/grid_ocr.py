@@ -15,7 +15,7 @@ from PIL import Image
 import api_client as api
 from config import MAX_CONCURRENCY, API_USER_IDS, BIN_INK, BIN_FAINT
 from geom import row_bnds, col_bnds, rows_misaligned
-from slicer_table import MAX_TILE_ROWS, MAX_TILE_COLS, UP_EDGE, UP_TARGET
+from slicer_table import MAX_TILE_ROWS, MAX_TILE_COLS, UP_EDGE, UP_TARGET, TILE_MAX
 from stitch_table import parse_tile
 
 _BLANK_TILE_INK = 0.001   # tile 墨率<此=空白,不调 API,按骨架补空 cell
@@ -65,6 +65,12 @@ def slice_grid(im):
     # 让渡为省调用把列放大到37~187是密集内容错误的第一元凶;矮宽表也不例外)
     row_bands = _chunk(rb, MAX_TILE_ROWS)
     col_bands = _chunk(cb, MAX_TILE_COLS)
+    if edge >= UP_EDGE and g.size <= TILE_MAX * TILE_MAX:
+        # 小段快路:整段像素 ≤ 单tile预算 且 格子大(非密集)——切分的两个理由(图太大/
+        # 格太小)都不存在,整段一口读。标题条(4400×96,字缝被数成上百"列")不再被
+        # 15列上限切成8个tile;密集段(1de69d49尾表edge≈31)不走快路,读并防护不破。
+        # 超比例仍由下方180:1对半环节兜
+        row_bands, col_bands = [(0, R)], [(0, C)]
     # 像素长宽比约束:API 拒收 >200:1(400)。矮表单tile可到 241:1(1de69d49 尾表 2行
     # 7000×29px)——列带宽 > 180×最矮行带高 时对半加密列带(切在列边界上,骨架拼接原生
     # 支持多tile;不垫白,内容无损)

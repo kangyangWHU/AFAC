@@ -225,13 +225,9 @@ _JUNK_CELLS = 30      # seg 骨架格数(行×列) < 此 = 文字(标题/说明)
 #   无高度门槛(h298~413 高个说明块照抓)。曾试 2D熵(墨迹分散度):紧裁的大字标题填满
 #   自己的框(e3e19b92 熵0.95)会漏,块内熵量的是"填框"不是"结构",弃。
 #   薄宽真表(1de69d49 2×100=200格)天然保住;稀疏条由"单表折叠先于分类"保护。
-_BLANK_INK = 0.002   # 块墨率 <此 = 空白(subtables 丢空段 / 淡段判 text 共用)
 _TIGHT_INK = 0.001   # _tighten:行/列均墨 >此 = 有内容(抗单点噪,空区≈0)
 _PAD_GUARD = 8       # pad 残余滤除带px:0<y<此 的框线是上一 seg 重叠带入的底框
 _TOP_TEXT_PEAK = 0.003  # 贴顶判据:最上框线上方行墨峰值 <此 = 无文字行(无标题)
-_BAND_THR = 0.004    # _peel 行段判定:行均墨 >此 = 内容行(_content_segs thr)
-_BAND_GAP = 6        # _peel 行段合并间隔px
-_BAND_MINH = 4       # _peel 行段最小高px(更矮=噪线)
 
 
 def _ink(g, bb):
@@ -244,17 +240,21 @@ def _union(bbs):
     return (min(xs0), min(ys0), max(xs1), max(ys1))
 
 
-def _tighten(im, bb):
+def _tighten(im, bb, drop_lines=False):
     """把裁块收紧到实际内容边界(去四周空白 margin)。用松二值化 g180。
 
     关键:定**左右界**时先去掉跨全宽的横线行(mean>0.5),定**上下界**时去掉贯穿全高的
     竖线列——否则一条延伸到空白区的框线(只上/下边线、无数据)会把边界撑大(如 1c9ac6d2
     上框线延伸到 x2685,数据实际只到 1672)。去线后仍保留的竖框线(带数据列)照常算边界,
-    所以有框空单元格不丢。mean>0.001 判该行/列有内容(抗单点噪,空区≈0 不过)。"""
+    所以有框空单元格不丢。mean>0.001 判该行/列有内容(抗单点噪,空区≈0 不过)。
+    drop_lines(title/text 专用):横线行在定上下界时也剔——文字块里的横线是邻表借来的
+    边框,算内容会把标题框拉长贴到表格线上;表格块(seg)不启用,框线即其合法边界。"""
     x0, y0, x1, y1 = bb
     d = np.asarray(im.crop(bb).convert("L")) < BIN_FAINT
     dc = d.copy(); dc[d.mean(1) > LINE_COVER, :] = False   # 去横线行 → 定左右界
     dr = d.copy(); dr[:, d.mean(0) > LINE_COVER] = False   # 去竖线列 → 定上下界
+    if drop_lines:
+        dr[d.mean(1) > LINE_COVER, :] = False              # 文字块:横线行也不算内容
     cols = np.where(dc.mean(0) > _TIGHT_INK)[0]
     rows = np.where(dr.mean(1) > _TIGHT_INK)[0]
     if len(rows) == 0 or len(cols) == 0:
@@ -370,7 +370,8 @@ def crop(im):
         titles, seg = _peel_title(im, bb)     # 只对表格剥标题;躯干免复审直接保seg
         items += [('title', tb) for tb in titles]
         items.append(('seg', seg))
-    items = [(k, _tighten(im, bb)) for k, bb in items]   # 每块收紧到内容边界(去 margin)
+    items = [(k, _tighten(im, bb, drop_lines=(k != 'seg'))) for k, bb in items]
+    #        ^ title/text 收界时剔横线(邻表边框非内容);seg 框线即边界不剔
     items = [(k, bb) for k, bb in items if bb[2] > bb[0] and bb[3] > bb[1]]  # 丢退化空块
     # title 出口统一过滤:tighten 后高 <12px = 字脚残屑(pad 重叠带入上段末行底,如
     # 945e8fe9 4px屑,4473×4=1118:1 被 API 400 拒;真标题最矮 17px)——不论出生路径一律丢
