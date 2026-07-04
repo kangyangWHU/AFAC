@@ -342,19 +342,11 @@ def crop(im):
         dense = [bb for bb in segs if _ink(g, bb) >= _DENSE_INK]
         if len(dense) <= 1:                              # ≤1 密集真表 → 单表,合回一块
             segs = [_union(segs)]
-    seg_items = []                                       # 剥每个 seg 顶部标题(→ 'title' 块)
-    for bb in segs:
-        titles, seg = _peel_title(im, bb)
-        seg_items += [('title', tb) for tb in titles]
-        seg_items.append(('seg', seg))
-    items = [('text', bb) for bb in texts] + seg_items
-
     def _is_texty(bb):
-        """三条结构判据(全部锚在实测天堑,无像素/灰度魔数):
-        ① 骨架行数<4: 标题/说明≤3行,真表≥4行——统一取代旧"矮段20px/淡段g128"
-        ② 骨架格数<30: 无二维结构(垃圾/残渣,绝对量无分母)
-        ③ span<0.5 且 格数<200: 窄块需强表证据(A榜混宽版式,窄真表1269格豁免,
-          标签格数个位照杀);peel残体=全宽表,span不触发,无需出身豁免"""
+        """发路条(在 peel 之前,对每个原始段):
+        text ⟺ 格数<30(结构底线) ∨ ((行数<4 ∨ span<0.5) ∧ 格数<200)
+        判为 seg 的才进 peel;peel 火过的躯干由构造保证是表,不再复审(出身原则,
+        且纯标题段/垃圾条在此已被拦下,peel 不再接触文字——34e残影条反例被顺序消灭)"""
         g2 = np.asarray(im.crop(bb).convert("L"))
         d = g2 < BIN_INK
         if d.shape[0] < 8 or d.shape[1] < 8 or not d.any():
@@ -368,10 +360,16 @@ def crop(im):
             return True                       # 结构底线:无二维结构恒文字
         xs = np.where(d.any(0))[0]
         span_small = (xs[-1] - xs[0] + 1) < 0.5 * d.shape[1]
-        # 弱嫌疑(矮:<4行 / 窄:span<0.5)可被**强表证据(格数≥200)豁免**——
-        # 1de69d49 尾表 2行×100=200格真表曾被"行数<4"错杀(历史重演一次,公式化终结)
         return (r < 4 or span_small) and cells < 200
-    items = [('text', bb) if k == 'seg' and _is_texty(bb) else (k, bb) for k, bb in items]
+
+    items = [('text', bb) for bb in texts]
+    for bb in segs:
+        if _is_texty(bb):                     # 先发路条
+            items.append(('text', bb))
+            continue
+        titles, seg = _peel_title(im, bb)     # 只对表格剥标题;躯干免复审直接保seg
+        items += [('title', tb) for tb in titles]
+        items.append(('seg', seg))
     items = [(k, _tighten(im, bb)) for k, bb in items]   # 每块收紧到内容边界(去 margin)
     items = [(k, bb) for k, bb in items if bb[2] > bb[0] and bb[3] > bb[1]]  # 丢退化空块
     # title 出口统一过滤:tighten 后高 <12px = 字脚残屑(pad 重叠带入上段末行底,如
