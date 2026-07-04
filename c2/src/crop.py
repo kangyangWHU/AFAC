@@ -196,16 +196,20 @@ def subtables(im, pad=4):
         cx0, cx1 = colb[c], colb[c + 1]
         rb = _row_bounds(dark[:, cx0:cx1], dark180[:, cx0:cx1])
         for ra, rbb in zip(rb[:-1], rb[1:]):
-            i128 = dark[ra:rbb, cx0:cx1].mean()
-            i180 = dark180[ra:rbb, cx0:cx1].mean()
-            if i180 < _BLANK_INK:                    # 松二值化都近空 → 真空白带,丢
+            band180 = dark180[ra:rbb, cx0:cx1]
+            # 空段判据=行投影(用户设计,与tile空白同一把尺):去线后每行墨<3px才是真空。
+            # 旧均值判据尺度相关:全宽段里两行标题(~3000墨px/33万px≈0.009)被稀释成
+            # "空白"静默吞掉,子表间标题整个从输出消失(A榜0cd74f08/3b243a83)
+            vk = band180.mean(axis=0) <= 0.9
+            b2 = band180[:, vk] if vk.any() else band180
+            rf_ = b2.mean(axis=1) if b2.size else np.zeros(1)
+            rowink = b2[rf_ <= 0.9].sum(axis=1) if (rf_ <= 0.9).any() else np.zeros(1)
+            if rowink.size == 0 or rowink.max() < 3:  # 真空白带,丢
                 continue
             bb = (x0 + cx0, y0 + max(0, ra - pad), x0 + cx1, y0 + min(H, rbb + pad))
-            # kind='text'(表外标题/说明,交 Stage III 当文本) 的两类:① 矮段(<20px,如首标题
-            # 12px);② **淡段**(g128 近空但 g180 有墨 = 灰度 130~180 的淡标题/说明,如
-            # f64061da 首标题灰度177 g128墨0.0008被误当空丢)。其余浓段=子表 'seg'。
-            kind = 'text' if (i128 < _BLANK_INK or rbb - ra < 20) else 'seg'
-            items.append((y0 + ra, kind, bb))
+            items.append((y0 + ra, 'seg', bb))   # 只切不判:类型统一由 crop 的结构判据定
+            #   (原矮段20px/淡段g128两条像素阈规则删除,其判别对象——1~3行的标题/说明——
+            #    由"骨架行数<4"结构判据统一覆盖)
     items.sort(key=lambda t: t[0])                     # 阅读顺序
     return [(k, bb) for _, k, bb in items] or [('seg', tb)]
 
@@ -344,26 +348,30 @@ def crop(im):
         seg_items += [('title', tb) for tb in titles]
         seg_items.append(('seg', seg))
     items = [('text', bb) for bb in texts] + seg_items
-    Himg = im.height                                     # 矮 seg=标题/说明,非表 → 当文本。
-    #   但需**骨架行数<4**双重确认——高比例判据在"高图+多小表"版式失效(a1aaef73 图高
-    #   4676,真表 6 行仅 62px=1.3% 图高,单靠 2% 会把真小表误转文本);真表≥4行,标题/说明 1~3 行
 
     def _is_texty(bb):
+        """三条结构判据(全部锚在实测天堑,无像素/灰度魔数):
+        ① 骨架行数<4: 标题/说明≤3行,真表≥4行——统一取代旧"矮段20px/淡段g128"
+        ② 骨架格数<30: 无二维结构(垃圾/残渣,绝对量无分母)
+        ③ span<0.5 且 格数<200: 窄块需强表证据(A榜混宽版式,窄真表1269格豁免,
+          标签格数个位照杀);peel残体=全宽表,span不触发,无需出身豁免"""
         g2 = np.asarray(im.crop(bb).convert("L"))
         d = g2 < BIN_INK
         if d.shape[0] < 8 or d.shape[1] < 8 or not d.any():
             return True
-        xs = np.where(d.any(0))[0]
-        if (xs[-1] - xs[0] + 1) < 0.5 * d.shape[1]:   # 墨迹x跨度<半块宽 = 文字(此处块仍是
-            return True                               #   主表全宽,未tighten:标签span 0.06~0.28,
-        #                                                 表格 p10=0.75,0.5 落天堑;表格必横跨)
         from geom import row_bnds as _rb, col_bnds as _cb
         d180 = g2 < BIN_FAINT
         r = len(_rb(d, d180)[0]) - 1
         c = len(_cb(d, d180)[0]) - 1
-        return r * c < _JUNK_CELLS
-    items = [('text', bb) if k == 'seg' and _is_texty(bb) else (k, bb)
-             for k, bb in items]
+        cells = r * c
+        if cells < _JUNK_CELLS:
+            return True                       # 结构底线:无二维结构恒文字
+        xs = np.where(d.any(0))[0]
+        span_small = (xs[-1] - xs[0] + 1) < 0.5 * d.shape[1]
+        # 弱嫌疑(矮:<4行 / 窄:span<0.5)可被**强表证据(格数≥200)豁免**——
+        # 1de69d49 尾表 2行×100=200格真表曾被"行数<4"错杀(历史重演一次,公式化终结)
+        return (r < 4 or span_small) and cells < 200
+    items = [('text', bb) if k == 'seg' and _is_texty(bb) else (k, bb) for k, bb in items]
     items = [(k, _tighten(im, bb)) for k, bb in items]   # 每块收紧到内容边界(去 margin)
     items = [(k, bb) for k, bb in items if bb[2] > bb[0] and bb[3] > bb[1]]  # 丢退化空块
     # title 出口统一过滤:tighten 后高 <12px = 字脚残屑(pad 重叠带入上段末行底,如
