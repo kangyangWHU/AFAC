@@ -19,7 +19,7 @@ from config import TRAIN_TABLE_DIR, API_USER_IDS
 from preprocess import prep
 from slicer_table import slice_table
 from crop import crop
-from grid_ocr import ocr_seg, _up, _ASPECT_SAFE
+from grid_ocr import ocr_seg, _up, _ASPECT_SAFE, _EDGE_PAD
 from stitch_table import stitch_table, parse_tile, parse_tile_segments, rows_to_html
 from evaluate import table_teds, text_edit_loss
 
@@ -245,7 +245,7 @@ def _ocr_strip(img, timeout):
     return " ".join(x for x in (left, right) if x)
 
 
-def ocr_text(im, bbox, timeout, pad=6):
+def ocr_text(im, bbox, timeout, pad=_EDGE_PAD):
     """Stage II — 裁一个文字块 → 单独 API 识别 → 剥成纯文本。表外 furniture 与子表上方
     的标题段共用这一套(裁剪→识别→拼接),不让小文字被 stitch 包成空 <table>。"""
     x0, y0, x1, y1 = bbox
@@ -304,8 +304,9 @@ def ocr(im, blocks, timeout=240):
         if kind == "title":               # mark:OCR 定真身——表格行 → 'tfrag'(Stage III 拼回)
             x0, y0, x1, y1 = bb
             _core = im.crop((x0, y0, x1, y1)).convert("RGB")
-            _cv = Image.new("RGB", (_core.width + 12, _core.height + 12), (255, 255, 255))
-            _cv.paste(_core, (6, 6))                 # 白pad同原则,防邻块半截字入图
+            _cv = Image.new("RGB", (_core.width + 2 * _EDGE_PAD, _core.height + 2 * _EDGE_PAD),
+                            (255, 255, 255))
+            _cv.paste(_core, (_EDGE_PAD, _EDGE_PAD))  # 白pad统一 _EDGE_PAD(与tile一致)
             raw = _ocr_strip(_up(_cv, 2), timeout)
             ncalls += 1
             rows = parse_tile(raw) if raw and raw.lower().count("<td") >= 6 else None

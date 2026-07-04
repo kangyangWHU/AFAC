@@ -175,7 +175,7 @@ def _row_bounds(dark, dark180=None, k=_SEAM_K, vmax=_SEAM_VMAX):
 
 
 @cached("subtables", __file__, os.path.join(os.path.dirname(os.path.abspath(__file__)), "geom.py"))
-def subtables(im, pad=4):
+def subtables(im, pad=0):   # 精确边界(±4实pad已清偿:邻段残影是白pad时代最后据点)
     """把整图切成**有序块**列表 `[(kind, bbox), ...]`(阅读顺序,先上后下)。
 
     kind='text' : split_table_texts 剥出的表外页眉/页脚/水印/页码。
@@ -290,7 +290,7 @@ def _peel_title(im, bb):
         if y - prev > 3:
             hl.append(int(y))
         prev = int(y)
-    hl = [y for y in hl if y == 0 or y >= _PAD_GUARD]   # 滤 pad 残余(seg重叠带入上一seg底框线)
+    # (_PAD_GUARD 过滤已退役:切分改精确边界后,顶部不再有邻段带入的框线)   # 滤 pad 残余(seg重叠带入上一seg底框线)
     # 路① 有横框线(≥2,含密集网格):最上一条=表顶,其上=标题(框线多≠无标题)
     if len(hl) >= 2:
         top = hl[0]
@@ -373,9 +373,8 @@ def crop(im):
     items = [(k, _tighten(im, bb, drop_lines=(k != 'seg'))) for k, bb in items]
     #        ^ title/text 收界时剔横线(邻表边框非内容);seg 框线即边界不剔
     items = [(k, bb) for k, bb in items if bb[2] > bb[0] and bb[3] > bb[1]]  # 丢退化空块
-    # title 出口统一过滤:tighten 后高 <12px = 字脚残屑(pad 重叠带入上段末行底,如
-    # 945e8fe9 4px屑,4473×4=1118:1 被 API 400 拒;真标题最矮 17px)——不论出生路径一律丢
-    items = [(k, bb) for k, bb in items if not (k == 'title' and bb[3] - bb[1] < 12)]
+    # (title <12px 字脚屑过滤已随 ±4 pad 清偿一并退役:残屑=pad带入的邻段字脚,
+    #  绝源后过滤只剩误杀——A榜 4e32dba9 的 11px 单行小标题曾被它灭口)
     items.sort(key=lambda kb: (kb[1][1], kb[1][0]))      # 阅读顺序 (y, x)
     return items or [('seg', (0, 0, im.width, im.height))]
 

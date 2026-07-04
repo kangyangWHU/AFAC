@@ -55,7 +55,11 @@ def slice_grid(im):
     R, C = len(rb) - 1, len(cb) - 1
     meta = {"rows": R, "cols": C, "rb": rb, "cb": cb, "misaligned": False,
             "col_framed": bool(cf)}
-    if R < 1 or C < 1 or rows_misaligned(dark, dark180):
+    if R < 1 or C < 1 or (R >= 2 and float(np.median(np.diff(rb))) >= 12
+                          and rows_misaligned(dark, dark180)):
+        # 错位检测仅在行距≥12px时有效:微距表(行缝2~3px)窄列条里数不出行,
+        # "列带行数<<全表"是检测器自身失明,非真错位(A榜e082df7b 354x110
+        # 对齐巨表被误标→整段自由读灾难)。真错位表b326/b5cad行距27px不受影响
         meta["misaligned"] = True
         return None, meta
     # 密集判据(沿用 slicer):每 cell 平均边长小 → 上采样
