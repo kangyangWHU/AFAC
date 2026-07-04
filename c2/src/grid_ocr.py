@@ -20,7 +20,10 @@ from stitch_table import parse_tile
 
 _BLANK_TILE_INK = 0.001   # tile 墨率<此=空白,不调 API,按骨架补空 cell
 _EDGE_PAD = 3             # tile 四周留白px(边界在缝中心,±3 不吃邻格墨)
-_UP_CAP = 2.0             # 上采样上限(沿用 slicer 实测结论)
+_UP_CAP = 3.0             # 上采样上限(密集表实验:15列+自适应放大,cap3 兜住最小格)
+_UP_TARGET = 55           # 目标格边长(实证:edge27 在 2× 已 99.5~99.8%,55/27≈2.0 正中甜点;
+#                           slicer 的 75 在 cap2 时代从未生效,cap3 下会把 2.78× 强加给
+#                           27px 格,载荷×7.7 纯浪费。3× 只留给最小格(19px→2.9×)
 
 
 def _chunk(bnds, max_cells):
@@ -37,8 +40,6 @@ def _chunk(bnds, max_cells):
     return out
 
 
-_CELL_BUDGET = MAX_TILE_ROWS * MAX_TILE_COLS   # 375:单 tile 单元格预算。行列上限互相让渡——
-#   矮子表(行少)列上限放宽(11行→34列,宽表不必切碎),窄表(列少)行上限放宽,减调用且保上下文
 
 
 def slice_grid(im):
@@ -58,15 +59,12 @@ def slice_grid(im):
         return None, meta
     # 密集判据(沿用 slicer):每 cell 平均边长小 → 上采样
     edge = (g.shape[0] * g.shape[1] / max(1, R * C)) ** 0.5
-    meta["upsample"] = round(min(_UP_CAP, UP_TARGET / edge), 2) if edge < UP_EDGE else 1.0
+    meta["upsample"] = round(min(_UP_CAP, _UP_TARGET / edge), 2) if edge < UP_EDGE else 1.0
     meta["cell_edge"] = round(edge, 1)
-    # 行列上限按单元格预算互相让渡(矮子表列放宽/窄表行放宽)
-    eff_r = min(R, MAX_TILE_ROWS)
-    col_cap = max(MAX_TILE_COLS, _CELL_BUDGET // max(1, eff_r))
-    eff_c = min(C, col_cap)
-    row_cap = max(MAX_TILE_ROWS, _CELL_BUDGET // max(1, eff_c))
-    row_bands = _chunk(rb, row_cap)
-    col_bands = _chunk(cb, col_cap)
+    # 硬上限 行25×列15(上榜版参数,让渡已废——双田实测密集表35列≈69%/15列≥99.5%,
+    # 让渡为省调用把列放大到37~187是密集内容错误的第一元凶;矮宽表也不例外)
+    row_bands = _chunk(rb, MAX_TILE_ROWS)
+    col_bands = _chunk(cb, MAX_TILE_COLS)
     # 像素长宽比约束:API 拒收 >200:1(400)。矮表单tile可到 241:1(1de69d49 尾表 2行
     # 7000×29px)——列带宽 > 180×最矮行带高 时对半加密列带(切在列边界上,骨架拼接原生
     # 支持多tile;不垫白,内容无损)
