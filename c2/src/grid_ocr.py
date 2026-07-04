@@ -82,18 +82,27 @@ def slice_grid(im):
     for (ri, rj) in row_bands:
         row = []
         for (ci, cj) in col_bands:
-            y0, y1 = max(0, rb[ri] - _EDGE_PAD), min(H, rb[rj] + _EDGE_PAD)
-            x0, x1 = max(0, cb[ci] - _EDGE_PAD), min(W, cb[cj] + _EDGE_PAD)
+            y0, y1 = rb[ri], rb[rj]
+            x0, x1 = cb[ci], cb[cj]
             ink = dark[y0:y1, x0:x1].mean()
             if ink < _BLANK_TILE_INK:
                 row.append(None)
                 continue
-            t = im.crop((x0, y0, x1, y1))
-            if not rf:                             # **无框表画骨架行线进 tile**:VLM 看见
-                t = t.convert("RGB")               # 显式行分隔→高格不再拆行(5年交)、行不
-                dr = ImageDraw.Draw(t)             # 漏读(21→22);内部线 only,顶/底边不画。
-                for i in range(ri + 1, rj):        # 有框表已有线,不叠画。
-                    dr.line([(0, rb[i] - y0), (t.width, rb[i] - y0)],
+            # **白pad**:精确按边界裁剪,贴到四周留白的画布上——实pad(±3px)会带进邻带行
+            # 的底边残影,VLM 对残影输出幻觉空行,整tile内容错移一行(9c7857f3 0.78 病根)。
+            # 边界都在缝中心/框线上,字不贴边,白边只提供视觉余量,邻带墨物理进不来。
+            core = im.crop((x0, y0, x1, y1)).convert("RGB")
+            t = Image.new("RGB", (core.width + 2 * _EDGE_PAD, core.height + 2 * _EDGE_PAD),
+                          (255, 255, 255))
+            t.paste(core, (_EDGE_PAD, _EDGE_PAD))
+            if not rf and np.median(np.diff(rb)) >= 12:
+                # **无框表画骨架行线进 tile**(行距≥12px):VLM 看见显式行分隔→高格不再
+                # 拆行(5年交)、行不漏读(21→22);内部线 only,顶/底边不画。行距<12px 的
+                # 密表不画——2px 线在 7px 行里吃字(5fdf46b0 画线 -1.1pt)。
+                dr = ImageDraw.Draw(t)
+                for i in range(ri + 1, rj):
+                    dr.line([(0, rb[i] - y0 + _EDGE_PAD),
+                             (t.width, rb[i] - y0 + _EDGE_PAD)],
                             fill=(0, 0, 0), width=2)
             row.append(t)
         tiles.append(row)
@@ -204,14 +213,14 @@ def ocr_seg(im, timeout=240):
         for c, (ci, cj) in enumerate(col_bands):
             cap, rows = parsed[(r, c)]
             E = [i for i in band_idx if cell_ink[i, ci:cj].any()]
+            while len(rows) > len(E):              # 空行**条件丢弃**(仅实读超期望时):
+                empt = [k for k, x in enumerate(rows)      # 白pad后残影幻觉空行已绝源,
+                        if not any(s.strip() for s in x)]  # 这里只兜画线后VLM老实输出的
+                if not empt:                               # 空行(数量超出有墨行数的部分);
+                    break                                  # 真空行内容由骨架按位置补"",
+                rows.pop(empt[0])                          # 不因丢弃而丢失
             if cap and len(rows) == len(E) - 1:
                 rows = [[cap]] + rows              # caption = 首个有墨行(跨列表头)
-            while len(rows) > len(E):              # 实读超期望时先丢**全空行**:±3px pad
-                empt = [k for k, x in enumerate(rows)          # 带进邻带行的底边残影,VLM
-                        if not any(s.strip() for s in x)]      # 输出全空行,按序对齐会把
-                if not empt:                                   # 整tile内容挤移一行(9c7857f3
-                    break                                      # 多tile整块错位,0.78病根)。
-                rows.pop(empt[0])                              # 全空行零信息,丢之必无害
             if r == 0 and len(rows) >= len(E) + 1 and len(rows) >= 2:
                 a, b = rows[0], rows[1]            # 斜线表头:一个高格斜线分写两行,OCR
                 ov = [t for t in range(min(len(a), len(b)))   # 拆成两行且仅第0格重叠
