@@ -108,14 +108,19 @@ def _extract_content(obj):
 
 _ERR_MARKERS = ('"success": false', '"success":false', "错误", "异常",
                 "Exception", "Request Timeout", "无法查询")
+_ERR_PAGES = ("<!doctype", "<html")   # 服务端偶发吐 HTML 错误页——不是解析内容,当失败
+#               (6c205e72 全量高压下 '<!DOCTYPE' 被当单元格内容入表并污染缓存)
 
 
 def _looks_like_error(md):
-    """判断返回是否是服务端错误信封（而非真正解析内容）。"""
+    """判断返回是否是服务端错误信封/错误页（而非真正解析内容）。"""
     if not md:
         return False
     head = md.strip()[:300]
     if head.startswith("{") and any(m in head for m in _ERR_MARKERS):
+        return True
+    low = head.lower()
+    if any(low.startswith(p) or p in low[:80] for p in _ERR_PAGES):
         return True
     return False
 

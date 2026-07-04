@@ -320,6 +320,8 @@ def ocr(im, blocks, timeout=240):
                     items.append(["text", txt, None])
             continue
         grid, nc, gmeta = ocr_seg(im.crop(bb), timeout)   # 骨架 OCR(一律以估计为准)
+        for a in gmeta.get("audit", []):                  # 实读与估计不一致 → 审计日志
+            print(f"  [audit] seg@y{bb[1]} {a}", flush=True)
         ncalls += nc
         if grid is not None:
             cells = sum(1 for row in grid for v in row if v.strip())

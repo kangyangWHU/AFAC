@@ -166,11 +166,35 @@ def ocr_seg(im, timeout=240):
                 lm[s:] |= line[:-s]                #  有字,数据行错进表头(1674392a)
             cell_ink[i, j] = bool(((cnt >= 3) & ~lm).any())
 
-    # 先解析全部 tile
+    # 先解析全部 tile;**行数越界=废品**(行期望偏差≤1 的先验即废品检测器:实读 >
+    # 期望+1 物理上不可能,必是错误页/幻觉)→绕过缓存重读一次(垃圾可能已污染缓存),
+    # 重读好则回写缓存;仍废 → 置空(补空,不投票不入表)
     parsed = {}
     for r in range(len(row_bands)):
+        ri, rj = row_bands[r]
         for c in range(len(col_bands)):
-            parsed[(r, c)] = _parse_cap(outs.get((r, c)))
+            ci, cj = col_bands[c]
+            cap, rows = _parse_cap(outs.get((r, c)))
+            E_n = int(sum(1 for i in range(ri, rj) if cell_ink[i, ci:cj].any()))
+            if len(rows) > E_n + 1 and tiles[r][c] is not None:
+                raw2 = api.call_safe(_up(tiles[r][c], up), timeout=timeout, use_cache=False)
+                cap2, rows2 = _parse_cap(raw2)
+                if rows2 and len(rows2) <= E_n + 1:      # 重读合格 → 抽风实锤,用重读
+                    api.write_cache(_up(tiles[r][c], up), raw2)
+                    cap, rows = cap2, rows2
+                elif rows2 and len(rows2) == len(rows):  # 两次一致超界 → 骨架真欠(微距
+                    api.write_cache(_up(tiles[r][c], up), raw2)   # 并行×2),保留内容按序
+                    cap, rows = cap2, rows2              # 入表(网格容期望+1,尾行裁,不冤杀)
+                else:                                    # 重读空/错/不一致 → 垃圾置空
+                    cap, rows = "", []
+            parsed[(r, c)] = (cap, rows)
+            if tiles[r][c] is not None and len(rows) != E_n:
+                pos = "首带" if r == 0 else ("末带" if r == len(row_bands) - 1 else "中带!")
+                badc = sum(1 for x in rows if len(x) != cj - ci)
+                meta.setdefault("audit", []).append(
+                    f"tile[{r}][{c}]({pos}) 行:期望{E_n}实读{len(rows)} 列宽不符行数:{badc}/{len(rows)}")
+                # 行整体精确的先验:只有首带(表头拆行/斜线)和末带(稀疏)允许偏差,
+                # 中带偏差=异常(骨架错/API抽风),审计日志供人工核查
 
     # **列校准**(行列职责不对称:行估计=真值,列在稀疏区/标签区可能少):非空 tile 的行
     # 格数众数若一致 = 骨架列数+k(k>0),且 ≥2 个行带的 tile 同票(或该列带只有 1 个非空
@@ -242,7 +266,8 @@ def ocr_seg(im, timeout=240):
                     rows = rows[:k] + [merged] + rows[k + 2:]
             aligned[c] = (E, rows)
         extra_votes = sum(1 for c in range(len(col_bands))
-                          if len(aligned[c][1]) > len(aligned[c][0]))
+                          if len(aligned[c][1]) == len(aligned[c][0]) + 1)
+        #                 ^ 恰好期望+1 才有投票权(越界废品已在解析层清除,双保险)
         for i in band_idx:                         # 行以骨架为准:多裁少补;唯一例外见下
             rowcells = []
             for c, (ci, cj) in enumerate(col_bands):
