@@ -255,8 +255,10 @@ def ocr_text(im, bbox, timeout, pad=6):
     """Stage II — 裁一个文字块 → 单独 API 识别 → 剥成纯文本。表外 furniture 与子表上方
     的标题段共用这一套(裁剪→识别→拼接),不让小文字被 stitch 包成空 <table>。"""
     x0, y0, x1, y1 = bbox
-    crop = im.crop((max(0, x0 - pad), max(0, y0 - pad),
-                    min(im.width, x1 + pad), min(im.height, y1 + pad)))
+    core = im.crop((x0, y0, x1, y1)).convert("RGB")  # 白pad(与tile同原则):实pad会把
+    crop = Image.new("RGB", (core.width + 2 * pad, core.height + 2 * pad),
+                     (255, 255, 255))                # 相邻块的半截字带进来(34e53b1c
+    crop.paste(core, (pad, pad))                     # 表1末行下半截被读成'000'垃圾)
     crop = _up(crop, 2)                              # 2x 上采样:标题/页脚小字 OCR 提精度
     return _strip_html(_ocr_strip(crop, timeout))
 
@@ -307,9 +309,10 @@ def ocr(im, blocks, timeout=240):
             continue
         if kind == "title":               # mark:OCR 定真身——表格行 → 'tfrag'(Stage III 拼回)
             x0, y0, x1, y1 = bb
-            raw = _ocr_strip(_up(im.crop((max(0, x0 - 6), max(0, y0 - 6),
-                                          min(im.width, x1 + 6), min(im.height, y1 + 6))), 2),
-                             timeout)
+            _core = im.crop((x0, y0, x1, y1)).convert("RGB")
+            _cv = Image.new("RGB", (_core.width + 12, _core.height + 12), (255, 255, 255))
+            _cv.paste(_core, (6, 6))                 # 白pad同原则,防邻块半截字入图
+            raw = _ocr_strip(_up(_cv, 2), timeout)
             ncalls += 1
             rows = parse_tile(raw) if raw and raw.lower().count("<td") >= 6 else None
             if rows:
@@ -324,6 +327,7 @@ def ocr(im, blocks, timeout=240):
             print(f"  [audit] seg@y{bb[1]} {a}", flush=True)
         ncalls += nc
         if grid is not None:
+            grid = _fix_grid(grid)
             cells = sum(1 for row in grid for v in row if v.strip())
             if cells >= _MIN_TABLE_CELLS:
                 items.append(["table", grid, None])
@@ -347,6 +351,23 @@ def ocr(im, blocks, timeout=240):
             if txt:
                 items.append(["text", txt, None])
     return items, ncalls
+
+
+_MDOT = re.compile(r"^\d{1,3}(?:\.\d{3})+\.\d{2}$")
+
+
+def _fix_mdot(s):
+    """多点数字规范化: '2.357.38'→'2,357.38'。欧式点千分位在本域不存在(用户判定),
+    pred侧是OCR把千分位逗号误读成点(f501eee1/f5009a2d),GT侧同款样式者视为GT标注
+    误差,统一赌逗号。严格整形匹配:粘连残渣('107.8.11',第二段非3位)不动。"""
+    if s and _MDOT.match(s):
+        head, dec = s.rsplit(".", 1)
+        return head.replace(".", ",") + "." + dec
+    return s
+
+
+def _fix_grid(grid):
+    return [[_fix_mdot(c) for c in row] for row in grid]
 
 
 def _grid_html(grid):
@@ -430,7 +451,12 @@ def merge(items):
                 rows = [r[:C] + [""] * max(0, C - len(r)) for r in it[1]]
                 items[i + 1] = ["table", rows + g, None]
             else:
-                fused.append(["table", it[1], None])
+                # 拼不进任何相邻表 → **降级为文本**:从子表拆出的块只能是表外标题,
+                # 绝不允许以独立表格落地(34e53b1c 残影+标题条自立成第3张表,表数3v2
+                # 配对全崩 0.49)。"拆出块必为标题"是不变量
+                txt = " ".join(c for r in it[1] for c in r if c.strip())
+                if txt.strip():
+                    fused.append(["text", txt, None])
             i += 1
             continue
         fused.append(it)
