@@ -252,6 +252,8 @@ def ocr_seg(im, timeout=240):
                 elif rows2 and len(rows2) == len(rows):  # 两次一致超界 → 骨架真欠(微距
                     api.write_cache(_up(tiles[r][c], up), raw2)   # 并行×2),保留内容按序
                     cap, rows = cap2, rows2              # 入表(网格容期望+1,尾行裁,不冤杀)
+                    meta.setdefault("adopt", []).append(
+                        f"tile[{r}][{c}] 双一致超界保留 期望{E_n}实读{len(rows)}")
                 else:                                    # 重读空/错/不一致 → 垃圾置空
                     cap, rows = "", []
             parsed[(r, c)] = (cap, rows)
@@ -282,7 +284,12 @@ def ocr_seg(im, timeout=240):
                     votes.append(Counter(cnts).most_common(1)[0][0])
         if votes:
             top, n = Counter(votes).most_common(1)[0]
-            if top > nc and (n >= 2 or len(votes) == 1):
+            if nc < top <= nc + 3 and n >= 2:
+                # 一致性铁律(用户原则:大部分tile行列必须一致):采纳必须≥2票——
+                # 单票例外已删(deb8尾表被1票从15列改成31列,token在稀疏行膨胀,
+                # 孤证=病态);幅度封顶+3(合法救援5fdf为+2,翻倍必是病)
+                meta.setdefault("adopt", []).append(
+                    f"列带{c} 列校准采纳 骨架{cj - ci}列→{top}列({n}票)")
                 nc = top
         band_nc.append(nc)
 
@@ -360,6 +367,8 @@ def ocr_seg(im, timeout=240):
                 rowcells += list(cells[:nc]) + [""] * max(0, nc - len(cells))
             grid.append(rowcells)
         if extra_votes >= 2 or (extra_votes == 1 and len(col_bands) == 1):
+            meta.setdefault("adopt", []).append(
+                f"带{r} 佐证加行 +1行({extra_votes}票)")
             # **佐证加行**:拆行墨测试没吃掉的多余实读行,≥2 tile 同票(或单tile带)=骨架
             # 真欠一行(微距表 <3px 缝并行,a1aaef73 列号行+年1行挤在一个骨架行,API 实读
             # 6>骨架5,0.00 末行被裁)→带尾补一行,实读顺序本身即正确顺序。孤证=幻觉仍裁

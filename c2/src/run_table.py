@@ -320,6 +320,8 @@ def ocr(im, blocks, timeout=240):
         grid, nc, gmeta = ocr_seg(im.crop(bb), timeout)   # 骨架 OCR(一律以估计为准)
         for a in gmeta.get("audit", []):                  # 实读与估计不一致 → 审计日志
             print(f"  [audit] seg@y{bb[1]} {a}", flush=True)
+        for a in gmeta.get("adopt", []):                  # 估计被API裁决改写 → 裁决日志
+            print(f"  [adopt] seg@y{bb[1]} {a}", flush=True)
         ncalls += nc
         if grid is not None:
             grid = _fix_grid(grid)
