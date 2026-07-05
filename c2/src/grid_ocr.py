@@ -321,7 +321,13 @@ def ocr_seg(im, timeout=240):
     # <E-1 也走此梯,封 1829 欠读洞)。先投票后自愈——5fdf带0(14→17,18票一致)此前被
     # 先送自愈白烧50次调用的教训。
     def _wstar(rws, dft):
-        cs = [len(x) for x in rws if any(s.strip() for s in x)]
+        # 有效宽=到【最后一个非空格】的位置(尾部去空),不是整行格数——API常把稀疏行
+        # 补齐拖一堆尾部空<td>(e082 '9946.83,10244.56,0.00'+16空=19格),len会误判
+        # 列多读→空跑自愈。真实内容宽3<<nc,不该触发;稠密劈裂全非空则宽=格数照触发。
+        def w(x):
+            last = max((k for k, s in enumerate(x) if s.strip()), default=-1)
+            return last + 1
+        cs = [w(x) for x in rws if any(s.strip() for s in x)]
         return Counter(cs).most_common(1)[0][0] if cs else dft
     for r in range(len(row_bands)):
         ri, rj = row_bands[r]
