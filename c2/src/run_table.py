@@ -323,6 +323,29 @@ def ocr(im, blocks, timeout=240):
         ncalls += nc
         if grid is not None:
             grid = _fix_grid(grid)
+            for sp in reversed(gmeta.get("splits") or []):
+                # API证词拆表(caption+轴行双条件):轴行前的连续"文本行"(≤3非空且含中文)
+                # 是节头,提出为表间文本;其余劈成两表
+                if not (0 < sp < len(grid)):
+                    continue
+                head_txt = []
+                for lo, txts in sorted((gmeta.get("split_txt") or {}).items()):
+                    if lo <= sp:                   # 该带溢出改道的节头文本,归此拆点
+                        head_txt += txts
+                cut = sp
+                while cut > 1:
+                    ne = [c for c in grid[cut - 1] if c.strip()]
+                    if 0 < len(ne) <= 3 and any('一' <= ch <= '鿿' for c in ne for ch in c):
+                        head_txt.insert(0, " ".join(ne)); cut -= 1
+                    else:
+                        break
+                lower = grid[sp:]
+                upper = grid[:cut]
+                if upper and lower:
+                    items.append(["table", upper, None])
+                    if head_txt:
+                        items.append(["text", "\n\n".join(head_txt), None])
+                    grid = lower
             cells = sum(1 for row in grid for v in row if v.strip())
             if cells >= _MIN_TABLE_CELLS:
                 items.append(["table", grid, None])

@@ -125,6 +125,30 @@ def _up(t, factor):
     return t
 
 
+def _tokens(cell):
+    """格内空格分词+数字重组:'3, 464'类被空格切碎的数字回并
+    (前token以,/./，结尾且后token以数字开头→并回)。"""
+    out = []
+    for p in cell.split():
+        if out and out[-1][-1] in ",.，" and p[0].isdigit():
+            out[-1] += p
+        else:
+            out.append(p)
+    return out
+
+
+def _unmerge_row(cells, nc):
+    """行级并列修复(半线表波动的确定性解药):VLM'以线分列'时把无线数据区并成一格
+    ('59.36 138.31 ...'),实读格数<骨架列数但空格俱在——按token展开,恰好对上骨架
+    列数才采纳(1674392a 倔形态3格→11格;乖形态行宽=nc不触发,零影响)。"""
+    if len(cells) >= nc:
+        return cells
+    ex = []
+    for c in cells:
+        ex += _tokens(c) if c.strip() else [""]
+    return ex if len(ex) == nc else cells
+
+
 def _parse_cap(raw):
     """解析 tile 输出 → (caption, rows)。tile 是从表内切出的,**不存在表外文字**——
     API 把跨列表头(colspan行,如"保单年度")当 caption 放在 <table> 前,必须回收。"""
@@ -132,8 +156,24 @@ def _parse_cap(raw):
     cap = ""
     if raw and "<table" in raw.lower():
         head = raw[:raw.lower().index("<table")]
-        cap = " ".join(head.split())
+        cap = head.strip()
     return cap, rows
+
+
+def _cap_rows(cap):
+    """caption → 行流。API 会把 tile 顶部的**前表尾行/节头行**降格为 <table> 前的
+    文本(deb8de95: '103 7455.02...'三行三角尾+'## 二年交/男性'节头全在 caption 里,
+    表内25物理行只进了19行)。逐行解析回行:数字密集行→按空格拆格(前表尾数据),
+    文本行→单格行(节头);markdown 井号剥掉。"""
+    out = []
+    for ln in cap.splitlines():
+        ln = ln.strip().lstrip("#").strip()
+        if not ln:
+            continue
+        toks = ln.split()
+        num = sum(1 for t in toks if t.replace(".", "").replace(",", "").isdigit())
+        out.append(toks if (len(toks) >= 2 and num >= len(toks) - 1) else [ln])
+    return out
 
 
 def ocr_seg(im, timeout=240):
@@ -247,11 +287,13 @@ def ocr_seg(im, timeout=240):
         band_nc.append(nc)
 
     grid = []
+    cap_rows_global = []                       # (条件1)非首带出现caption的带 → 其全局行范围
     for r, (ri, rj) in enumerate(row_bands):
         band_idx = list(range(ri, rj))
         aligned = {}
         for c, (ci, cj) in enumerate(col_bands):
             cap, rows = parsed[(r, c)]
+            rows = [_unmerge_row(x, cj - ci) for x in rows]   # 行级并列修复(半线表)
             E = [i for i in band_idx if cell_ink[i, ci:cj].any()]
             while len(rows) > len(E):              # 空行**条件丢弃**(仅实读超期望时):
                 empt = [k for k, x in enumerate(rows)      # 白pad后残影幻觉空行已绝源,
@@ -259,8 +301,20 @@ def ocr_seg(im, timeout=240):
                 if not empt:                               # 空行(数量超出有墨行数的部分);
                     break                                  # 真空行内容由骨架按位置补"",
                 rows.pop(empt[0])                          # 不因丢弃而丢失
-            if cap and len(rows) == len(E) - 1:
-                rows = [[cap]] + rows              # caption = 首个有墨行(跨列表头)
+            if cap and len(rows) < len(E):         # 实读不足额 → caption行流回收补进
+                crows = _cap_rows(cap)             # (跨列表头单行/前表尾行/节头行按行序回填)
+                rows = crows + rows
+                while len(rows) > len(E):          # 溢出(骨架在零缝junction并行,物理行
+                    for k in range(len(crows)):    # 多于骨架):优先裁cap里的**文本行**,
+                        if k < len(rows) and not any(                 # 但不丢弃——改道进
+                                t.replace(".", "").replace(",", "").isdigit()  # 表间文本通道
+                                for t in rows[k]):                    # (拆表时作节头输出);
+                            meta.setdefault("split_txt", {}).setdefault(
+                                len(grid), []).append(" ".join(x for x in rows[k] if x.strip()))
+                            del rows[k]
+                            break
+                    else:
+                        del rows[0]                # 全是数据行才裁最前(不得已)
             if r == 0 and len(rows) >= len(E) + 1 and len(rows) >= 2:
                 a, b = rows[0], rows[1]            # 斜线表头:一个高格斜线分写两行,OCR
                 ov = [t for t in range(min(len(a), len(b)))   # 拆成两行且仅第0格重叠
@@ -292,6 +346,8 @@ def ocr_seg(im, timeout=240):
                     k, merged = hits[0]
                     rows = rows[:k] + [merged] + rows[k + 2:]
             aligned[c] = (E, rows)
+            if cap and r > 0:
+                cap_rows_global.append((len(grid), len(grid) + len(band_idx)))
         extra_votes = sum(1 for c in range(len(col_bands))
                           if len(aligned[c][1]) == len(aligned[c][0]) + 1)
         #                 ^ 恰好期望+1 才有投票权(越界废品已在解析层清除,双保险)
@@ -314,4 +370,27 @@ def ocr_seg(im, timeout=240):
                 nc = band_nc[c]
                 rowcells += list(cells[:nc]) + [""] * max(0, nc - len(cells))
             grid.append(rowcells)
+    # 表边界(用户双条件): ①非首带tile出现caption ②该带行流含轴行(连续整数序列>10)
+    # → 在轴行处拆表(deb8de95 '二年交'新块自带[0..14]轴行;1674392a 轴行在首带且
+    #   caption带无轴行,双条件互锁不误拆)
+    def _axis_at(i):
+        vals = [c.strip() for c in grid[i] if c.strip()]
+        run = best = 0
+        prev = None
+        for v in vals:
+            if v.isdigit():
+                n = int(v)
+                run = run + 1 if (prev is not None and n == prev + 1) else 1
+                prev = n
+                best = max(best, run)
+            else:
+                prev = None
+                run = 0
+        return best > 10
+    splits = []
+    for lo, hi in cap_rows_global:
+        for i in range(max(1, lo), min(hi, len(grid))):
+            if _axis_at(i) and i not in splits:
+                splits.append(i)
+    meta["splits"] = sorted(set(splits))
     return grid, len(flat), meta
