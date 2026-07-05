@@ -213,7 +213,10 @@ def ocr_seg(im, timeout=240):
     up = meta["upsample"]
     row_bands, col_bands = meta["row_bands"], meta["col_bands"]
     rb, cb = meta["rb"], meta["cb"]
-    dark = np.asarray(im.convert("L")) < BIN_INK
+    _gray = np.asarray(im.convert("L"))
+    dark = _gray < BIN_INK
+    dark180 = _gray < BIN_FAINT                    # 淡灰内容(灰度129~180):d1752e16整张
+    #  数字印成浅灰,128全隐形→cell_ink判空→E欠数→裁多丢真值。180看得见,配API门控救回
     flat = [(r, c) for r in range(len(tiles)) for c in range(len(tiles[r]))
             if tiles[r][c] is not None]
     from concurrent.futures import ThreadPoolExecutor
@@ -231,6 +234,7 @@ def ocr_seg(im, timeout=240):
     # 行对齐(哪些行有内容)和列摆放(哪些格有内容)共用——空白判定要求极低墨。
     R, C = meta["rows"], meta["cols"]
     cell_ink = np.zeros((R, C), dtype=bool)
+    cell_gray = np.zeros((R, C), dtype=bool)       # 淡灰内容(180),仅当API确认时才启用(下方)
     for i in range(R):
         y0, y1 = rb[i] + 2, rb[i + 1] - 2
         if y1 <= y0:
@@ -248,6 +252,14 @@ def ocr_seg(im, timeout=240):
                 lm[:-s] |= line[s:]                #  保单年度底线的灰边使 row0 被误判
                 lm[s:] |= line[:-s]                #  有字,数据行错进表头(1674392a)
             cell_ink[i, j] = bool(((cnt >= 3) & ~lm).any())
+            if not cell_ink[i, j]:                 # 128判空的格才查灰(省算):180去线cnt≥3
+                sg = dark180[y0:y1, x0:x1]
+                cg = sg.sum(1); fg = sg.mean(1)
+                lg = fg > 0.7                      # 灰阈下线更满,门更高防框线灰边
+                lmg = lg.copy()
+                for s in (1, 2):
+                    lmg[:-s] |= lg[s:]; lmg[s:] |= lg[:-s]
+                cell_gray[i, j] = bool(((cg >= 3) & ~lmg).any())
 
     # 先解析全部 tile;**行数越界=废品**(行期望偏差≤1 的先验即废品检测器:实读 >
     # 期望+1 物理上不可能,必是错误页/幻觉)→绕过缓存重读一次(垃圾可能已污染缓存),
@@ -407,6 +419,18 @@ def ocr_seg(im, timeout=240):
         for c, (ci, cj) in enumerate(col_bands):
             cap, rows = parsed[(r, c)]
             E = [i for i in band_idx if cell_ink[i, ci:cj].any()]
+            # 淡灰内容救回(API门控):d1752e16整张数字印浅灰,128判空→E欠数→真值被裁多丢。
+            # 仅当【API实读非空行数 > E】(API确认有更多内容)时,从灰行(180判有墨、128判空)
+            # 按位置补足差额。幻觉(落在128&180都空的行)无灰墨→补不进→仍裁,不误纳;框线
+            # 灰边被cell_gray的frac>0.7+膨胀挡掉。灰行只在API确认时启用,平时零影响。
+            nz_k = sum(1 for x in rows if any(s.strip() for s in x))
+            if nz_k > len(E):
+                gray = [i for i in band_idx if i not in E and cell_gray[i, ci:cj].any()]
+                if gray:
+                    add = gray[:nz_k - len(E)]
+                    E = sorted(E + add)
+                    meta.setdefault("adopt", []).append(
+                        f"tile[{r}][{c}] 灰内容救回 +{len(add)}行(128判空/180有墨,API确认)")
             while len(rows) > len(E):              # 空行**条件丢弃**(仅实读超期望时):
                 empt = [k for k, x in enumerate(rows)      # 白pad后残影幻觉空行已绝源,
                         if not any(s.strip() for s in x)]  # 这里只兜画线后VLM老实输出的
