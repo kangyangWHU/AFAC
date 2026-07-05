@@ -161,6 +161,29 @@ def _parse_cap(raw):
     return cap, rows
 
 
+def _grid_reread(im, rb, cb, r0, r1, c0, c1, ci, cj, timeout):
+    """flat tile 抢救(方案B'):裁有墨包围盒[r0:r1]×[c0:c1] + 按骨架线画网格 → 重调,
+    逼VLM从竖排flat变规整表(实测 baf9 '1000⏎0⏎0'→[1000,0],[0,空])。返回 padding 到
+    full tile 列宽[ci:cj]的 rows。只对'API无<table>'的极少数废tile用,不碰正常tile。"""
+    from PIL import ImageDraw
+    core = im.crop((cb[c0], rb[r0], cb[c1], rb[r1])).convert("RGB")
+    sc = 3                                          # 放大让网格线清晰、小字可读
+    core = core.resize((core.width * sc, core.height * sc), Image.LANCZOS)
+    d = ImageDraw.Draw(core)
+    for i in range(r0, r1 + 1):
+        y = (rb[i] - rb[r0]) * sc
+        d.line([(0, y), (core.width, y)], fill=(0, 0, 0), width=2)
+    for j in range(c0, c1 + 1):
+        x = (cb[j] - cb[c0]) * sc
+        d.line([(x, 0), (x, core.height)], fill=(0, 0, 0), width=2)
+    tt = Image.new("RGB", (core.width + 2 * _EDGE_PAD, core.height + 2 * _EDGE_PAD),
+                   (255, 255, 255))
+    tt.paste(core, (_EDGE_PAD, _EDGE_PAD))
+    _, grows = _parse_cap(api.call_safe(tt, timeout=timeout))   # 已放大,不再_up
+    left, right = c0 - ci, cj - c1                  # 包围盒外的列(全空)左右补齐到full tile
+    return [[""] * left + g + [""] * right for g in grows]
+
+
 def _cap_rows(cap):
     """caption → 行流。API 会把 tile 顶部的**前表尾行/节头行**降格为 <table> 前的
     文本(deb8de95: '103 7455.02...'三行三角尾+'## 二年交/男性'节头全在 caption 里,
@@ -232,26 +255,38 @@ def ocr_seg(im, timeout=240):
     # 期望+1 物理上不可能,必是错误页/幻觉)→绕过缓存重读一次(垃圾可能已污染缓存),
     # 重读好则回写缓存;仍废 → 置空(补空,不投票不入表)
     parsed = {}
+    need_grid = []                                  # flat抢救待重调: (r,c,r0,r1,c0,c1,ci,cj)
     for r in range(len(row_bands)):
         ri, rj = row_bands[r]
         for c in range(len(col_bands)):
             ci, cj = col_bands[c]
-            cap, rows = _parse_cap(outs.get((r, c)))
+            raw = outs.get((r, c))
+            cap, rows = _parse_cap(raw)
             E_n = int(sum(1 for i in range(ri, rj) if cell_ink[i, ci:cj].any()))
             if not rows and tiles[r][c] is not None and E_n > 0:
                 # 有墨tile实读0行 = API重试耗尽后的静默空响应(空不入缓存,直接重调)。
                 # 废品检测只抓行数超界,实读0是另一半洞——老slicer的空tile重试丢失于
                 # 重写,全量夜跑抽风受害十余张的病根
-                raw2 = api.call_safe(_up(tiles[r][c], up), timeout=timeout)
-                cap, rows = _parse_cap(raw2)
+                raw = api.call_safe(_up(tiles[r][c], up), timeout=timeout)
+                cap, rows = _parse_cap(raw)
+            # flat抢救(方案B'):tile有内容却返回【无<table>】=VLM放弃表结构竖排输出
+            # (稀疏tile左上角几个数被拍扁成一竖列,丢列位置)。裁有墨包围盒+画网格逼它
+            # 结构化。只打这类废tile(全A榜~17个),正常tile一律不动、零副作用。
+            if (tiles[r][c] is not None and raw and "<table" not in raw.lower()
+                    and any(any(s.strip() for s in x) for x in rows)):
+                ir = [i for i in range(ri, rj) if cell_ink[i, ci:cj].any()]
+                ic = [j for j in range(ci, cj) if cell_ink[ri:rj, j].any()]
+                if ir and ic:
+                    need_grid.append((r, c, ir[0], ir[-1] + 1, ic[0], ic[-1] + 1, ci, cj))
             parsed[(r, c)] = (cap, rows)
-            if tiles[r][c] is not None and len(rows) != E_n:
-                pos = "首带" if r == 0 else ("末带" if r == len(row_bands) - 1 else "中带!")
-                badc = sum(1 for x in rows if len(x) != cj - ci)
-                meta.setdefault("audit", []).append(
-                    f"tile[{r}][{c}]({pos}) 行:期望{E_n}实读{len(rows)} 列宽不符行数:{badc}/{len(rows)}")
-                # 行整体精确的先验:只有首带(表头拆行/斜线)和末带(稀疏)允许偏差,
-                # 中带偏差=异常(骨架错/API抽风),审计日志供人工核查
+    if need_grid:                                   # flat重调批量并发(与主tile调用同模式)
+        def gwork(a):
+            return (a[0], a[1]), _grid_reread(im, rb, cb, a[2], a[3], a[4], a[5], a[6], a[7], timeout)
+        with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENCY, len(need_grid))) as ex:
+            for (r, c), grows in ex.map(gwork, need_grid):
+                if grows:
+                    parsed[(r, c)] = (parsed[(r, c)][0], grows)
+                    meta.setdefault("adopt", []).append(f"tile[{r}][{c}] flat→画网格重读")
 
     # **列校准**(行列职责不对称:行估计=真值,列在稀疏区/标签区可能少):非空 tile 的行
     # 格数众数若一致 = 骨架列数+k(k>0),且 ≥2 个行带的 tile 同票(或该列带只有 1 个非空
@@ -296,11 +331,11 @@ def ocr_seg(im, timeout=240):
                 continue
             cap, rows = parsed[(r, c)]
             enc = band_nc[c]
-            E_n = int(sum(1 for i in range(ri, rj) if cell_ink[i, ci:cj].any()))
-            nz = sum(1 for x in rows if any(s.strip() for s in x))
-            col_bad = rows and not (enc - 5 <= _wstar(rows, enc) <= enc + 1)
-            row_bad = rows and (nz < E_n - 1 or nz > E_n + 1)   # 行越界±1(欠读/超读统一)
-            if not (col_bad or row_bad):
+            # 自愈=切列重读,只治【列多读】(劈裂/口吃/重叠 W*>nc+1)。
+            # 列少读(W*<nc)对稀疏表正常——边缘空列VLM少读天经地义,切列救不了纯浪费,
+            # 交装配补空;行数不符是行轴问题→投票(佐证加行)+E对齐。只留上界单向触发。
+            col_bad = rows and _wstar(rows, enc) > enc + 1
+            if not col_bad:
                 continue
             # 自愈=列边界对半重读,读取即真值(用户终稿:3x不可靠,不做二次质检;
             # 半块+1行首空格由溢出弃空格消化;装配照常按E/期望收束)
@@ -322,11 +357,13 @@ def ocr_seg(im, timeout=240):
                       for i in range(n_)]
             if joined:
                 parsed[(r, c)] = (cap, joined)     # 保留原caption!拆表双条件与行流回收
-                meta.setdefault("adopt", []).append(    # 都靠它(抹掉曾致deb8表数3→2)
-                    f"tile[{r}][{c}] 自愈:对半为真 W*{_wstar(joined, enc)}/exp{enc}")
+                w = _wstar(joined, enc)            # 都靠它(抹掉曾致deb8表数3→2)
+                bad = "" if enc - 5 <= w <= enc + 1 else " ⚠未收敛"   # 唯一可能fail的信号:
+                meta.setdefault("audit" if bad else "adopt", []).append(  # 自愈跑了仍不符
+                    f"tile[{r}][{c}] 自愈:对半为真 W*{w}/exp{enc}{bad}")
             else:
                 meta.setdefault("audit", []).append(
-                    f"tile[{r}][{c}] 对半空读,以骨架为真 W*{_wstar(rows, enc)}/exp{enc} 行{nz}/E{E_n}")
+                    f"tile[{r}][{c}] 自愈:对半空读⚠ W*{_wstar(rows, enc)}/exp{enc}")
 
     grid = []
     cap_rows_global = []                       # (条件1)非首带出现caption的带 → 其全局行范围
@@ -400,10 +437,10 @@ def ocr_seg(im, timeout=240):
                 nc = band_nc[c]
                 if len(cells) > nc:                # 溢出弃空格:先丢空格格(零信息)再截尾
                     need = len(cells) - nc         # (bac0aeac 13格=11值+''+0.00,截尾杀
-                    kept = []                      #  真值0.00;丢''零损失)
-                    for s in cells:
-                        if need and not s.strip():
-                            need -= 1; continue
+                    kept = []                      #  真值0.00;丢''零损失)。截掉的非空=tile
+                    for s in cells:                #  列边界重叠/VLM末值口吃的冗余副本,
+                        if need and not s.strip():  #  真值由拥属tile保留(3792d522 136格截断
+                            need -= 1; continue     #  实测真丢0)——补空/截断都是正常操作,不报
                         kept.append(s)
                     cells = kept
                 rowcells += list(cells[:nc]) + [""] * max(0, nc - len(cells))
