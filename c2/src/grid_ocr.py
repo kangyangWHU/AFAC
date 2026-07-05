@@ -10,6 +10,7 @@
 - 列错位表(rows_misaligned)是唯一例外:骨架不可信,回退整段自由读(交上层 ocr_table)。
 """
 import numpy as np
+from collections import Counter
 from PIL import Image
 
 import api_client as api
@@ -243,19 +244,6 @@ def ocr_seg(im, timeout=240):
                 # 重写,全量夜跑抽风受害十余张的病根
                 raw2 = api.call_safe(_up(tiles[r][c], up), timeout=timeout)
                 cap, rows = _parse_cap(raw2)
-            if len(rows) > E_n + 1 and tiles[r][c] is not None:
-                raw2 = api.call_safe(_up(tiles[r][c], up), timeout=timeout, use_cache=False)
-                cap2, rows2 = _parse_cap(raw2)
-                if rows2 and len(rows2) <= E_n + 1:      # 重读合格 → 抽风实锤,用重读
-                    api.write_cache(_up(tiles[r][c], up), raw2)
-                    cap, rows = cap2, rows2
-                elif rows2 and len(rows2) == len(rows):  # 两次一致超界 → 骨架真欠(微距
-                    api.write_cache(_up(tiles[r][c], up), raw2)   # 并行×2),保留内容按序
-                    cap, rows = cap2, rows2              # 入表(网格容期望+1,尾行裁,不冤杀)
-                    meta.setdefault("adopt", []).append(
-                        f"tile[{r}][{c}] 双一致超界保留 期望{E_n}实读{len(rows)}")
-                else:                                    # 重读空/错/不一致 → 垃圾置空
-                    cap, rows = "", []
             parsed[(r, c)] = (cap, rows)
             if tiles[r][c] is not None and len(rows) != E_n:
                 pos = "首带" if r == 0 else ("末带" if r == len(row_bands) - 1 else "中带!")
@@ -269,7 +257,6 @@ def ocr_seg(im, timeout=240):
     # 格数众数若一致 = 骨架列数+k(k>0),且 ≥2 个行带的 tile 同票(或该列带只有 1 个非空
     # tile) → 采纳 nc+k(5fdf46b0 三标签列被并 1 列,429 行每行一致多读 2 格=最强信号;
     # 稀疏空 tile 不投票)。
-    from collections import Counter
     band_nc = []
     for c, (ci, cj) in enumerate(col_bands):
         nc = cj - ci
@@ -293,6 +280,54 @@ def ocr_seg(im, timeout=240):
                 nc = top
         band_nc.append(nc)
 
+    # ── 统一自愈(用户设计,顺序:①空解释已由E对齐承担 ②一致性投票(上面的列校准/
+    # 下面的佐证)已改完期望 ③与【最终期望】仍不符的孤立tile=读错 → 升采样3×重读
+    # → 对半重读 → 放弃。行列同构:列看行宽众数 vs band_nc;行看非空行数 vs E(欠读
+    # <E-1 也走此梯,封 1829 欠读洞)。先投票后自愈——5fdf带0(14→17,18票一致)此前被
+    # 先送自愈白烧50次调用的教训。
+    def _wstar(rws, dft):
+        cs = [len(x) for x in rws if any(s.strip() for s in x)]
+        return Counter(cs).most_common(1)[0][0] if cs else dft
+    for r in range(len(row_bands)):
+        ri, rj = row_bands[r]
+        for c in range(len(col_bands)):
+            ci, cj = col_bands[c]
+            if tiles[r][c] is None:
+                continue
+            cap, rows = parsed[(r, c)]
+            enc = band_nc[c]
+            E_n = int(sum(1 for i in range(ri, rj) if cell_ink[i, ci:cj].any()))
+            nz = sum(1 for x in rows if any(s.strip() for s in x))
+            col_bad = rows and not (enc - 5 <= _wstar(rows, enc) <= enc + 1)
+            row_bad = rows and (nz < E_n - 1 or nz > E_n + 1)   # 行越界±1(欠读/超读统一)
+            if not (col_bad or row_bad):
+                continue
+            # 自愈=列边界对半重读,读取即真值(用户终稿:3x不可靠,不做二次质检;
+            # 半块+1行首空格由溢出弃空格消化;装配照常按E/期望收束)
+            mid = (ci + cj) // 2
+            halves = []
+            for lo, hi in ((ci, mid), (mid, cj)):
+                if hi <= lo:
+                    halves.append([]); continue
+                core = im.crop((cb[lo], rb[ri], cb[hi], rb[rj])).convert("RGB")
+                tt = Image.new("RGB", (core.width + 2 * _EDGE_PAD,
+                                       core.height + 2 * _EDGE_PAD), (255, 255, 255))
+                tt.paste(core, (_EDGE_PAD, _EDGE_PAD))
+                _, hrows = _parse_cap(api.call_safe(_up(tt, up), timeout=timeout))
+                halves.append(hrows)
+            hl, hr_ = halves
+            n_ = max(len(hl), len(hr_)) if (hl or hr_) else 0
+            joined = [(hl[i] if i < len(hl) else [""] * (mid - ci))
+                      + (hr_[i] if i < len(hr_) else [""] * (cj - mid))
+                      for i in range(n_)]
+            if joined:
+                parsed[(r, c)] = (cap, joined)     # 保留原caption!拆表双条件与行流回收
+                meta.setdefault("adopt", []).append(    # 都靠它(抹掉曾致deb8表数3→2)
+                    f"tile[{r}][{c}] 自愈:对半为真 W*{_wstar(joined, enc)}/exp{enc}")
+            else:
+                meta.setdefault("audit", []).append(
+                    f"tile[{r}][{c}] 对半空读,以骨架为真 W*{_wstar(rows, enc)}/exp{enc} 行{nz}/E{E_n}")
+
     grid = []
     cap_rows_global = []                       # (条件1)非首带出现caption的带 → 其全局行范围
     for r, (ri, rj) in enumerate(row_bands):
@@ -300,7 +335,6 @@ def ocr_seg(im, timeout=240):
         aligned = {}
         for c, (ci, cj) in enumerate(col_bands):
             cap, rows = parsed[(r, c)]
-            rows = [_unmerge_row(x, cj - ci) for x in rows]   # 行级并列修复(半线表)
             E = [i for i in band_idx if cell_ink[i, ci:cj].any()]
             while len(rows) > len(E):              # 空行**条件丢弃**(仅实读超期望时):
                 empt = [k for k, x in enumerate(rows)      # 白pad后残影幻觉空行已绝源,
@@ -364,6 +398,14 @@ def ocr_seg(im, timeout=240):
                 E, rows = aligned[c]
                 cells = rows[E.index(i)] if i in E and E.index(i) < len(rows) else []
                 nc = band_nc[c]
+                if len(cells) > nc:                # 溢出弃空格:先丢空格格(零信息)再截尾
+                    need = len(cells) - nc         # (bac0aeac 13格=11值+''+0.00,截尾杀
+                    kept = []                      #  真值0.00;丢''零损失)
+                    for s in cells:
+                        if need and not s.strip():
+                            need -= 1; continue
+                        kept.append(s)
+                    cells = kept
                 rowcells += list(cells[:nc]) + [""] * max(0, nc - len(cells))
             grid.append(rowcells)
         if extra_votes >= 2 or (extra_votes == 1 and len(col_bands) == 1):
