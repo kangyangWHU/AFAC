@@ -21,7 +21,8 @@ import hashlib
 import requests
 from PIL import Image
 
-from config import API_URL, API_KEY, API_USER_IDS, CACHE_DIR
+from config import (API_URL, API_KEY, API_USER_IDS, CACHE_DIR,
+                    API_TIMEOUT, API_RETRIES, API_BACKOFF_CAP)
 
 Image.MAX_IMAGE_PIXELS = None        # 解除 PIL 超大图保护（赛题图可达 3.8 亿像素）
 CACHE_UP_DIR = os.path.join(os.path.dirname(CACHE_DIR), "cache_up")  # 上采样 tile 缓存(分离)
@@ -182,7 +183,7 @@ def _find_md_in_obj(obj):
     return None
 
 
-def call(image, *, fmt="PNG", timeout=120, retries=8, use_cache=True,
+def call(image, *, fmt="PNG", timeout=API_TIMEOUT, retries=API_RETRIES, use_cache=True,
          user_id=None, cache_dir=None):
     """调用 FinixDoc-VL，返回 markdown 字符串。
 
@@ -219,7 +220,7 @@ def call(image, *, fmt="PNG", timeout=120, retries=8, use_cache=True,
             )
             if resp.status_code != 200:
                 last_err = "HTTP %d: %s" % (resp.status_code, resp.text[:200])
-                time.sleep(min(2 ** attempt, 30) + random.uniform(0, 2))
+                time.sleep(min(2 ** attempt, API_BACKOFF_CAP) + random.uniform(0, 2))
                 continue
             md, _ = _parse_response(resp)
             if _looks_like_error(md):            # 服务端错误信封 → 当失败，重试
@@ -227,7 +228,7 @@ def call(image, *, fmt="PNG", timeout=120, retries=8, use_cache=True,
                 if "Error code: 400" in md or "aspect ratio" in md:
                     break                        # 永久性错误(参数/图形不合法):重试无意义,
                 #                                  fail-fast(此前 8 次重试×4 轮白烧几分钟)
-                time.sleep(min(2 ** attempt, 30) + random.uniform(0, 2))
+                time.sleep(min(2 ** attempt, API_BACKOFF_CAP) + random.uniform(0, 2))
                 continue
             # 截断（输出超 ~12k 上限）**不写缓存**：避免半截结果污染缓存，交由
             # 上层 _split_call_merge 拆小重读、再 write_cache 回填完整结果。
@@ -237,7 +238,7 @@ def call(image, *, fmt="PNG", timeout=120, retries=8, use_cache=True,
             return md
         except requests.RequestException as e:
             last_err = str(e)
-            time.sleep(min(2 ** attempt, 30) + random.uniform(0, 2))
+            time.sleep(min(2 ** attempt, API_BACKOFF_CAP) + random.uniform(0, 2))
     raise RuntimeError("FinixDoc-VL 调用失败（重试 %d 次）：%s" % (retries, last_err))
 
 

@@ -71,12 +71,10 @@ def slice_grid(im):
     # 让渡为省调用把列放大到37~187是密集内容错误的第一元凶;矮宽表也不例外)
     row_bands = _chunk(rb, MAX_TILE_ROWS)
     col_bands = _chunk(cb, MAX_TILE_COLS)
-    if edge >= UP_EDGE and g.size <= TILE_MAX * TILE_MAX:
-        # 小段快路:整段像素 ≤ 单tile预算 且 格子大(非密集)——切分的两个理由(图太大/
-        # 格太小)都不存在,整段一口读。标题条(4400×96,字缝被数成上百"列")不再被
-        # 15列上限切成8个tile;密集段(1de69d49尾表edge≈31)不走快路,读并防护不破。
-        # 超比例仍由下方180:1对半环节兜
-        row_bands, col_bands = [(0, R)], [(0, C)]
+    # 小段快路已退役(旧代码):它把整段塌成单tile整读,本为省调用/防标题条切碎,但——
+    # ①标题/文字在crop已分流,不进slice_grid,这里全是表格;②表格是真列,按列切后骨架
+    # 拼接原生无损;③整读制造"单tile无冗余+极端宽比"脆弱点(d1752e16 5行×71列 80:1整读
+    # 失败→5行全丢)。现拼接成熟,一律tile+拼接更鲁棒(一次失败只丢一带,且真列可拼回)。
     # 像素长宽比约束:API 拒收 >200:1(400)。矮表单tile可到 241:1(1de69d49 尾表 2行
     # 7000×29px)——列带宽 > 180×最矮行带高 时对半加密列带(切在列边界上,骨架拼接原生
     # 支持多tile;不垫白,内容无损)
@@ -272,19 +270,49 @@ def ocr_seg(im, timeout=240):
             # flat抢救(方案B'):tile有内容却返回【无<table>】=VLM放弃表结构竖排输出
             # (稀疏tile左上角几个数被拍扁成一竖列,丢列位置)。裁有墨包围盒+画网格逼它
             # 结构化。只打这类废tile(全A榜~17个),正常tile一律不动、零副作用。
-            if (tiles[r][c] is not None and raw and "<table" not in raw.lower()
-                    and any(any(s.strip() for s in x) for x in rows)):
+            # 判据看 raw 有内容(非rows)——单值flat如'71557.9'被parse_tile解析成空rows,
+            # 但raw明明有值,若看rows会漏救(71557.9在v2/v3都丢)。raw非空+无table即抢救。
+            if (tiles[r][c] is not None and raw and raw.strip()
+                    and "<table" not in raw.lower()):
                 ir = [i for i in range(ri, rj) if cell_ink[i, ci:cj].any()]
                 ic = [j for j in range(ci, cj) if cell_ink[ri:rj, j].any()]
                 if ir and ic:
-                    need_grid.append((r, c, ir[0], ir[-1] + 1, ic[0], ic[-1] + 1, ci, cj))
+                    if len(ic) == 1 or len(ir) == 1:
+                        # 单列/单行:几何完全确定(墨只在一列→竖排,只在一行→横排),
+                        # 直接拼接,不画网格不调API(省一次调用;行号列/表头行的主场)
+                        vals = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+                        body = [[v] for v in vals] if len(ic) == 1 else [vals]
+                        off = ic[0] - ci
+                        rows = [(([""] * off + g)[:cj - ci] + [""] * (cj - ci))[:cj - ci]
+                                for g in body]
+                        meta.setdefault("adopt", []).append(
+                            f"tile[{r}][{c}] flat→几何直拼(单{'列' if len(ic) == 1 else '行'})")
+                    else:                              # 多行×多列真2D歧义 → 画网格问API
+                        need_grid.append((r, c, ir[0], ir[-1] + 1, ic[0], ic[-1] + 1, ci, cj, raw))
             parsed[(r, c)] = (cap, rows)
     if need_grid:                                   # flat重调批量并发(与主tile调用同模式)
         def gwork(a):
-            return (a[0], a[1]), _grid_reread(im, rb, cb, a[2], a[3], a[4], a[5], a[6], a[7], timeout)
+            return a, _grid_reread(im, rb, cb, a[2], a[3], a[4], a[5], a[6], a[7], timeout)
         with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENCY, len(need_grid))) as ex:
-            for (r, c), grows in ex.map(gwork, need_grid):
-                if grows:
+            for a, grows in ex.map(gwork, need_grid):
+                r, c, r0, r1, c0, c1, ci, cj, raw = a
+                if not grows:
+                    # 网格失败(如1×1单值,API不把单数字当表)→ 兜底按包围盒几何放flat值,
+                    # 至少保住内容(71557.9这类曾整个丢失)。竖排流按行/列布局:
+                    vals = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+                    nr, ncol = r1 - r0, c1 - c0
+                    if not vals:
+                        continue
+                    if ncol == 1:                  # 单列: 每值一行(竖排列, 如序号列)
+                        grows = [[v] for v in vals]
+                    elif nr == 1:                  # 单行: 所有值一行(横排, 如列号表头)
+                        grows = [vals]
+                    else:                          # 多行多列且网格没救回: 按行填(保内容)
+                        grows = [[v] for v in vals]
+                    grows = [[""] * (c0 - ci) + g + [""] * (cj - c1) for g in grows]
+                    parsed[(r, c)] = (parsed[(r, c)][0], grows)
+                    meta.setdefault("adopt", []).append(f"tile[{r}][{c}] flat→几何兜底")
+                else:
                     parsed[(r, c)] = (parsed[(r, c)][0], grows)
                     meta.setdefault("adopt", []).append(f"tile[{r}][{c}] flat→画网格重读")
 
@@ -430,11 +458,20 @@ def ocr_seg(im, timeout=240):
                     k, merged = hits[0]
                     rows = rows[:k] + [merged] + rows[k + 2:]
             aligned[c] = (E, rows)
+            # 真损失上报(audit找问题,不藏问题):经投票/自愈/caption/拆行后仍不一致的才是问题
+            #   补空有墨位: 骨架该tile有E个有墨行,实读不足→末尾几个有墨行拿不到内容,补空丢行
+            #   裁多有内容: 实读>E,多出的行有内容→被裁(佐证加行至多救1行),丢内容
+            nz_rows = [x for x in rows if any(s.strip() for s in x)]
+            pos = "首带" if r == 0 else ("末带" if r == len(row_bands) - 1 else "中带!")
+            if len(nz_rows) > len(E) + 1:              # 裁多(+1留给佐证加行):在aligned阶段判,
+                meta.setdefault("audit", []).append(   # 因多余行装配时就丢了,最终grid看不到
+                    f"tile[{r}][{c}]({pos}) 裁多丢行 实读{len(nz_rows)}>期望{len(E)},多余被裁")
             if cap and r > 0:
                 cap_rows_global.append((len(grid), len(grid) + len(band_idx)))
         extra_votes = sum(1 for c in range(len(col_bands))
                           if len(aligned[c][1]) == len(aligned[c][0]) + 1)
         #                 ^ 恰好期望+1 才有投票权(越界废品已在解析层清除,双保险)
+        pos = "首带" if r == 0 else ("末带" if r == len(row_bands) - 1 else "中带!")
         for i in band_idx:                         # 行以骨架为准:多裁少补;唯一例外见下
             rowcells = []
             for c, (ci, cj) in enumerate(col_bands):
@@ -451,6 +488,11 @@ def ocr_seg(im, timeout=240):
                     cells = kept
                 rowcells += list(cells[:nc]) + [""] * max(0, nc - len(cells))
             grid.append(rowcells)
+            # 补空丢行=看【最终grid行】:用组装自己的判空(cell_ink,与E同一把尺,不另造阈值)
+            # ——骨架判此行有墨(cell_ink任一列真),装配出的这行却全空 = 有墨位补成空,真丢。
+            if cell_ink[i].any() and not any(s.strip() for s in rowcells):
+                meta.setdefault("audit", []).append(
+                    f"骨架行{i}({pos}) 补空丢行 cell_ink判有墨却装配成全空")
         if extra_votes >= 2 or (extra_votes == 1 and len(col_bands) == 1):
             meta.setdefault("adopt", []).append(
                 f"带{r} 佐证加行 +1行({extra_votes}票)")
