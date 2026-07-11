@@ -16,8 +16,8 @@ import re
 import unicodedata
 from rapidfuzz.distance import Levenshtein
 
-from config import TABLE_OPEN_RE, TABLE_CLOSE_RE
-from teds import teds_score, _first_table
+from common.config import TABLE_OPEN_RE, TABLE_CLOSE_RE
+from metrics.teds import teds_score, _first_table
 
 # 同时匹配整段 <table>...</table>
 _TABLE_BLOCK_RE = re.compile(TABLE_OPEN_RE + r".*?" + TABLE_CLOSE_RE,
@@ -310,7 +310,7 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     if args.selftest:
-        from config import TRAIN_LONG_DIR, TRAIN_TABLE_DIR
+        from common.config import TRAIN_LONG_DIR, TRAIN_TABLE_DIR
         for tag, d in [("LONG", TRAIN_LONG_DIR), ("TABLE", TRAIN_TABLE_DIR)]:
             mds = sorted(glob.glob(os.path.join(d, "mds", "*.md")))[:5]
             pairs_same, pairs_pert = [], []

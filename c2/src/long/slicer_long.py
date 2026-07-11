@@ -67,7 +67,7 @@ def slice_long(im, target_h=5000, search=500, dark_thresh=200, min_h=800):
 if __name__ == "__main__":
     import glob
     import os
-    from config import TRAIN_LONG_DIR
+    from common.config import TRAIN_LONG_DIR
     f = sorted(glob.glob(os.path.join(TRAIN_LONG_DIR, "images", "*.jpg")))[0]
     im = Image.open(f)
     for H in (3000, 5000, 8000):

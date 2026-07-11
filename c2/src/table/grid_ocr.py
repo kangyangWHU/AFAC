@@ -13,11 +13,11 @@ import numpy as np
 from collections import Counter
 from PIL import Image
 
-import api_client as api
-from config import MAX_CONCURRENCY, API_USER_IDS, BIN_INK, BIN_FAINT
-from geom import row_bnds, col_bnds, rows_misaligned, LINE_FULL
-from slicer_table import MAX_TILE_ROWS, MAX_TILE_COLS, UP_EDGE, UP_TARGET, TILE_MAX
-from stitch_table import parse_tile
+import common.api_client as api
+from common.config import MAX_CONCURRENCY, API_USER_IDS, BIN_INK, BIN_FAINT
+from table.geom import row_bnds, col_bnds, rows_misaligned, LINE_FULL
+from table.slicer_table import MAX_TILE_ROWS, MAX_TILE_COLS, UP_EDGE, UP_TARGET, TILE_MAX
+from table.stitch_table import parse_tile
 
 _BLANK_TILE_INK = 0.001   # tile 墨率<此=空白,不调 API,按骨架补空 cell
 _EDGE_PAD = 3             # tile 四周留白px(边界在缝中心,±3 不吃邻格墨)

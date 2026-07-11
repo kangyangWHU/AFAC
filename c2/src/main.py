@@ -20,40 +20,36 @@ import traceback
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
-from config import (A_LONG_DIR, A_TABLE_DIR, TRAIN_LONG_DIR, TRAIN_TABLE_DIR,
-                    OUT_DIR)
-from preprocess import prep
-from classify import classify
-from run_long import run_smart
-from run_table import parse_table as run_table_one   # 三段式:crop → ocr → merge
-from heading_norm import roman_to_unicode, subscript_to_latex
+from common.config import (A_LONG_DIR, A_TABLE_DIR, TRAIN_LONG_DIR, TRAIN_TABLE_DIR,
+                    OUT_DIR, RUN_TARGETS)
+from common.preprocess import prep
+from long.run_long import run_smart
+from table.run_table import parse_table as run_table_one   # 三段式:crop → ocr → merge
 
 
-def process_image(path, target_h=5000, timeout=240):
-    """单图 → (markdown, kind, n_calls)。异常时返回空串。"""
+def process_image(path, kind, target_h=5000, timeout=240):
+    """单图 → (markdown, kind, n_calls)。kind 由调用方按目录给定。异常时返回空串。"""
     im = prep(Image.open(path))
-    kind = classify(im)
     if kind == "long":
         md, ncalls = run_smart(im, target_h=target_h, timeout=timeout)
     else:
         md, ncalls, _ = run_table_one(im, timeout=timeout)
-    # 不转半角:VLM 与 GT 都用中文全角标点(，。：；),转半角反而拉低分。
-    # 仅保留 GT 确用的规范:罗马数字→unicode、下标→LaTeX。
-    md = subscript_to_latex(roman_to_unicode(md))
     return md, kind, ncalls
 
 
-def _iter_images(dirs):
-    for d in dirs:
+def _iter_images(targets):
+    """targets: [(目录, kind)] → 依次产出 (图片路径, kind)。"""
+    for d, kind in targets:
         for ext in ("*.jpg", "*.png", "*.jpeg"):
             for f in sorted(glob.glob(os.path.join(d, ext))):
-                yield f
+                yield f, kind
 
 
-def _run_one(path, target_h, timeout):
+def _run_one(item, target_h, timeout):
+    path, kind = item
     name = os.path.basename(path)
     try:
-        md, kind, ncalls = process_image(path, target_h, timeout)
+        md, kind, ncalls = process_image(path, kind, target_h, timeout)
     except Exception as e:
         print(f"  {name} 失败: {e}", flush=True)
         traceback.print_exc()
@@ -61,9 +57,9 @@ def _run_one(path, target_h, timeout):
     return name, md, kind, ncalls
 
 
-def run_batch(image_dirs, out_csv, target_h=5000, timeout=240, limit=None):
-    """处理一批目录里的图片，写 submission.csv（file_name, ground_truth）。"""
-    files = list(_iter_images(image_dirs))
+def run_batch(targets, out_csv, target_h=5000, timeout=240, limit=None):
+    """处理一批 (目录, kind)，写 submission.csv（file_name, ground_truth）。"""
+    files = list(_iter_images(targets))
     if limit:
         files = files[:limit]
     print(f"待处理图片 {len(files)} 张 → {out_csv}")
@@ -79,7 +75,8 @@ def run_batch(image_dirs, out_csv, target_h=5000, timeout=240, limit=None):
             done[name] = md
             print(f"  [{i+1}/{len(files)}] {name} kind={kind} calls={ncalls} "
                   f"len={len(md)} 累计{time.time()-t0:.0f}s", flush=True)
-    rows = [(os.path.basename(p), done.get(os.path.basename(p), "")) for p in files]
+    rows = [(os.path.basename(p), done.get(os.path.basename(p), ""))
+            for p, _ in files]
 
     # 写 CSV：UTF-8，全引用，换行/逗号自动转义
     with open(out_csv, "w", encoding="utf-8", newline="") as f:
@@ -92,7 +89,7 @@ def run_batch(image_dirs, out_csv, target_h=5000, timeout=240, limit=None):
 
 def train_eval(n=8, target_h=5000, timeout=240):
     """训练集自评：各取 n 张 LONG/TABLE，跑流水线并与 GT 比三指标。"""
-    from evaluate import evaluate_one
+    from metrics.evaluate import evaluate_one
 
     def pick(dir_, n):
         mds = sorted(glob.glob(os.path.join(dir_, "mds", "*.md")),
@@ -109,7 +106,7 @@ def train_eval(n=8, target_h=5000, timeout=240):
                 continue
             gt = open(md, encoding="utf-8").read()
             try:
-                pred, kind, _ = process_image(img, target_h, timeout)
+                pred, kind, _ = process_image(img, tag, target_h, timeout)
             except Exception as e:
                 print(f"  {os.path.basename(img)[:8]} 失败: {e}")
                 continue
@@ -129,7 +126,8 @@ def train_eval(n=8, target_h=5000, timeout=240):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--images", nargs="*", help="图片目录（可多个）")
+    ap.add_argument("--images", nargs="*", help="图片目录（可多个，需配 --kind）")
+    ap.add_argument("--kind", choices=["long", "table"], help="--images 的类别")
     ap.add_argument("--a_test", action="store_true", help="跑 A 榜两目录")
     ap.add_argument("--train_eval", action="store_true", help="训练集自评(带GT)")
     ap.add_argument("--out", default=os.path.join(OUT_DIR, "submission.csv"))
@@ -142,11 +140,16 @@ def main():
     if args.train_eval:
         train_eval(args.n, args.target_h, args.timeout)
     elif args.a_test:
-        dirs = [os.path.join(A_LONG_DIR, "images"),
-                os.path.join(A_TABLE_DIR, "images")]
-        run_batch(dirs, args.out, args.target_h, args.timeout, args.limit)
+        targets = [(os.path.join(A_LONG_DIR, "images"), "long"),
+                   (os.path.join(A_TABLE_DIR, "images"), "table")]
+        run_batch(targets, args.out, args.target_h, args.timeout, args.limit)
     elif args.images:
-        run_batch(args.images, args.out, args.target_h, args.timeout, args.limit)
+        if not args.kind:
+            ap.error("--images 需配 --kind long|table")
+        targets = [(d, args.kind) for d in args.images]
+        run_batch(targets, args.out, args.target_h, args.timeout, args.limit)
+    elif RUN_TARGETS:
+        run_batch(RUN_TARGETS, args.out, args.target_h, args.timeout, args.limit)
     else:
         ap.print_help()
 

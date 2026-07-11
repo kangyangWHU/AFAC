@@ -6,7 +6,7 @@
 import os
 
 # ---- 目录锚点 ----
-SRC_DIR = os.path.dirname(os.path.abspath(__file__))          # c2/src
+SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # c2/src（本文件在 src/common/）
 C2_DIR = os.path.dirname(SRC_DIR)                              # c2
 DATA_DIR = os.path.join(C2_DIR, "data")
 
@@ -22,6 +22,13 @@ A_LONG_DIR = os.path.join(
     DATA_DIR, "AFAC A榜评测数据集(2)_extracted", "finix_huge_long_rest_A")
 A_TABLE_DIR = os.path.join(
     DATA_DIR, "AFAC A榜评测数据集(2)_extracted", "finix_huge_table_rest_A")
+
+# ---- 批处理目标：(图片目录, kind)，kind ∈ {"long", "table"}。----
+# main.py 默认跑此列表，不再靠长宽比自动分类。按需自行填/改要处理的目录。
+RUN_TARGETS = [
+    # (os.path.join(A_LONG_DIR, "images"), "long"),
+    # (os.path.join(A_TABLE_DIR, "images"), "table"),
+]
 
 # ---- 输出目录 ----
 OUT_DIR = os.path.join(C2_DIR, "out")

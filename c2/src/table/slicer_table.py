@@ -15,7 +15,7 @@ import os
 import numpy as np
 from PIL import Image
 
-from geom import (_runlen_lines, _panel_seams, split_table_texts,
+from table.geom import (_runlen_lines, _panel_seams, split_table_texts,
                   _gap_lines, _boundaries, column_cuts)
 
 Image.MAX_IMAGE_PIXELS = None
@@ -248,7 +248,7 @@ def slice_table(im, tile_max=TILE_MAX, blank_ink=BLANK_INK, peel=True,
 if __name__ == "__main__":
     import glob
     import os
-    from config import TRAIN_TABLE_DIR
+    from common.config import TRAIN_TABLE_DIR
     files = sorted(glob.glob(os.path.join(TRAIN_TABLE_DIR, "mds", "*.md")),
                    key=os.path.getsize)
     for md in [files[len(files) // 2], files[5], glob.glob(

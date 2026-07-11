@@ -14,14 +14,14 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
-import api_client as api
-from config import TRAIN_TABLE_DIR, API_USER_IDS
-from preprocess import prep
-from slicer_table import slice_table
-from crop import crop
-from grid_ocr import ocr_seg, _up, _ASPECT_SAFE, _EDGE_PAD
-from stitch_table import stitch_table, parse_tile, parse_tile_segments, rows_to_html
-from evaluate import table_teds, text_edit_loss
+import common.api_client as api
+from common.config import TRAIN_TABLE_DIR, API_USER_IDS
+from common.preprocess import prep
+from table.slicer_table import slice_table
+from table.crop import crop
+from table.grid_ocr import ocr_seg, _up, _ASPECT_SAFE, _EDGE_PAD
+from table.stitch_table import stitch_table, parse_tile, parse_tile_segments, rows_to_html
+from metrics.evaluate import table_teds, text_edit_loss
 
 
 
@@ -125,7 +125,7 @@ def _repair_bad_tile(img, html, reason, timeout, expected_rows=None, cache_dir=N
 def _refine_bad_tiles(tiles, outs, meta, timeout=240, upsample=1, cache_dir=None):
     """对所有高置信坏 tile 局部裁剪重读。upsample>1 时坏块按上采样后的图重读、
     回写进 cache_dir(与原始缓存分离)。"""
-    from config import MAX_CONCURRENCY
+    from common.config import MAX_CONCURRENCY
     row_cells = meta.get("row_cells", []) if meta else []
     todo = []
     for r in range(len(outs)):
@@ -168,7 +168,7 @@ def _call_grid(tiles, timeout=240, upsample=1, cache_dir=None):
     故对"非空白却空"的 tile 做多轮重试(降并发避开限流)，直到拿到内容或轮次用尽，
     保证结果可复现、不随机丢行。
     """
-    from config import MAX_CONCURRENCY
+    from common.config import MAX_CONCURRENCY
     flat = [(r, c) for r in range(len(tiles))
             for c in range(len(tiles[r])) if tiles[r][c] is not None]
 

@@ -13,10 +13,10 @@ import time
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
-from config import TRAIN_TABLE_DIR, OUT_DIR
-from preprocess import prep
-from run_table import parse_table
-from evaluate import table_teds, text_edit_loss
+from common.config import TRAIN_TABLE_DIR, OUT_DIR
+from common.preprocess import prep
+from table.run_table import parse_table
+from metrics.evaluate import table_teds, text_edit_loss
 
 
 def _tr_td(s):

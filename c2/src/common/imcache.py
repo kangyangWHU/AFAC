@@ -14,7 +14,7 @@ import hashlib
 import functools
 import threading
 from PIL import Image
-from config import CACHE_DIR
+from common.config import CACHE_DIR
 
 _DIR = os.path.join(CACHE_DIR, "imcache")
 os.makedirs(_DIR, exist_ok=True)

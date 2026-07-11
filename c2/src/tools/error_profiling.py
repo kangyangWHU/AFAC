@@ -22,9 +22,9 @@ import argparse
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
-import api_client as api
-from config import TRAIN_TABLE_DIR, TRAIN_LONG_DIR, OUT_DIR
-from evaluate import (text_edit_loss, table_teds, read_order_loss,
+import common.api_client as api
+from common.config import TRAIN_TABLE_DIR, TRAIN_LONG_DIR, OUT_DIR
+from metrics.evaluate import (text_edit_loss, table_teds, read_order_loss,
                       normalize_text)
 
 _TR_RE = re.compile(r"<tr[^>]*>.*?</tr>", re.I | re.S)
@@ -62,7 +62,7 @@ def _call_imgs(imgs, timeout=240):
     返回 (outputs, wall_latency)。wall_latency 为并发墙钟，贴近实际复现耗时。
     """
     from concurrent.futures import ThreadPoolExecutor
-    from config import API_USER_IDS
+    from common.config import API_USER_IDS
     t0 = time.time()
     workers = min(16, max(1, len(imgs)))          # 实测 16 路并发无限流
     with ThreadPoolExecutor(max_workers=workers) as ex:

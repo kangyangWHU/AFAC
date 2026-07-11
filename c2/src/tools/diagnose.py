@@ -19,12 +19,12 @@ from collections import Counter
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
-from config import TRAIN_TABLE_DIR, OUT_DIR
-from preprocess import prep
-from slicer_table import slice_table
-from stitch_table import stitch_multi
-from run_table import _call_grid
-from evaluate import table_teds, text_edit_loss
+from common.config import TRAIN_TABLE_DIR, OUT_DIR
+from common.preprocess import prep
+from table.slicer_table import slice_table
+from table.stitch_table import stitch_multi
+from table.run_table import _call_grid
+from metrics.evaluate import table_teds, text_edit_loss
 
 
 def _mode_col(s, tag):

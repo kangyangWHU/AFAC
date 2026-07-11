@@ -15,7 +15,7 @@
 import re
 from collections import Counter
 from rapidfuzz.distance import Levenshtein as _Lev
-from teds import _first_table, _parse_grid
+from metrics.teds import _first_table, _parse_grid
 
 _GT_TABLE_OPEN = '<table border="1" cellpadding="8" cellspacing="0">'
 

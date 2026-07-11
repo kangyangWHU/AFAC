@@ -5,7 +5,7 @@ Stage I(crop)与 Stage II(slicer/stitch)都依赖这些低层几何,放中立模
 """
 import numpy as np
 
-from config import BIN_FAINT, BIN_LINE
+from common.config import BIN_FAINT, BIN_LINE
 
 # ---- 框线/行列检测阈值(几何常量,与图像内容自适应量区分) ----
 FRAME_MIN_RUN = 120     # 框线判定:竖直/横向连续墨段 ≥此px(文字碎段最长~10px,12×余量)

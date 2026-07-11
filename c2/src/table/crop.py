@@ -16,11 +16,11 @@ import json
 import numpy as np
 from PIL import ImageDraw
 
-from geom import (split_table_texts, _runlen_lines, _content_segs, LINE_FULL,
+from table.geom import (split_table_texts, _runlen_lines, _content_segs, LINE_FULL,
                   LINE_COVER, FRAME_MIN_RUN, DATA_SPAN_MIN, DATA_RUN_MIN,
                   rows_misaligned)
-from config import BIN_INK, BIN_FAINT, BIN_LINE
-from imcache import cached
+from common.config import BIN_INK, BIN_FAINT, BIN_LINE
+from common.imcache import cached
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +302,7 @@ def _peel_title(im, bb):
     # ≈15px/行)看不见小标签("X岁"每行十几px墨)——标签对 peel 隐形、却被行计数数进去,
     # 堆叠小表家族全部 +1 行(ce5799a7×6/1de69d49×5/225fb899×4…)。row_bnds 的行带里
     # 标签作为 band0 现身 → is_data 判非数据 → 剥走。
-    from geom import row_bnds as _rb
+    from table.geom import row_bnds as _rb
     rbnd, _fr = _rb(g, g180)
     bands = [(rbnd[i], rbnd[i + 1]) for i in range(len(rbnd) - 1)]
     if len(bands) < 3:
@@ -351,7 +351,7 @@ def crop(im):
         d = g2 < BIN_INK
         if d.shape[0] < 8 or d.shape[1] < 8 or not d.any():
             return True
-        from geom import row_bnds as _rb, col_bnds as _cb
+        from table.geom import row_bnds as _rb, col_bnds as _cb
         d180 = g2 < BIN_FAINT
         r = len(_rb(d, d180)[0]) - 1
         c = len(_cb(d, d180)[0]) - 1

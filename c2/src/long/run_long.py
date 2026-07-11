@@ -15,19 +15,20 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
-import api_client as api
-from config import TRAIN_LONG_DIR, API_USER_IDS
-from preprocess import prep
-from slicer_long import slice_long
-from stitch_long import merge_strips
-from heading_norm import relevel_strips, toc_bullets_to_headings
-from evaluate import text_edit_loss, read_order_loss
+import common.api_client as api
+from common.config import TRAIN_LONG_DIR, API_USER_IDS
+from common.preprocess import prep
+from long.slicer_long import slice_long
+from long.stitch_long import merge_strips
+from long.heading_norm import (relevel_strips, toc_bullets_to_headings,
+                               roman_to_unicode, subscript_to_latex)
+from metrics.evaluate import text_edit_loss, read_order_loss
 
 
 def _call_strips(strips, timeout=240):
     """并发调用（≤16 路，userId 轮询，走缓存）。
     失败置空的条带多轮重试(降并发避开限流) → 防内容随机丢失、分数波动。"""
-    from config import MAX_CONCURRENCY
+    from common.config import MAX_CONCURRENCY
 
     def _call_set(items, workers):
         with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -54,7 +55,10 @@ def run_smart(im, target_h=5000, timeout=240):
     outs = _call_strips(strips, timeout)
     outs = [toc_bullets_to_headings(o) for o in outs]   # 目录列表项→标题(在定级前)
     outs = relevel_strips(outs)
-    return merge_strips(outs), len(strips)
+    md = merge_strips(outs)
+    # GT 规范:罗马数字→unicode、下标→LaTeX(仅 LONG 需要;TABLE 无此内容)
+    md = subscript_to_latex(roman_to_unicode(md))
+    return md, len(strips)
 
 
 def run_naive(im, target_h=5000, timeout=240):

@@ -14,10 +14,10 @@ import numpy as np
 from PIL import Image, ImageDraw
 Image.MAX_IMAGE_PIXELS = None
 
-from config import TRAIN_TABLE_DIR, OUT_DIR, BIN_INK, BIN_FAINT
-from preprocess import prep
-from crop import crop
-from geom import row_bnds, col_bnds
+from common.config import TRAIN_TABLE_DIR, OUT_DIR, BIN_INK, BIN_FAINT
+from common.preprocess import prep
+from table.crop import crop
+from table.geom import row_bnds, col_bnds
 
 
 def grid_lines(sub):

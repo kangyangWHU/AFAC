@@ -21,7 +21,7 @@ import hashlib
 import requests
 from PIL import Image
 
-from config import (API_URL, API_KEY, API_USER_IDS, CACHE_DIR,
+from common.config import (API_URL, API_KEY, API_USER_IDS, CACHE_DIR,
                     API_TIMEOUT, API_RETRIES, API_BACKOFF_CAP)
 
 Image.MAX_IMAGE_PIXELS = None        # 解除 PIL 超大图保护（赛题图可达 3.8 亿像素）
@@ -277,7 +277,7 @@ if __name__ == "__main__":
     # 用一张训练图探测返回格式
     import argparse
     import glob
-    from config import TRAIN_TABLE_DIR, TRAIN_LONG_DIR
+    from common.config import TRAIN_TABLE_DIR, TRAIN_LONG_DIR
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--image", help="指定图片路径；缺省用一张训练图")

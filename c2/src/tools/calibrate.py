@@ -21,8 +21,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
-import api_client as api
-from config import TRAIN_TABLE_DIR, TRAIN_LONG_DIR, OUT_DIR, API_USER_IDS
+import common.api_client as api
+from common.config import TRAIN_TABLE_DIR, TRAIN_LONG_DIR, OUT_DIR, API_USER_IDS
 
 
 def _timed_call(pil_img, uid, timeout):
