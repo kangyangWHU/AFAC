@@ -250,8 +250,10 @@ def ocr_seg(im, timeout=240):
                         grows = [[v] for v in vals]
                     elif nr == 1:                  # 单行: 所有值一行(横排, 如列号表头)
                         grows = [vals]
-                    else:                          # 多行多列且网格没救回: 按行填(保内容)
-                        grows = [[v] for v in vals]
+                    else:                          # 多行多列且网格没救回: 按行填(保内容)。
+                        # 数字密集行须按空格拆格(_cap_rows),否则整行并一格+右补空=塌缩
+                        # (baf9a56f 单调区 '1000 ×14/行' 曾整行进单格,两seg~25%格子错)
+                        grows = _cap_rows(raw)
                     grows = [[""] * (c0 - ci) + g + [""] * (cj - c1) for g in grows]
                     parsed[(r, c)] = (parsed[(r, c)][0], grows)
                     meta.setdefault("adopt", []).append(f"tile[{r}][{c}] flat→几何兜底")
