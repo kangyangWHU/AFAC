@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """行列估计准确度诊断(纯几何,不调 API)。
 
-对每张图: crop 出 seg → 用**我们自己的几何估计**(geom.column_cuts 列 + 对称行检测,
+对每张图: crop 出 seg → 用**我们自己的几何估计**(geom.row_bnds/col_bnds 行列估计,
 即 Stage I 那套,非 slice_table 二次加工)算骨架 row_bnd × col_bnd →
 ① 画出估计的行列线到 out/grids/<uid>.jpg ② 对比 GT 的 tr/td 算准确度。
 """

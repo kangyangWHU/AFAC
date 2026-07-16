@@ -7,9 +7,8 @@
   - 失败重试 + 指数退避 + 超时控制
   - 按图像内容哈希做本地缓存，避免重复调用（省时省额度，且保证可复现）
 
-⚠️ 官方未公开返回体 schema，本模块对返回做**鲁棒解析**：
-   优先按 JSON 解析并在常见字段里找 markdown；否则回退为纯文本。
-   首次实跑后用 `probe()` 打印原始返回，确认字段名再按需收紧。
+返回体 schema(实测已确认): {message,request_id,result:{result:"<json字符串>"}},内层再解析得
+   {choices:[{message:{content:...}}]}——见 _extract_content;未知形状由 _find_md_in_obj 兜底。
 """
 import os
 import io
@@ -126,7 +125,7 @@ def _looks_like_error(md):
     return False
 
 
-def _is_truncated(md):
+def is_truncated(md):
     """tile 输出被 ~12k 字符上限截断：有 <table 却无闭合 </table>。
     截断是 200 成功内容、错误信封识别不出，必须单独拦下：**不写缓存**，
     由上层 _split_call_merge 拆小重读后用 write_cache 回填完整结果。"""
@@ -145,7 +144,7 @@ def write_cache(image, md, *, fmt="PNG", cache_dir=None):
 
 
 def _parse_response(resp):
-    """从 HTTP 响应中抽取 markdown 字符串。返回 (markdown, raw_text)。"""
+    """从 HTTP 响应中抽取 markdown 字符串。"""
     raw = resp.text
     ctype = resp.headers.get("Content-Type", "")
     if "json" in ctype or raw.strip()[:1] in "{[":
@@ -156,13 +155,13 @@ def _parse_response(resp):
         if obj is not None:
             content = _extract_content(obj)
             if content is not None:
-                return _strip_fences(content), raw
+                return _strip_fences(content)
             # 兜底：递归找像 markdown 的字段
             found = _find_md_in_obj(obj)
             if found is not None:
-                return _strip_fences(found), raw
-            return json.dumps(obj, ensure_ascii=False), raw
-    return raw, raw
+                return _strip_fences(found)
+            return json.dumps(obj, ensure_ascii=False)
+    return raw
 
 
 def _find_md_in_obj(obj):
@@ -202,7 +201,7 @@ def call(image, *, fmt="PNG", timeout=API_TIMEOUT, retries=API_RETRIES, use_cach
         with open(cpath, encoding="utf-8") as f:
             cached = f.read()
         # 错误信封 / 旧的截断半截结果 → 视为未命中，重调（截断会触发拆分修复）
-        if not _looks_like_error(cached) and not _is_truncated(cached):
+        if not _looks_like_error(cached) and not is_truncated(cached):
             return cached
 
     if CACHE_ONLY:                               # 离线评测：未命中缓存直接置空，不调 API
@@ -222,7 +221,7 @@ def call(image, *, fmt="PNG", timeout=API_TIMEOUT, retries=API_RETRIES, use_cach
                 last_err = "HTTP %d: %s" % (resp.status_code, resp.text[:200])
                 time.sleep(min(2 ** attempt, API_BACKOFF_CAP) + random.uniform(0, 2))
                 continue
-            md, _ = _parse_response(resp)
+            md = _parse_response(resp)
             if _looks_like_error(md):            # 服务端错误信封 → 当失败，重试
                 last_err = md.strip()[:160]
                 if "Error code: 400" in md or "aspect ratio" in md:
@@ -232,7 +231,7 @@ def call(image, *, fmt="PNG", timeout=API_TIMEOUT, retries=API_RETRIES, use_cach
                 continue
             # 截断（输出超 ~12k 上限）**不写缓存**：避免半截结果污染缓存，交由
             # 上层 _split_call_merge 拆小重读、再 write_cache 回填完整结果。
-            if use_cache and not _is_truncated(md):
+            if use_cache and not is_truncated(md):
                 with open(cpath, "w", encoding="utf-8") as f:
                     f.write(md)
             return md

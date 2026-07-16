@@ -3,7 +3,8 @@
 
 kind:
   'text'  : 表外 furniture(页眉/页脚/水印/页码),Stage III 用 ocr_text 读纯文本。
-  'seg'   : 候选表格区域,Stage II 用 ocr_table 读;是表还是标题由 Stage III 按 td 数定。
+  'seg'   : 候选表格区域,Stage II 用 grid_ocr.ocr_seg 骨架 OCR(列错位回退 ocr_table);
+            是表还是标题由 Stage III 按 td 数定。
   'title' : 从 seg 顶部剥下的标题/副标题/colspan组表头(mark),Stage III 按 keep_title
             决定丢为文本 or 拼回 colspan 表头行。
 
@@ -16,61 +17,16 @@ import json
 import numpy as np
 from PIL import ImageDraw
 
-from table.geom import (split_table_texts, _runlen_lines, _content_segs, LINE_FULL,
-                  LINE_COVER, FRAME_MIN_RUN, DATA_SPAN_MIN, DATA_RUN_MIN,
-                  rows_misaligned)
-from common.config import BIN_INK, BIN_FAINT, BIN_LINE
+from table.geom import (split_table_texts, _runlen_lines, band_blank, panel_seam_xs,
+                        row_bnds, col_bnds, LINE_COVER, FRAME_MIN_RUN,
+                        DATA_SPAN_MIN, DATA_RUN_MIN)
+from common.config import BIN_INK, BIN_FAINT
 from common.imcache import cached
 
 
 # ---------------------------------------------------------------------------
-# 子表几何切分(原 split_table.py):把含多子表的整图切成单子表段
+# 子表几何切分:把含多子表的整图切成单子表段
 # ---------------------------------------------------------------------------
-def _panel_seam_xs(g):
-    """左右并排子表的竖直中缝 x 坐标:靠"横向长墨线(行)被竖直白带打断"判定。
-    与 geom._panel_seams 同源,但返回缝的 x 位置(用于切分)而非缝数。零误拆。"""
-    W = g.shape[1]
-    step = max(1, W // 1500)
-    g2 = g[::step, ::step]
-    Hs, Ws = g2.shape
-    dark = (g2 < BIN_LINE)
-    thr = 0.25 * Ws
-    minrun = 0.1 * Ws
-    covx = np.zeros(Ws, bool)
-    found = False
-    for y in range(Hs):
-        row = dark[y]
-        if row.sum() < thr:
-            continue
-        d = np.diff(np.concatenate(([0], row.view(np.int8), [0])))
-        s = np.where(d == 1)[0]
-        e = np.where(d == -1)[0]
-        runs = e - s
-        if runs.size == 0 or runs.max() < thr:
-            continue
-        found = True
-        for a, b, L in zip(s, e, runs):
-            if L >= minrun:
-                covx[a:b] = True
-    if not found:
-        return []
-    xs = np.where(covx)[0]
-    xlo, xhi = xs[0], xs[-1]
-    seams = []
-    i = xlo
-    while i <= xhi:
-        if not covx[i]:
-            j = i
-            while j <= xhi and not covx[j]:
-                j += 1
-            if j - i > 0.03 * Ws:
-                seams.append((i + j) // 2 * step)
-            i = j
-        else:
-            i += 1
-    return seams
-
-
 _SEAM_K = 2.5   # 缝高门槛(×行缝中位)。下限由**表内分组空隙**定(8ff15f9a 2.25×,切了
 #                 一表变多表,K=2 实测碎成14段);上限由密排小表真缝定(225fb899 2.5~2.6×,
 #                 K=3 实测粘连)。真管线 2.4~2.5 平台无差(peel/分类吸收刀刃),取 2.5 与
@@ -174,8 +130,10 @@ def _row_bounds(dark, dark180=None, k=_SEAM_K, vmax=_SEAM_VMAX):
     return [0] + merged + [H]
 
 
-@cached("subtables", __file__, os.path.join(os.path.dirname(os.path.abspath(__file__)), "geom.py"))
-def subtables(im, pad=0):   # 精确边界(±4实pad已清偿:邻段残影是白pad时代最后据点)
+@cached("subtables", __file__,
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "geom.py"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common", "preprocess.py"))
+def subtables(im):
     """把整图切成**有序块**列表 `[(kind, bbox), ...]`(阅读顺序,先上后下)。
 
     kind='text' : split_table_texts 剥出的表外页眉/页脚/水印/页码。
@@ -191,25 +149,17 @@ def subtables(im, pad=0):   # 精确边界(±4实pad已清偿:邻段残影是白
     dark = (g < BIN_INK)
     dark180 = (g < BIN_FAINT)                          # 松二值化:给竖线断裂检测(救浅灰框线)
     H, W = g.shape
-    colb = [0] + _panel_seam_xs(g) + [W]
+    colb = [0] + panel_seam_xs(g) + [W]
     for c in range(len(colb) - 1):                    # ② 主表内切子表段(不预判类型)
         cx0, cx1 = colb[c], colb[c + 1]
         rb = _row_bounds(dark[:, cx0:cx1], dark180[:, cx0:cx1])
         for ra, rbb in zip(rb[:-1], rb[1:]):
             band180 = dark180[ra:rbb, cx0:cx1]
-            # 空段判据=行投影(用户设计,与tile空白同一把尺):去线后每行墨<3px才是真空。
-            # 旧均值判据尺度相关:全宽段里两行标题(~3000墨px/33万px≈0.009)被稀释成
-            # "空白"静默吞掉,子表间标题整个从输出消失(A榜0cd74f08/3b243a83)
-            vk = band180.mean(axis=0) <= LINE_FULL
-            b2 = band180[:, vk] if vk.any() else band180
-            rf_ = b2.mean(axis=1) if b2.size else np.zeros(1)
-            rowink = b2[rf_ <= LINE_FULL].sum(axis=1) if (rf_ <= LINE_FULL).any() else np.zeros(1)
-            if rowink.size == 0 or rowink.max() < 3:  # 真空白带,丢
+            # 空段判据(geom.band_blank,与空tile同一把尺):松档180计墨(两行标题也算内容)
+            if band_blank(band180, band180):
                 continue
-            bb = (x0 + cx0, y0 + max(0, ra - pad), x0 + cx1, y0 + min(H, rbb + pad))
-            items.append((y0 + ra, 'seg', bb))   # 只切不判:类型统一由 crop 的结构判据定
-            #   (原矮段20px/淡段g128两条像素阈规则删除,其判别对象——1~3行的标题/说明——
-            #    由"骨架行数<4"结构判据统一覆盖)
+            bb = (x0 + cx0, y0 + ra, x0 + cx1, y0 + rbb)
+            items.append((y0 + ra, 'seg', bb))   # 只切不判:类型由 crop 的结构判据(骨架格数)定
     items.sort(key=lambda t: t[0])                     # 阅读顺序
     return [(k, bb) for _, k, bb in items] or [('seg', tb)]
 
@@ -290,7 +240,6 @@ def _peel_title(im, bb):
         if y - prev > 3:
             hl.append(int(y))
         prev = int(y)
-    # (_PAD_GUARD 过滤已退役:切分改精确边界后,顶部不再有邻段带入的框线)   # 滤 pad 残余(seg重叠带入上一seg底框线)
     # 路① 有横框线(≥2,含密集网格):最上一条=表顶,其上=标题(框线多≠无标题)
     if len(hl) >= 2:
         top = hl[0]
@@ -302,8 +251,7 @@ def _peel_title(im, bb):
     # ≈15px/行)看不见小标签("X岁"每行十几px墨)——标签对 peel 隐形、却被行计数数进去,
     # 堆叠小表家族全部 +1 行(ce5799a7×6/1de69d49×5/225fb899×4…)。row_bnds 的行带里
     # 标签作为 band0 现身 → is_data 判非数据 → 剥走。
-    from table.geom import row_bnds as _rb
-    rbnd, _fr = _rb(g, g180)
+    rbnd, _ = row_bnds(g, g180)
     bands = [(rbnd[i], rbnd[i + 1]) for i in range(len(rbnd) - 1)]
     if len(bands) < 3:
         return [], bb
@@ -351,10 +299,9 @@ def crop(im):
         d = g2 < BIN_INK
         if d.shape[0] < 8 or d.shape[1] < 8 or not d.any():
             return True
-        from table.geom import row_bnds as _rb, col_bnds as _cb
         d180 = g2 < BIN_FAINT
-        r = len(_rb(d, d180)[0]) - 1
-        c = len(_cb(d, d180)[0]) - 1
+        r = len(row_bnds(d, d180)[0]) - 1
+        c = len(col_bnds(d, d180)[0]) - 1
         cells = r * c
         if cells < _JUNK_CELLS:
             return True                       # 结构底线:无二维结构恒文字
@@ -373,8 +320,6 @@ def crop(im):
     items = [(k, _tighten(im, bb, drop_lines=(k != 'seg'))) for k, bb in items]
     #        ^ title/text 收界时剔横线(邻表边框非内容);seg 框线即边界不剔
     items = [(k, bb) for k, bb in items if bb[2] > bb[0] and bb[3] > bb[1]]  # 丢退化空块
-    # (title <12px 字脚屑过滤已随 ±4 pad 清偿一并退役:残屑=pad带入的邻段字脚,
-    #  绝源后过滤只剩误杀——A榜 4e32dba9 的 11px 单行小标题曾被它灭口)
     items.sort(key=lambda kb: (kb[1][1], kb[1][0]))      # 阅读顺序 (y, x)
     return items or [('seg', (0, 0, im.width, im.height))]
 

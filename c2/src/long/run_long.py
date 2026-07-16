@@ -2,7 +2,7 @@
 """LONG 端到端 runner + A/B 评测。
 
 对比两种策略，量化智能切点的收益：
-  - naive : 等高裸切 + 直接拼（对照，等同 profiling 的做法）
+  - naive : 等高裸切 + 直接拼（对照）
   - smart : 行间空白带切 + 接缝去重（本方案）
 
 用训练集（带 GT）跑若干图，打印三指标。所有 API 调用走缓存。
@@ -10,14 +10,13 @@
 import os
 import glob
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
-import common.api_client as api
-from common.config import TRAIN_LONG_DIR, API_USER_IDS
+from common.config import TRAIN_LONG_DIR
 from common.preprocess import prep
+from table.tiles import call_tiles
 from long.slicer_long import slice_long
 from long.stitch_long import merge_strips
 from long.heading_norm import (relevel_strips, toc_bullets_to_headings,
@@ -25,34 +24,9 @@ from long.heading_norm import (relevel_strips, toc_bullets_to_headings,
 from metrics.evaluate import text_edit_loss, read_order_loss
 
 
-def _call_strips(strips, timeout=240):
-    """并发调用（≤16 路，userId 轮询，走缓存）。
-    失败置空的条带多轮重试(降并发避开限流) → 防内容随机丢失、分数波动。"""
-    from common.config import MAX_CONCURRENCY
-
-    def _call_set(items, workers):
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            return list(ex.map(
-                lambda x: api.call_safe(x[1], timeout=timeout,
-                                        user_id=API_USER_IDS[x[0] % len(API_USER_IDS)]),
-                list(enumerate(items))))
-
-    outs = _call_set(strips, min(MAX_CONCURRENCY, max(1, len(strips))))
-    if not getattr(api, "CACHE_ONLY", False):
-        for _round in range(4):
-            idx = [i for i, o in enumerate(outs) if not (o or "").strip()]
-            if not idx:
-                break
-            for i, o in zip(idx, _call_set([strips[i] for i in idx],
-                                           max(1, min(6, len(idx))))):
-                if (o or "").strip():
-                    outs[i] = o
-    return outs
-
-
 def run_smart(im, target_h=5000, timeout=240):
     strips, _ = slice_long(im, target_h=target_h)
-    outs = _call_strips(strips, timeout)
+    outs = call_tiles(strips, timeout=timeout, retry_rounds=4)
     outs = [toc_bullets_to_headings(o) for o in outs]   # 目录列表项→标题(在定级前)
     outs = relevel_strips(outs)
     md = merge_strips(outs)
@@ -67,7 +41,7 @@ def run_naive(im, target_h=5000, timeout=240):
     k = max(1, -(-h // target_h))
     strips = [im.crop((0, i * target_h, w, min(h, (i + 1) * target_h)))
               for i in range(k)]
-    outs = _call_strips(strips, timeout)
+    outs = call_tiles(strips, timeout=timeout, retry_rounds=4)
     return "\n".join(outs), k
 
 

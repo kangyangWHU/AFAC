@@ -9,18 +9,16 @@
   - TableTEDS      表格树编辑距离相似度（越大越好，满分 100；本模块内部用 [0,1] 再 ×100）
   - ReadOrderEdit  逻辑块级阅读流顺序的归一化编辑距离（越小越好）
 
-⚠️ 官方未公开评测脚本，本实现为**合理复现**，用于本地相对排序与迭代。
-   关键假设见下方注释，待 error_profiling 阶段拿到 API 真实输出后与线上分校准。
+⚠️ 官方未公开评测脚本，本实现为**合理复现**（已用 A 榜真实分数校准），用于本地相对排序与迭代。
 """
 import re
 import unicodedata
 from rapidfuzz.distance import Levenshtein
 
-from common.config import TABLE_OPEN_RE, TABLE_CLOSE_RE
-from metrics.teds import teds_score, _first_table
+from metrics.teds import teds_score
 
-# 同时匹配整段 <table>...</table>
-_TABLE_BLOCK_RE = re.compile(TABLE_OPEN_RE + r".*?" + TABLE_CLOSE_RE,
+# 同时匹配整段 <table>...</table>（GT 中表格以 HTML <table> 标签出现）
+_TABLE_BLOCK_RE = re.compile(r"<table[^>]*>.*?</table>",
                              re.IGNORECASE | re.DOTALL)
 
 
@@ -108,53 +106,10 @@ def table_teds(pred, gt):
 
 
 # ---------------------------------------------------------------------------
-# 指标 3：阅读流顺序编辑距离（块级）
+# 指标 3：阅读流顺序编辑距离
 # ---------------------------------------------------------------------------
-def _doc_blocks(doc):
-    """把文档切成逻辑块序列（用于阅读流）：
-    - 表格整体作为一个块，签名 'TBL#<出现序号>'（按位置区分,贴近官方"逻辑块序列编辑距离"）
-    - 文本按空行分段，每段归一化后作为一个块（取前 80 字符做匹配键）
-
-    表签名为何带序号:旧版所有表都用同一个 '__TABLE__'。文档里【多表与文字块交错】时,
-    pred 的每个表都 fuzzy 匹配到 GT 的第一个 __TABLE__(同签名),matched 里反复出现同一
-    index 把 LIS 打断 → ro 被严重低估(a4924b6d 真值92、旧版给48;2358594b 88→50)。改成
-    'TBL#0/1/2…' 后,第 k 个表匹配第 k 个表(exact=100 > 邻号≈80,extractOne 选对),按位置
-    对齐 → 贴近官方。单表文档(gt/pred 都只 TBL#0)行为不变。"""
-    blocks = []
-    nt = 0
-    for b in split_blocks(doc):
-        if b["type"] == "table":
-            blocks.append("TBL#%d" % nt)
-            nt += 1
-        else:
-            txt = normalize_text(b["raw"])
-            for para in re.split(r"\n\s*\n", txt):
-                para = " ".join(para.split())
-                if para:
-                    blocks.append(para[:80])
-    return blocks
-
-
-def _lnds(seq):
-    """最长非降子序列长度（容忍分段差异导致的重复索引）。"""
-    import bisect
-    tails = []
-    for x in seq:
-        i = bisect.bisect_right(tails, x)
-        if i == len(tails):
-            tails.append(x)
-        else:
-            tails[i] = x
-    return len(tails)
-
-
 def _reading_text(doc):
-    """非表文字按阅读序拼成【完整】一串、归一化(NFKC + 去所有空白)。表格不计入。
-
-    用 split_blocks 全文,**不走 _doc_blocks 的 [:80] 截断**——那截断是给旧 lenient 块匹配的,
-    对 char 级 read_order 会失真:long 长段落被截成 80 字,且 pred 过度切块(291 vs GT 11)→
-    截断块数×80 假性膨胀 → char-RO 虚低(long 假象 55,实则文字 1.0x 对得上)。table 块本就<80,不受影响。"""
-    import unicodedata
+    """非表文字按阅读序拼成【完整】一串、归一化(NFKC + 去所有空白)。表格不计入。"""
     parts = [normalize_text(b["raw"]) for b in split_blocks(doc) if b["type"] != "table"]
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", " ".join(parts)))
 
@@ -168,9 +123,7 @@ def read_order_loss(pred, gt):
     为何是字符级而非块级:实测官方度量对"块边界(合并/拆分)"几乎不敏感
     —— 合并连续文字块,A榜 Δ 仅 +0.27,而块级 edit-distance Δ +18.7(过敏感、误导),
     字符级 Δ +0.30 与 A 榜吻合。即官方按字符比对阅读序文本、不在乎我们怎么分块;
-    真正能动它的是【字符内容准确度 + 顺序】(OCR、角格、漏标签),非块边界。
-    块级版见 read_order_loss_blocklevel,LIS 版见 read_order_loss_lenient(均不准,仅对照)。"""
-    from rapidfuzz.distance import Levenshtein
+    真正能动它的是【字符内容准确度 + 顺序】(OCR、角格、漏标签),非块边界。"""
     a = _reading_text(pred)
     b = _reading_text(gt)
     if not b:
@@ -178,50 +131,6 @@ def read_order_loss(pred, gt):
     if not a:
         return 1.0
     return Levenshtein.distance(a, b) / max(len(a), len(b))
-
-
-def read_order_loss_blocklevel(pred, gt, eq_thresh=90.0):
-    """[不准,仅对照] 块级 Levenshtein(文字块+TBL#n,块相等 fuzz.ratio>=90)。
-    对块边界过敏感(合并块本地+18.7 但 A榜仅+0.27),已被字符级 read_order_loss 取代。"""
-    from rapidfuzz import fuzz
-    gb = _doc_blocks(gt)
-    pb = _doc_blocks(pred)
-    if len(gb) == 0:
-        return 0.0 if len(pb) == 0 else 1.0
-    if len(pb) == 0:
-        return 1.0
-    n, m = len(pb), len(gb)
-    prev = list(range(m + 1))                    # Levenshtein 滚动行
-    for i in range(1, n + 1):
-        cur = [i] + [0] * m
-        a = pb[i - 1]
-        for j in range(1, m + 1):
-            c = 0 if fuzz.ratio(a, gb[j - 1]) >= eq_thresh else 1
-            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + c)
-        prev = cur
-    return prev[m] / max(n, m)
-
-
-def read_order_loss_lenient(pred, gt, match_thresh=75.0):
-    """[已弃用,虚高] 旧 LIS + token_set_ratio 版,对多出块视而不见、对词重叠过度宽容。
-    保留仅作对照。正式评测用 read_order_loss(edit-distance)。"""
-    from rapidfuzz import process, fuzz
-    gb = _doc_blocks(gt)
-    pb = _doc_blocks(pred)
-    if len(gb) == 0:
-        return 0.0 if len(pb) == 0 else 1.0
-    if len(pb) == 0:
-        return 1.0
-    matched = []
-    for blk in pb:
-        hit = process.extractOne(blk, gb, scorer=fuzz.token_set_ratio,
-                                 score_cutoff=match_thresh)
-        if hit is not None:
-            matched.append(hit[2])
-    if not matched:
-        return 1.0
-    L = _lnds(matched)
-    return max(0.0, 1.0 - L / len(gb))
 
 
 # ---------------------------------------------------------------------------

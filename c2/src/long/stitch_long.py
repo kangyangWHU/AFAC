@@ -108,8 +108,12 @@ def _split_table_seam_loose(acc, lines, max_orphan=2):
 
 
 def _splice_table_loose(acc, lines, idx, max_overlap, sim_thresh):
-    """续表拼接(下条 <table> 前夹孤儿散行版):去内侧边界标签,孤儿散行包成 <tr><td> 行
-    插回两段表之间,再行级去重。"""
+    """续表拼接:去内侧边界标签,idx>0 时把 <table> 前的孤儿散行包成 <tr><td> 行插回
+    两段表之间,再行级去重(idx=0 即紧邻续表,无孤儿行)。
+
+    判据只用结构信号(上段裸 </table> 收口、下段裸 <table> 起头、中间无标题文字)——
+    相邻两张真表之间必有标题行,下段就不会以裸 <table> 起头,故无需再用列数判据
+    (rowspan 续行列数本就不齐,列数判据反会误拒)。"""
     a = acc[:]
     a[-1] = _TABLE_CLOSE.sub("", a[-1]).rstrip()
     if not a[-1].strip():
@@ -127,31 +131,6 @@ def _splice_table_loose(acc, lines, idx, max_overlap, sim_thresh):
         return acc + lines
     k = _seam_overlap(a, b, max_overlap, sim_thresh)
     return a + orphan_rows + b[k:]
-
-
-def _splice_table(acc, lines, max_overlap, sim_thresh):
-    """把被切开的两段表拼成一张：去内侧边界标签 + 行级去重。
-
-    判据只用结构信号(上段裸 </table> 收口、下段裸 <table> 起头、中间无标题文字)——
-    相邻两张真表之间必有标题行，下段就不会以裸 <table> 起头，故无需再用列数判据
-    (rowspan 续行列数本就不齐，列数判据反会误拒)。"""
-    a = acc[:]
-    # 去掉上段末尾的 </table>（可能独占一行，也可能附在行尾）
-    a[-1] = _TABLE_CLOSE.sub("", a[-1]).rstrip()
-    if not a[-1].strip():
-        a.pop()
-    # 去掉下段开头的 <table>（可能独占一行，也可能与首行内容同行）
-    b = lines[:]
-    if _TABLE_OPEN_FULL.match(b[0]):
-        b.pop(0)
-    else:
-        b[0] = _TABLE_OPEN_LEAD.sub("", b[0], count=1)
-        if not b[0].strip():
-            b.pop(0)
-    if not a or not b:
-        return acc + lines
-    k = _seam_overlap(a, b, max_overlap, sim_thresh)
-    return a + b[k:]
 
 
 def _guarded_overlap(acc, lines, max_k, sim_thresh):
@@ -173,7 +152,7 @@ def merge_strips(outputs, max_overlap_lines=8, sim_thresh=0.85):
             acc = lines
             continue
         if _is_split_table_seam(acc, lines):
-            acc = _splice_table(acc, lines, max_overlap_lines, sim_thresh)
+            acc = _splice_table_loose(acc, lines, 0, max_overlap_lines, sim_thresh)
         elif (idx := _split_table_seam_loose(acc, lines)) > 0:
             acc = _splice_table_loose(acc, lines, idx, max_overlap_lines, sim_thresh)
         else:

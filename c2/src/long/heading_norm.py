@@ -107,22 +107,11 @@ def _is_doc_title(text):
     return bool(re.search(r"(条款|保险|公司|合同|附加|目录)", t))
 
 
-def _same_series(prev, cur):
-    return _series_key(prev) is not None and _series_key(prev) == _series_key(cur)
-
-
 def _find_stack_level(stack, marker):
     for old_marker, old_level in reversed(stack):
         if old_marker == marker:
             return old_level
     return None
-
-
-def _find_series_level(series_levels, marker):
-    sk = _series_key(marker)
-    if sk is None:
-        return None
-    return series_levels.get(sk)
 
 
 def _find_stack_sibling(stack, marker):
@@ -149,20 +138,6 @@ def _heading_positions(md):
     return lines, matches
 
 
-def relevel_markdown(md, offset=0):
-    """给单篇 Markdown 标题整体平移层级。
-
-    默认 offset=0，所以对 GT 是严格幂等；传入 offset 时只改 `#` 数量。
-    """
-    if not offset:
-        return md
-    lines, matches = _heading_positions(md)
-    for i, m in matches:
-        old = len(m.group(1))
-        lines[i] = "#" * _clamp_level(old + offset) + " " + m.group(2)
-    return "\n".join(lines)
-
-
 def predict_heading_levels(headings, anchor_level, anchor_index=0):
     """用锚点绝对层级预测整篇标题层级。
 
@@ -177,10 +152,9 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
         return []
     anchor_index = max(0, min(anchor_index, len(headings) - 1))
     texts = [text for _, text in headings]
-    levels = [None] * len(headings)
+    levels: list = [None] * len(headings)
 
     stack = []
-    marker_levels = {}
     series_levels = {}
     series_last = {}                 # sk -> 该序列最近一次出现的 marker
     last_marker = None
@@ -204,13 +178,10 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
             # 回到已确立的编号序列(十七…深层游走…十八 / (5)…漂移…(6)):
             # 用该序列历史层级,而非相邻 last_level±1
             level = series_levels[sk]
-        elif last_marker is not None and _is_child(last_marker, marker):
+        elif last_marker is not None and last_level is not None and _is_child(last_marker, marker):
             level = last_level + 1
-        elif last_marker is not None and _is_next(last_marker, marker):
-            if _same_series(last_marker, marker):
-                level = last_level
-            else:
-                level = _find_series_level(series_levels, marker) or last_level
+        # (相邻 _is_next(last_marker,·) 分支不需要:_is_next 成立 ⇒ 同 series key,而
+        #  series_last 每个编号项都更新 ⇒ 上面的 series_last 分支必先命中,且给值相同)
         elif kind == "dec":
             parent_level = None
             if len(path) > 1:
@@ -220,40 +191,43 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
             if parent_level is not None:
                 level = parent_level + 1
             else:
-                seen = _find_series_level(series_levels, marker)
+                seen = series_levels.get(sk)
                 level = seen if seen is not None else anchor_level + max(0, len(path) - 1)
         elif kind == "int":
-            if (path and path[0] == 1 and last_marker
+            if (path and path[0] == 1 and last_marker and last_level is not None
                     and last_marker[0] in ("cndun", "cnpar", "numpar", "circ", "dec")):
                 # 值==1 紧跟列表项/小数子项 = 起新子列表 → 当前项的子级
                 # (避免深层 "1、住院" 被当成顶层 "1." 的层级)
                 level = last_level + 1
             else:
-                seen = _find_series_level(series_levels, marker)
+                seen = series_levels.get(sk)
                 level = seen if seen is not None else anchor_level
         elif kind == "art":
-            seen = _find_series_level(series_levels, marker)
+            seen = series_levels.get(sk)
             if seen is not None:
                 level = seen
-            elif last_marker and last_marker[0] in ("int", "dec"):
+            elif last_marker and last_level is not None and last_marker[0] in ("int", "dec"):
                 level = last_level + 1
-            elif idx > 0 and parse_marker(texts[idx - 1])[0] == "title" and not _is_doc_title(texts[idx - 1]):
+            elif (last_level is not None and idx > 0
+                  and parse_marker(texts[idx - 1])[0] == "title" and not _is_doc_title(texts[idx - 1])):
                 level = last_level + 1
             else:
                 level = anchor_level
         elif kind == "cndun":
-            if path and path[0] == 1 and last_marker and last_marker[0] in ("int", "dec", "art"):
+            if (path and path[0] == 1 and last_marker and last_level is not None
+                    and last_marker[0] in ("int", "dec", "art")):
                 level = last_level + 1
-            elif last_marker and last_marker[0] in ("cnpar", "numpar", "circ"):
+            elif last_marker and last_level is not None and last_marker[0] in ("cnpar", "numpar", "circ"):
                 level = max(anchor_level, last_level - 1)
             else:
-                seen = _find_series_level(series_levels, marker)
+                seen = series_levels.get(sk)
                 level = seen if seen is not None else anchor_level
         elif kind in ("cnpar", "numpar", "circ"):
-            if path and path[0] == 1 and last_marker and last_marker[0] in ("cndun", "dec", "int", "art"):
+            if (path and path[0] == 1 and last_marker and last_level is not None
+                    and last_marker[0] in ("cndun", "dec", "int", "art")):
                 level = last_level + 1
             else:
-                seen = _find_series_level(series_levels, marker)
+                seen = series_levels.get(sk)
                 level = seen if seen is not None else ((last_level + 1) if last_level is not None else anchor_level)
         else:
             level = last_level if last_level is not None else anchor_level
@@ -265,34 +239,12 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
             stack.pop()
         stack.append((marker, level))
         if kind != "title":
-            marker_levels[marker] = level
             if sk is not None:
                 series_levels[sk] = level
                 series_last[sk] = marker
         last_marker, last_level = marker, level
 
     return levels
-
-
-def relevel_markdown_from_anchor(md, anchor_level=None, anchor_index=0):
-    """按给定锚点重算整篇 Markdown 的所有标题 `#`。
-
-    anchor_level=None 时，默认保留锚点原始层级；用于 GT 幂等测试。
-    """
-    lines, matches = _heading_positions(md)
-    if not matches:
-        return md
-
-    anchor_index = max(0, min(anchor_index, len(matches) - 1))
-    heads = [(len(m.group(1)), m.group(2)) for _, m in matches]
-    if anchor_level is None:
-        anchor_level = heads[anchor_index][0]
-    levels = predict_heading_levels(heads, anchor_level, anchor_index)
-
-    for (i, m), level in zip(matches, levels):
-        if level != len(m.group(1)):
-            lines[i] = "#" * level + " " + m.group(2)
-    return "\n".join(lines)
 
 
 # 封面大标题常被 VLM 拆成几行普通段落(无 `#`)。识别并提升为 `# ` L1。
@@ -305,7 +257,6 @@ def _promote_leading_title(md):
 
     只动第一个已有 `#` 之前的开头行:取连续的【无编号、短、无句末标点、非注册编号】
     行(跳空行),合并成一行 `# `。遇编号行/注册编号/长句即停(避免吃到正文和 (X) 病种项)。
-    返回 (新md, 是否提升)。
     """
     lines = md.split("\n")
     first_h = next((i for i, l in enumerate(lines) if _H.match(l)), len(lines))
@@ -326,11 +277,11 @@ def _promote_leading_title(md):
             break
     joined = " ".join(block)
     if not block or not _TITLE_KW.search(joined):
-        return md, False
+        return md
     lines[idxs[0]] = "# " + joined
     for j in reversed(idxs[1:]):
         del lines[j]
-    return "\n".join(lines), True
+    return "\n".join(lines)
 
 
 def _anchor_for(text):
@@ -348,7 +299,7 @@ def relevel_strips(strips, anchor_level=None):
     strips = list(strips)
     for i, md in enumerate(strips):             # Type A:只在首个有内容的条带补标题
         if md and md.strip():
-            strips[i], _ = _promote_leading_title(md)
+            strips[i] = _promote_leading_title(md)
             break
 
     docs = []
@@ -398,36 +349,6 @@ def toc_bullets_to_headings(md):
             break
         lines[i] = "# " + text                 # 转标题(占位级)
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# 标点半角化(官方口径:GT/VLM 均为半角)
-# ---------------------------------------------------------------------------
-def _build_punct_map():
-    m = {}
-    for cp in range(0xFF01, 0xFF5F):           # 全角 ASCII 标点(排除字母/数字)
-        half = chr(cp - 0xFEE0)
-        if not half.isalnum():
-            m[chr(cp)] = half
-    m["　"] = " "                          # 全角空格
-    m.update({
-        "。": ".", "、": ",", "，": ",", "：": ":", "；": ";",
-        "？": "?", "！": "!", "（": "(", "）": ")",
-        "「": '"', "」": '"', "『": "'", "』": "'",
-        "【": "[", "】": "]", "〔": "[", "〕": "]",
-        "《": "<", "》": ">", "〈": "<", "〉": ">",
-        "“": '"', "”": '"', "‘": "'", "’": "'",
-        "—": "-", "－": "-", "～": "~",
-    })
-    return m
-
-
-_PUNCT_TRANS = str.maketrans(_build_punct_map())
-
-
-def to_halfwidth_punct(md):
-    """所有标点转半角。不动字母/数字/圈号(①)/`#`。"""
-    return (md or "").translate(_PUNCT_TRANS).replace("…", "...")
 
 
 # ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ _APTED_NODE_LIMIT = 1200          # 节点数超过此值不走 APTED（太慢�
 # ===========================================================================
 # HTML 解析
 # ===========================================================================
-def _first_table(html_str):
+def first_table(html_str):
     """解析字符串里的第一个 <table> 元素，失败返回 None。"""
     html_str = (html_str or "").strip()
     if "<table" not in html_str.lower():
@@ -34,7 +34,7 @@ def _first_table(html_str):
     return tables[0] if tables else None
 
 
-def _parse_grid(el):
+def parse_grid(el):
     """把 table 元素解析成二维网格：List[row]，row = List[cell_text]。"""
     rows = []
     for tr in el.xpath(".//tr"):
@@ -177,15 +177,15 @@ def _teds_apted(pred_el, gt_el):
 # ===========================================================================
 def teds_score(pred_html, gt_html):
     """单表 TEDS ∈[0,1]。GT 无表格→None（不计入）；该出表却没出→0.0。"""
-    gt_el = _first_table(gt_html)
+    gt_el = first_table(gt_html)
     if gt_el is None:
         return None
-    pred_el = _first_table(pred_html)
+    pred_el = first_table(pred_html)
     if pred_el is None:
         return 0.0
 
-    gt_rows = _parse_grid(gt_el)
-    pred_rows = _parse_grid(pred_el)
+    gt_rows = parse_grid(gt_el)
+    pred_rows = parse_grid(pred_el)
     n = max(_grid_nodes(gt_rows), _grid_nodes(pred_rows))
 
     spanned = _has_span(gt_el) or _has_span(pred_el)

@@ -1,21 +1,18 @@
 # -*- coding: utf-8 -*-
-"""TABLE 2D 重组（支持多子表）。
+"""TABLE 2D 重组（单表）。
 
-关键事实（实测）：API 对**跨子表边界**的 tile，会自己返回**多个 `<table>` + 中间标题**
-（如 a300a942 的某 tile 返回 表1尾3行 + "上海人寿…女性" + 表2表头）。之前 `_first_table`
-只取第一个 `<table>`、丢掉了后面的表和标题 → 多子表被压成一个、结构崩。
-
-本模块：
+职责：
   - `parse_tile_segments`：把一个 tile 输出切成 [(标题, 单元格网格), ...]（按 <table> 分段）；
-  - `_reconstruct_grid`：单表的 2D 重组（全局列宽 W_c 一致，原逻辑）；
-  - `stitch_multi`：扫各 tile 的分段，在"≥2 段"的边界 band 处把网格拆成多个子表，
-    每个子表各自重建 + 还原标题，按 "标题\n\n<table>" 拼回（对齐 GT 多 <table> 结构）。
-  单表（所有 tile 只 1 段）走原路径，零回归。
+  - `_reconstruct_grid`：单表的 2D 重组（全局列宽 W_c 一致）；
+  - `stitch_single_table`：全部 band 平铺 → 剥 ragged 顶 → 重建 → HTML。
+
+**不做子表检测**：多子表在几何层(crop 三段式)已切好，落到这里的单元(全宽模式 /
+列错位回退)都是单张表(训练集 gt_tables=1 实证)。旧 stitch_multi 的 caption/表头行
+边界检测在单表上只会误拆(8a4 被拆 4 张→11.3)，已随多子表前置切分退役。
 """
 import re
 from collections import Counter
-from rapidfuzz.distance import Levenshtein as _Lev
-from metrics.teds import _first_table, _parse_grid
+from metrics.teds import first_table, parse_grid
 
 _GT_TABLE_OPEN = '<table border="1" cellpadding="8" cellspacing="0">'
 
@@ -64,15 +61,15 @@ def parse_tile_segments(html):
             tbl, after = chunk + "</table>", ""
         else:
             tbl, after = chunk[:ci + 8], _clean_caption(chunk[ci + 8:])
-        el = _first_table(tbl)
-        grid = _parse_grid(el) if el is not None else []
+        el = first_table(tbl)
+        grid = parse_grid(el) if el is not None else []
         segs.append((captions[i], grid))
         captions.append(after)
     return segs
 
 
 def parse_tile(html):
-    """兼容旧接口：只取第一个表的网格。"""
+    """tile 解析入口(两条流水线共用)：只取第一个表的网格。"""
     segs = parse_tile_segments(html)
     return segs[0][1] if segs else []
 
@@ -87,50 +84,8 @@ def _mode(vals):
     return Counter(vals).most_common(1)[0][0] if vals else 0
 
 
-def _seq_sim(a, b):
-    sa = "|".join((x or "").strip() for x in a)
-    sb = "|".join((x or "").strip() for x in b)
-    m = max(len(sa), len(sb))
-    return 1.0 if m == 0 else 1.0 - _Lev.distance(sa, sb) / m
-
-
-def _append_cells_dedup(row, cells, max_overlap=8, sim_thresh=0.82):
-    """横向 overlap 去重：当前行尾部与新 tile 行头部相似时丢掉重复前缀。"""
-    cells = list(cells)
-    best_k, best_s = 0, 0.0
-    kmax = min(max_overlap, len(row), len(cells))
-    for k in range(kmax, 1, -1):
-        s = _seq_sim(row[-k:], cells[:k])
-        if s > best_s:
-            best_k, best_s = k, s
-    if best_k and best_s >= sim_thresh:
-        cells = cells[best_k:]
-    row.extend(cells)
-
-
-def _row_sim_cells(a, b):
-    return _seq_sim(a, b)
-
-
-def _extend_rows_dedup(all_rows, band, max_overlap=4, sim_thresh=0.86):
-    """纵向 overlap 去重：上一 band 尾行与下一 band 头行相似时丢掉重复行。"""
-    if not all_rows or not band:
-        all_rows.extend(band)
-        return
-    best_k, best_s = 0, 0.0
-    kmax = min(max_overlap, len(all_rows), len(band))
-    for k in range(kmax, 0, -1):
-        sims = [_row_sim_cells(a, b) for a, b in zip(all_rows[-k:], band[:k])]
-        s = sum(sims) / len(sims)
-        if s > best_s:
-            best_k, best_s = k, s
-    if best_k and best_s >= sim_thresh:
-        band = band[best_k:]
-    all_rows.extend(band)
-
-
 # ---------------------------------------------------------------------------
-# 单表 2D 重组（全局列宽一致 W_c）—— 原 stitch_table 逻辑，重构成可复用
+# 单表 2D 重组（全局列宽一致 W_c）
 # ---------------------------------------------------------------------------
 def _width_segments(parsed, n_col):
     """检测「不同宽度子表上下堆叠」：某 tile-column 的众数列宽在某 band 突变
@@ -170,8 +125,10 @@ def _width_segments(parsed, n_col):
     return [(0, b), (b, n_band)]
 
 
-def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4,
-                      overlap_x=0, overlap_y=0, framed=False):
+_DEG_HI, _DEG_LO = 1.8, 0.4   # 离群 tile 列宽剔除带(>1.8×/<0.4×中位=坏读,不进 W_c 投票)
+
+
+def _reconstruct_grid(parsed, col_cells, col_cuts=None, framed=False):
     """parsed[r][c] = 单元格网格 或 None。返回 rows（list[list[str]]）。
 
     空列块（API 无读数）的列宽不再用过检测的 col_cells（会膨胀），而是按
@@ -183,8 +140,7 @@ def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4,
     if len(segs) > 1:                               # 多宽度子表 → 逐段递归(各自 W_c)
         out = []
         for b0, b1 in segs:
-            out.extend(_reconstruct_grid(parsed[b0:b1], col_cells, col_cuts,
-                                         deg_hi, deg_lo, overlap_x, overlap_y, framed))
+            out.extend(_reconstruct_grid(parsed[b0:b1], col_cells, col_cuts, framed))
         return out
     n_band = len(parsed)
 
@@ -196,7 +152,7 @@ def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4,
             continue
         med = sorted(counts)[len(counts) // 2]
         for c, g in enumerate(parsed[r]):
-            if g and not (len(g) > deg_hi * med or len(g) < deg_lo * med):
+            if g and not (len(g) > _DEG_HI * med or len(g) < _DEG_LO * med):
                 col_widths[c].append(_mode_width(g))
 
     # 列密度（列/像素）：用有读数的列块估计，给空块兜底用
@@ -243,15 +199,8 @@ def _reconstruct_grid(parsed, col_cells, col_cuts=None, deg_hi=1.8, deg_lo=0.4,
             wc = W[c]
             for i in range(nrows):
                 cells = list(g[i]) if (g and i < len(g)) else []
-                cells = (cells + [""] * wc)[:wc]
-                if overlap_x:
-                    _append_cells_dedup(band[i], cells)
-                else:
-                    band[i].extend(cells)
-        if overlap_y:
-            _extend_rows_dedup(all_rows, band)
-        else:
-            all_rows.extend(band)
+                band[i].extend((cells + [""] * wc)[:wc])
+        all_rows.extend(band)
     return all_rows
 
 
@@ -267,121 +216,6 @@ def _is_caption_like(text):
     cjk = len(_CJK.findall(t))
     dig = len(_DIGIT.findall(t))
     return cjk >= 4 and cjk > dig
-
-
-def _row_sim(a, b):
-    """两行整行签名的归一化相似度 ∈[0,1]（数字也参与，1=完全相同）。"""
-    sa, sb = "|".join(a), "|".join(b)
-    m = max(len(sa), len(sb))
-    return 1.0 - _Lev.distance(sa, sb) / m if m else 1.0
-
-
-_NUM_RE = re.compile(r"-?[\d,]+\.?\d*%?")
-
-
-def _is_num(s):
-    return bool(_NUM_RE.fullmatch((s or "").replace(" ", "")))
-
-
-def _to_int(s):
-    s = (s or "").replace(",", "").strip()
-    return int(s) if re.fullmatch(r"-?\d+", s) else None
-
-
-def _label_col(rows, thr=0.5):
-    """标签列 = 自左起第一个填充率 ≥thr 的列。跳过『合并单元格只在段顶填值』的稀疏前导
-    列（如险种/性别），否则逐行 _first_cell 会在空行漂移到右侧数据列、把数据行误判成
-    『数字运行→文本』的子表边界（3fa0851c：前3列稀疏 → 误拆 → 0.456）。"""
-    if not rows:
-        return 0
-    W = max(len(r) for r in rows)
-    n = len(rows)
-    for c in range(W):
-        if sum(1 for r in rows if len(r) > c and (r[c] or "").strip()) / n >= thr:
-            return c
-    return 0
-
-
-def _split_at_headers(rows, min_seg=3, sim_hi=0.95, max_frac=0.4):
-    """在"子表边界行"处把行序列切成多个子表段（边界行归入其下方子表）。
-
-    两个**与"标题长短/有无数字"无关**的边界信号(取并集)：
-      B. **首列『数字运行→文本』**(主力)：数据行首列是数字、子表标题/表头首列是文本。
-         沿首列向下,**只用数据行累积"数字运行"**,**忽略每段开头的文本行(表头/多级表头)**——
-         否则重复表头会污染运行、让后续边界全漏(实测召回掉到 61%)。当数字运行 ≥2 后遇到
-         文本行 → 该处即子表边界。对 OCR 鲁棒(认数字)、短标题不漏、无状态污染。
-         GT 实测:多表召回 100%、单表仅 1 误检(交费期间这类文本列被合并的个案)。
-         注:曾试"翻转后须重现表头"做确认,虽去掉那 1 误检,但召回暴跌到 85%(误杀边界后
-         表头未在窗口内重现的真子表)——得不偿失,不用确认。
-      A. **重复表头**(备份)：与首行整行高度相似的后续行，带 max_frac 防误判闸。GT 上被 B
-         覆盖，但 B 依赖数字首列；纯文本首列的多子表由 A 兜底；0 误检故保留。
-         sim_hi=0.95：真·重复表头是**完全相同**(sim=1.0)；上采样读准后，相邻投保年龄
-         数据行(金额随年龄缓变)整行 sim 会冲到 ~0.85 被误判成表头而过切(2358594b
-         上采样 0.65→0.45、块4→5)，故阈值从 0.85 提到 0.95 挡住"相似但非相同"的数据行。
-    仅当能切出 ≥2 段、每段 ≥min_seg 行时才生效。
-    """
-    n = len(rows)
-    if n < 2 * min_seg:
-        return [rows]
-    header = rows[0]
-    bnds = set()
-
-    # B. 标签列 数字运行(≥2,忽略开局文本) → 文本/数字序列表头 = 边界（主力）。
-    # 用固定标签列(跳过稀疏合并列)而非逐行 _first_cell，避免空行漂移到数据列致误判。
-    lc = _label_col(rows)
-    fc = [(r[lc].strip() if len(r) > lc and r[lc] else "") for r in rows]
-    run = 0
-    for i in range(1, n):
-        cur = fc[i]
-        if not cur:
-            continue
-        if _is_num(cur):
-            run += 1                          # 数据行,累积数字运行
-        else:
-            if run >= 2:                      # 已建立数字运行 → 该文本行是子表边界
-                bnds.add(i)
-                run = 0
-            # run<2: 仍在该段开头表头区,忽略此文本行(不计边界、不重置已有运行)
-
-    # A. 重复表头（仅当 B 一个边界都没找到时兜底：纯文本首列的多子表，B 的数字运行建不起来）。
-    # 不与 B 取并集——并集会让 A 在 B 已正确切分的数字表上过切(实测召回 100%→96%)。
-    if not bnds:
-        hdr_match = [i for i in range(1, n) if _row_sim(rows[i], header) >= sim_hi]
-        if 0 < len(hdr_match) <= max_frac * n:
-            bnds |= set(hdr_match)
-
-    segs, cur = [], []
-    for i, row in enumerate(rows):
-        if i in bnds and len(cur) >= min_seg:
-            segs.append(cur)
-            cur = [row]
-        else:
-            cur.append(row)
-    if cur:
-        segs.append(cur)
-    # 末段太短则并回上一段（避免碎尾）
-    if len(segs) >= 2 and len(segs[-1]) < min_seg:
-        segs[-2].extend(segs[-1])
-        segs.pop()
-    return segs
-
-
-def _trim_trailing_empty_cols(rows):
-    """删除"所有行都为空"的尾部列（W_c 过补出来的幻影列）。
-    安全：三角表尾列在上部行有数据→非全空→保留；只裁真正全空的尾列。
-    """
-    if not rows:
-        return rows
-    maxlen = max(len(r) for r in rows)
-    keep = maxlen
-    for c in range(maxlen - 1, -1, -1):
-        if all(len(r) <= c or not (r[c] or "").strip() for r in rows):
-            keep = c
-        else:
-            break
-    if keep == maxlen:
-        return rows
-    return [r[:keep] for r in rows]
 
 
 def _one_table(rows):
@@ -417,7 +251,7 @@ def rows_to_html(rows, panel_n=1):
 
 
 # ---------------------------------------------------------------------------
-# 多子表重组主入口
+# 单表组装主入口
 # ---------------------------------------------------------------------------
 def _filled(row):
     return [x for x in row if (x or "").strip()]
@@ -433,8 +267,8 @@ def _peel_ragged_top(bands, framed=False):
     """band0 的最左 tile 若比其它 tile 多出【顶部短行】(标签只出现在最左 tile)→ 弹出作
     caption、从 grid 去掉。修「标签揉进表头致对角错位」:子表标签"男性 3年交"是只占左 2-3
     格的半行,只在最左列 tile,stitch 按 nrows=max 逐行对齐时它和其它 tile 的表头对齐 →
-    整表每行=上行左半+下行右半、对角劈裂(a4924b6d 12子表 TEDS 48)。弹掉后行对齐、表去
-    错位 + 标签成 caption(对 ro)。判据:最左 tile 行数 > 其它 tile,且多出的顶行格数 ≤3。
+    整表每行=上行左半+下行右半、对角劈裂(a4924b6d 12子表 TEDS 48)。弹掉后行对齐、标签成
+    caption(对 ro)。判据:最左 tile 行数 > 其它 tile,且多出的顶行格数 ≤3。
 
     **向下合并**:遇到单格文字行(如 API 把表头角"年度/年龄"单独成行)、且其下一行恰比
     数据满宽少一列(== 满宽-1)→ 不剥进 caption,而把这格 prepend 回下一行补回首列、停。
@@ -471,20 +305,14 @@ def _peel_ragged_top(bands, framed=False):
     return "\n".join(caps)
 
 
-def stitch_multi(tile_outputs, meta, single=False):
-    """按 API 自带的多 <table> 边界拆子表、各自重建、拼回。单表走单表路径。
-
-    single=True(全宽模式用):**不做任何子表检测** —— 几何层 subtables/run 已把子表
-    切好,进来的 unit 就是单张子表。关掉 band 边界(caption 误判)和 _split_at_headers(表头行
-    误判),只把所有带重建成一张表(列重建/稀疏补位仍走 _reconstruct_grid)。修「全宽单列tile
-    被 stitch 误拆成多表」(8a4 被拆4张→11.3)。"""
+def stitch_single_table(tile_outputs, meta):
+    """单表组装：清洗各 tile 分段(丢展平幻觉) → 全部 band 平铺 → 剥 ragged 顶 →
+    `_reconstruct_grid` 重建(列重建/稀疏补位) → HTML(+caption)。"""
     n_band = len(tile_outputs)
     n_col = max((len(row) for row in tile_outputs), default=0)
     col_cells = meta.get("col_cells", [])
     col_cuts = meta.get("col_cuts")
     row_cuts = meta.get("row_cuts")
-    overlap_x = meta.get("overlap_x", 0)
-    overlap_y = meta.get("overlap_y", 0)
     panel_n = meta.get("panel_n", 1)
     # 有框补空列只对单表:panel(左右并排)的列含中间缝、补空列会破坏 panel_n 拆分(8c8c784c 1.0→0.23)
     framed = meta.get("col_framed", False) and panel_n < 2
@@ -512,28 +340,18 @@ def stitch_multi(tile_outputs, meta, single=False):
     segs = [[_clean_segs(r, c) for c in range(len(tile_outputs[r]))]
             for r in range(n_band)]
 
-    # 子表 = 在"某 band 的 tile 出现 ≥2 段"处拆分。收集每个子表的 (caption, parsed_bands)
-    subtables = []                                  # [(caption, parsed[][])]
-    cur_bands = []                                  # 当前子表的 band 列表，每元素是 [grid/None]*n_col
-    cur_caption = ""
+    # 全部分段平铺成 band 序列（不做子表边界判定）。
+    # 段索引对齐:稀疏列(段数<max_seg)在三角形列分段宽表里缺的是**靠前**的段,
+    # 按 max_seg 末端对齐(idx=j-(max_seg-len(sc)));max_seg=1 时 offset=0 行为不变。
+    bands = []
     first_caption = ""
-
     for r in range(n_band):
         max_seg = max((len(segs[r][c]) for c in range(len(segs[r]))), default=0)
-        if max_seg == 0:
-            continue
-        # 取该 band 第 j 段（j 从 0..max_seg-1）：每个 tile 的第 j 段网格
         for j in range(max_seg):
             band_row = []
             seg_cap = ""
             for c in range(n_col):
                 sc = segs[r][c] if c < len(segs[r]) else []
-                # 段索引对齐:稀疏列(段数<max_seg)在三角形列分段宽表里缺的是**靠前**的
-                # 子表段——右列段(大保单年度末)对大投保年龄无数据,只在靠后子表才出现。
-                # 故按 max_seg 末端对齐(idx=j-(max_seg-len(sc))),而非一律取第 j 段;
-                # 否则后段的右列表头会被错配进前段、被 _is_numeric_header_row 误判成
-                # 表头而过切(2358594b GT4→7、3c3f1666 GT3→5 的根因)。max_seg=1 时
-                # offset=0,行为不变,不影响普通单段 band。
                 idx = j - (max_seg - len(sc))
                 if 0 <= idx < len(sc):
                     cap, grid = sc[idx]
@@ -542,52 +360,12 @@ def stitch_multi(tile_outputs, meta, single=False):
                         seg_cap = cap               # 该段前的"标题样"文字
                 else:
                     band_row.append(None)
-            # 边界判定：① 同 tile 出现新表段(j>0)；② 段前有标题样文字
-            # (竖线缝 split_bands 实测净负，已弃用——会过切，offset 多子表收益)
-            has_data = any(any(g for g in br) for br in cur_bands)
-            boundary = False if single else ((j > 0) or (seg_cap and has_data))
-            if boundary and cur_bands:
-                subtables.append((cur_caption, cur_bands))
-                cur_caption = seg_cap
-                cur_bands = [band_row]
-            else:
-                if seg_cap and not first_caption and not cur_bands:
-                    first_caption = seg_cap         # 文档顶标题
-                cur_bands.append(band_row)
-    if cur_bands:
-        subtables.append((cur_caption, cur_bands))
+            if seg_cap and not first_caption and not bands:
+                first_caption = seg_cap             # 文档顶标题
+            bands.append(band_row)
 
-    # 单表：API 未自带拆分。再用"纯文字表头行"做一次泛化拆分（多子表被合并的兜底）
-    if len(subtables) <= 1:
-        bands = cur_bands if subtables else []
-        lead = _peel_ragged_top(bands, framed=framed)  # 无框:空角格→填回(去泄漏);剥标签去对角错位
-        rows = _reconstruct_grid(bands, col_cells, col_cuts,
-                                 overlap_x=overlap_x, overlap_y=overlap_y, framed=framed)
-        segs = [rows] if (single and rows) else _split_at_headers(rows)
-        if len(segs) >= 2:
-            html = "\n\n".join(rows_to_html(s, panel_n) for s in segs)
-        else:
-            html = rows_to_html(rows, panel_n)
-        cap = (first_caption + "\n\n" + lead).strip("\n") if (first_caption and lead) else (first_caption or lead)
-        if cap:
-            html = cap + "\n\n" + html
-        return html
-
-    # 多子表：逐个重建 + 拼标题。每个 API 子表再用"纯文字表头行"递归拆（重复表头=内部边界）
-    parts = []
-    for k, (cap, bands) in enumerate(subtables):
-        rows = _reconstruct_grid(bands, col_cells, col_cuts,
-                                 overlap_x=overlap_x, overlap_y=overlap_y, framed=framed)
-        if not rows:
-            continue
-        segs = _split_at_headers(rows)
-        html = ("\n\n".join(rows_to_html(s, panel_n) for s in segs)
-                if len(segs) >= 2 else rows_to_html(rows, panel_n))
-        caption = (first_caption if k == 0 else cap)
-        parts.append((caption + "\n\n" + html) if caption else html)
-    return "\n\n".join(parts)
-
-
-# 兼容旧调用名
-def stitch_table(tile_outputs, meta, **kw):
-    return stitch_multi(tile_outputs, meta, single=kw.get("single", False))
+    lead = _peel_ragged_top(bands, framed=framed)  # 无框:空角格→填回(去泄漏);剥标签去对角错位
+    rows = _reconstruct_grid(bands, col_cells, col_cuts, framed=framed)
+    html = rows_to_html(rows, panel_n)
+    cap = (first_caption + "\n\n" + lead).strip("\n") if (first_caption and lead) else (first_caption or lead)
+    return (cap + "\n\n" + html) if cap else html

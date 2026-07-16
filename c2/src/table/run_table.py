@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""TABLE 端到端 runner + TEDS 评测。
+"""TABLE Stage II/III：逐块识别(ocr/ocr_text) + 合并拼接(merge) + 入口 parse_table。
 
-流程：预处理 → 网格切片 → 并发调用 → 2D 重组 → 与 GT 比 TEDS / 文本编辑距离。
-所有 API 调用走缓存。
+主路:crop 裁块 → ocr_seg 骨架 OCR;列错位表回退 ocr_table 自由读(tile+重组),
+坏 tile 由 _refine_bad_tiles 裁剪重读。main() 是抽样冒烟测试 CLI。所有 API 调用走缓存。
 """
 import os
 import re
@@ -15,20 +15,14 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
 import common.api_client as api
-from common.config import TRAIN_TABLE_DIR, API_USER_IDS
+from common.config import TRAIN_TABLE_DIR, BIN_FAINT
 from common.preprocess import prep
 from table.slicer_table import slice_table
 from table.crop import crop
-from table.grid_ocr import ocr_seg, _up, _ASPECT_SAFE, _EDGE_PAD
-from table.stitch_table import stitch_table, parse_tile, parse_tile_segments, rows_to_html
+from table.grid_ocr import ocr_seg
+from table.tiles import upscale, pad_white, call_tiles, ASPECT_SAFE
+from table.stitch_single import stitch_single_table, parse_tile, parse_tile_segments, rows_to_html
 from metrics.evaluate import table_teds, text_edit_loss
-
-
-
-
-def _is_truncated(o):
-    """tile 输出被 ~12k 上限截断：有 <table 却无 </table>。"""
-    return bool(o) and "<table" in o.lower() and "</table>" not in o.lower()
 
 
 def _merge_side_by_side(left_rows, right_rows):
@@ -45,7 +39,7 @@ def _merge_side_by_side(left_rows, right_rows):
     return out
 
 
-def _split_call_merge(img, timeout, depth=0, axis="h", cache_dir=None):
+def _split_call_merge(img, timeout, *, axis, depth=0, cache_dir=None):
     """把坏 tile 裁剪成两半重读后合并。
 
     axis="h": 上/下拆，适合截断、少行(row_under)。
@@ -61,10 +55,10 @@ def _split_call_merge(img, timeout, depth=0, axis="h", cache_dir=None):
 
     out1 = api.call_safe(first, timeout=timeout, cache_dir=cache_dir)
     out2 = api.call_safe(second, timeout=timeout, cache_dir=cache_dir)
-    if depth < 2 and _is_truncated(out1) and min(first.size) > 200:
-        out1 = _split_call_merge(first, timeout, depth + 1, axis=axis, cache_dir=cache_dir)
-    if depth < 2 and _is_truncated(out2) and min(second.size) > 200:
-        out2 = _split_call_merge(second, timeout, depth + 1, axis=axis, cache_dir=cache_dir)
+    if depth < 2 and api.is_truncated(out1) and min(first.size) > 200:
+        out1 = _split_call_merge(first, timeout, axis=axis, depth=depth + 1, cache_dir=cache_dir)
+    if depth < 2 and api.is_truncated(out2) and min(second.size) > 200:
+        out2 = _split_call_merge(second, timeout, axis=axis, depth=depth + 1, cache_dir=cache_dir)
 
     rows1, rows2 = parse_tile(out1), parse_tile(out2)
     if axis == "v":
@@ -77,9 +71,8 @@ def _split_call_merge(img, timeout, depth=0, axis="h", cache_dir=None):
 def _tile_shape(html):
     rows = parse_tile(html)
     if not rows:
-        return 0, 0, 0
-    widths = [len(r) for r in rows]
-    return len(rows), max(widths), sorted(widths)[len(widths) // 2]
+        return 0, 0
+    return len(rows), max(len(r) for r in rows)
 
 
 def _bad_tile_reason(img, html, expected_rows=None):
@@ -88,14 +81,14 @@ def _bad_tile_reason(img, html, expected_rows=None):
     返回 None 表示可用；返回字符串表示建议重读。这里刻意只抓高置信坏块，
     避免把稀疏表/短表误判后引入更多 API 调用。
     """
-    nrows, maxw, medw = _tile_shape(html)
-    w, h = img.size
+    nrows, maxw = _tile_shape(html)
+    w = img.size[0]
     # 典型展平幻觉：1~2 行、几百列；或者超过像素物理上限。
     if nrows <= 2 and maxw >= 80:
         return "flat"
     if maxw > max(80, w // 6):
         return "too_wide"
-    if _is_truncated(html):
+    if api.is_truncated(html):
         return "truncated"
     if nrows == 0:
         return None
@@ -144,16 +137,16 @@ def _refine_bad_tiles(tiles, outs, meta, timeout=240, upsample=1, cache_dir=None
     with ThreadPoolExecutor(max_workers=workers) as ex:
         fixed = list(ex.map(
             lambda item: _repair_bad_tile(
-                _up(tiles[item[0]][item[1]], upsample), outs[item[0]][item[1]], item[2],
+                upscale(tiles[item[0]][item[1]], upsample), outs[item[0]][item[1]], item[2],
                 timeout, row_cells[item[0]] if item[0] < len(row_cells) else None,
                 cache_dir=cache_dir),
             todo))
-    for (r, c, _reason), o in zip(todo, fixed):
+    for (r, c, _), o in zip(todo, fixed):
         outs[r][c] = o
         # 修复成功的**完整**结果回写缓存：截断 tile 此前未落盘（api 不缓存截断），
         # 这里把拆分重读合并的完整结果写回原 tile key，下次直接命中、不再拆分。
         exp = row_cells[r] if r < len(row_cells) else None
-        up_img = _up(tiles[r][c], upsample)
+        up_img = upscale(tiles[r][c], upsample)
         if o and _bad_tile_reason(up_img, o, exp) is None:
             api.write_cache(up_img, o, cache_dir=cache_dir)
     return outs
@@ -161,38 +154,15 @@ def _refine_bad_tiles(tiles, outs, meta, timeout=240, upsample=1, cache_dir=None
 
 def _call_grid(tiles, timeout=240, upsample=1, cache_dir=None):
     """并发调用 2D tiles，保持 [r][c] 结构。None（空白块）不调 API。
-    upsample>1 时每个 tile 先放大再调（修密集小字读崩），缓存进 cache_dir(分离)。
-
-    **失败重试**：非空白 tile 若返回空串（=API 限流/失败被 call_safe 静默置空），
-    会被当成空白块丢内容 → **分数随运行随机波动**(同一图两次跑分不同)。
-    故对"非空白却空"的 tile 做多轮重试(降并发避开限流)，直到拿到内容或轮次用尽，
-    保证结果可复现、不随机丢行。
-    """
-    from common.config import MAX_CONCURRENCY
+    调用层复用 tiles.call_tiles；retry_rounds=4:非空白 tile 返回空串(限流被
+    call_safe 静默置空)会被当空白块丢内容→分数随运行随机波动,重试保证可复现。"""
     flat = [(r, c) for r in range(len(tiles))
             for c in range(len(tiles[r])) if tiles[r][c] is not None]
-
-    def _call_set(items, workers):
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            return list(ex.map(
-                lambda x: api.call_safe(_up(tiles[x[1][0]][x[1][1]], upsample), timeout=timeout,
-                                        user_id=API_USER_IDS[x[0] % len(API_USER_IDS)],
-                                        cache_dir=cache_dir),
-                list(enumerate(items))))
-
-    grid = [[None] * len(tiles[r]) for r in range(len(tiles))]
-    for (r, c), o in zip(flat, _call_set(flat, min(MAX_CONCURRENCY, max(1, len(flat))))):
+    outs = call_tiles([tiles[r][c] for r, c in flat], timeout=timeout,
+                      upsample=upsample, cache_dir=cache_dir, retry_rounds=4)
+    grid: list = [[None] * len(tiles[r]) for r in range(len(tiles))]
+    for (r, c), o in zip(flat, outs):
         grid[r][c] = o
-
-    # 重试失败置空的 tile（CACHE_ONLY 离线评测下跳过——空=未缓存,重调也是空）
-    if not getattr(api, "CACHE_ONLY", False):
-        for _round in range(4):
-            empties = [(r, c) for (r, c) in flat if not (grid[r][c] or "").strip()]
-            if not empties:
-                break
-            for (r, c), o in zip(empties, _call_set(empties, max(1, min(6, len(empties))))):
-                if (o or "").strip():
-                    grid[r][c] = o
     return grid
 
 
@@ -234,41 +204,37 @@ def _ocr_strip(img, timeout):
     内容无损。"""
     import numpy as np
     w, h = img.size
-    if w <= _ASPECT_SAFE * max(1, h):
+    if w <= ASPECT_SAFE * max(1, h):
         return api.call_safe(img, timeout=timeout)
     g = np.asarray(img.convert("L"))
     lo, hi = int(w * 0.3), int(w * 0.7)
-    colf = (g < 180).mean(axis=0)[lo:hi]
+    colf = (g < BIN_FAINT).mean(axis=0)[lo:hi]
     cut = lo + int(colf.argmin())
     left = _ocr_strip(img.crop((0, 0, cut, h)), timeout)
     right = _ocr_strip(img.crop((cut, 0, w, h)), timeout)
     return " ".join(x for x in (left, right) if x)
 
 
-def ocr_text(im, bbox, timeout, pad=_EDGE_PAD):
+def ocr_text(im, bbox, timeout):
     """Stage II — 裁一个文字块 → 单独 API 识别 → 剥成纯文本。表外 furniture 与子表上方
     的标题段共用这一套(裁剪→识别→拼接),不让小文字被 stitch 包成空 <table>。"""
     x0, y0, x1, y1 = bbox
-    core = im.crop((x0, y0, x1, y1)).convert("RGB")  # 白pad(与tile同原则):实pad会把
-    crop = Image.new("RGB", (core.width + 2 * pad, core.height + 2 * pad),
-                     (255, 255, 255))                # 相邻块的半截字带进来(34e53b1c
-    crop.paste(core, (pad, pad))                     # 表1末行下半截被读成'000'垃圾)
-    crop = _up(crop, 2)                              # 2x 上采样:标题/页脚小字 OCR 提精度
+    crop = pad_white(im.crop((x0, y0, x1, y1)))      # 白pad与tile同原则(34e53b1c
+    crop = upscale(crop, 2)                                # 表1末行半截字被读成'000'垃圾)
+    #                                                    2x 上采样:标题/页脚小字提精度
     return _strip_html(_ocr_strip(crop, timeout))
 
 
-def ocr_table(im, timeout=240, peel=True, col_tile_max=None, max_rows=None):
-    """Stage II — 读单张表格裁块:切片→并发OCR→补差tile→2D重组。
-    不处理表外文字(Stage I 已把 furniture 分成独立 text 块,Stage III 用 ocr_text 读)。"""
-    tiles, meta = slice_table(im, peel=peel, col_tile_max=col_tile_max, max_rows=max_rows)
+def ocr_table(im, timeout=240):
+    """列错位表的自由读回退:切片→并发OCR→补差tile→单表 2D 重组。
+    进来的一定是几何层已裁好的**单张表**(gt_tables=1 实证),stitch 不做子表检测。"""
+    tiles, meta = slice_table(im)
     up = meta.get("upsample", 1)
     cdir = api.CACHE_UP_DIR if up > 1 else None      # 上采样 tile 缓存与原始分离
     outs = _call_grid(tiles, timeout, upsample=up, cache_dir=cdir)
-    if not getattr(api, "CACHE_ONLY", False):
+    if not api.CACHE_ONLY:
         outs = _refine_bad_tiles(tiles, outs, meta, timeout, upsample=up, cache_dir=cdir)
-    # 全宽模式:走 stitch 的单表模式(关子表检测,保留列重建/稀疏补位)。子表已在几何层切好,
-    # stitch 不该再拆——否则全宽单列tile被它的 caption 边界/表头行检测误拆成多表(8a4 11.3)。
-    pred = stitch_table(outs, meta, single=bool(meta.get("fullwidth")))
+    pred = stitch_single_table(outs, meta)
     ncalls = sum(1 for row in tiles for t in row if t is not None)
     return pred, ncalls, meta
 
@@ -303,11 +269,7 @@ def ocr(im, blocks, timeout=240):
             continue
         if kind == "title":               # mark:OCR 定真身——表格行 → 'tfrag'(Stage III 拼回)
             x0, y0, x1, y1 = bb
-            _core = im.crop((x0, y0, x1, y1)).convert("RGB")
-            _cv = Image.new("RGB", (_core.width + 2 * _EDGE_PAD, _core.height + 2 * _EDGE_PAD),
-                            (255, 255, 255))
-            _cv.paste(_core, (_EDGE_PAD, _EDGE_PAD))  # 白pad统一 _EDGE_PAD(与tile一致)
-            raw = _ocr_strip(_up(_cv, 2), timeout)
+            raw = _ocr_strip(upscale(pad_white(im.crop((x0, y0, x1, y1))), 2), timeout)
             ncalls += 1
             rows = parse_tile(raw) if raw and raw.lower().count("<td") >= 6 else None
             if rows:
@@ -357,7 +319,7 @@ def ocr(im, blocks, timeout=240):
                     items.append(["text", txt, None])
             continue
         # 列错位(rows_misaligned):骨架不可信 → 自由读回退(旧路)
-        p, nc2, _ = ocr_table(im.crop(bb), timeout, peel=False)
+        p, nc2, _ = ocr_table(im.crop(bb), timeout)
         ncalls += nc2
         if p.lower().count("<td") >= _MIN_TABLE_CELLS:
             grids = [g for _, g in parse_tile_segments(p) if g]

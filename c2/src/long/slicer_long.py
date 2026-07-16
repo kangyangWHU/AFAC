@@ -62,16 +62,3 @@ def slice_long(im, target_h=5000, search=500, dark_thresh=200, min_h=800):
     strips = [im.crop((0, cuts[i], w, cuts[i + 1]))
               for i in range(len(cuts) - 1)]
     return strips, cuts
-
-
-if __name__ == "__main__":
-    import glob
-    import os
-    from common.config import TRAIN_LONG_DIR
-    f = sorted(glob.glob(os.path.join(TRAIN_LONG_DIR, "images", "*.jpg")))[0]
-    im = Image.open(f)
-    for H in (3000, 5000, 8000):
-        strips, cuts = slice_long(im, target_h=H)
-        hs = [cuts[i + 1] - cuts[i] for i in range(len(cuts) - 1)]
-        print(f"H={H}: {len(strips)} 条, 条高 min={min(hs)} max={max(hs)} "
-              f"(原高 {im.size[1]})")

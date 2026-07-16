@@ -79,53 +79,14 @@ def _runlen_lines(dark, min_run=120):
     return lines
 
 
-def _otsu_split(widths):
-    """对一组缝宽做 Otsu 双峰分离，返回阈值：宽度 ≥ 阈值 = 列缝。
-
-    原理（关键）：**同一张表内，文字内缝(字/位间隙)永远比列缝窄**——所以缝宽分布
-    是双峰：窄峰=文字白河、宽峰=列缝，中间有谷。在本表自己的宽度直方图上找这个谷
-    （Otsu 最大化类间方差），就能逐表自适应地把两者切开，无需任何固定/相对常数。
-    宽度跨度可达数百倍，故在 log2 空间做。近似单峰（无明显窄/宽之分）→ 返回 0（全留）。
-    """
-    ws = np.asarray(widths, dtype=float)
-    if len(ws) < 3 or ws.max() / max(1.0, ws.min()) < 2.0:
-        return 0.0
-    lw = np.log2(ws)
-    edges = np.linspace(lw.min(), lw.max(), 50)
-    hist, _ = np.histogram(lw, bins=edges)
-    ctr = (edges[:-1] + edges[1:]) / 2
-    cum = np.cumsum(hist)
-    cumv = np.cumsum(hist * ctr)
-    tot, totv = cum[-1], cumv[-1]
-    best_t, best_var = 0.0, -1.0
-    for i in range(1, len(hist)):
-        w0 = cum[i - 1]
-        w1 = tot - w0
-        if w0 == 0 or w1 == 0:
-            continue
-        m0 = cumv[i - 1] / w0
-        m1 = (totv - cumv[i - 1]) / w1
-        v = w0 * w1 * (m0 - m1) ** 2          # 类间方差
-        if v > best_var:
-            best_var, best_t = v, edges[i]
-    return 2.0 ** best_t
-
-
-def _gap_lines(dark_frac, lo=0.02, floor=3, width_gate=False):
-    """无边框回退：单元格间的低墨"白缝"作为候选切点。
-
-    `width_gate`（**仅列方向开**）：右对齐数字各位之间会形成**全高、近零墨的"白河"**
-    ——与真列缝在墨量上完全无法区分（卡到 0 也分不开），导致 `lo` 阈值单用时列数虚高
-    数倍（100 张列检出中位 411%、最高 846%、49/100 严重过分割）。唯一可区分量是**缝宽**，
-    故按 `_otsu_split` 逐表分离窄(文字)/宽(列缝)两峰只留宽峰，逐表自适应、无固定常数。
-    **行方向必须关**：行缝大小相近，Otsu 会把窄行缝当文字、只留分节大缝 → 行塌成几条
-    （实测行检出 102%→13%）。colspan/JPEG 杂点用 lo 容差兜（不要求严格 ==0，否则跨列
-    表头处真缝被删）。floor 先滤 1~2px 抗锯齿噪点。
-    """
+def _gap_lines(dark_frac, lo=0.02):
+    """无边框回退：单元格间的低墨"白缝"作为候选切点（行方向专用；列方向走 column_cuts
+    自己的白缝逻辑）。colspan/JPEG 杂点用 lo 容差兜（不要求严格 ==0，否则跨列表头处
+    真缝被删）。返回每条缝的中心。"""
     idx = np.where(dark_frac < lo)[0]
     if len(idx) == 0:
         return []
-    runs, run = [], [idx[0]]                 # 先聚成连续低墨段（缝），段内允许 ≤2px 断点
+    runs, run = [], [idx[0]]                 # 聚成连续低墨段（缝），段内允许 ≤2px 断点
     for x in idx[1:]:
         if x - run[-1] <= 2:
             run.append(x)
@@ -133,12 +94,7 @@ def _gap_lines(dark_frac, lo=0.02, floor=3, width_gate=False):
             runs.append(run)
             run = [x]
     runs.append(run)
-    if not width_gate:                       # 行方向：原样返回每段中心，不做宽度过滤
-        return [int(np.mean(r)) for r in runs]
-    runs = [r for r in runs if r[-1] - r[0] + 1 >= floor] or runs
-    thr = _otsu_split([r[-1] - r[0] + 1 for r in runs])
-    keep = [r for r in runs if (r[-1] - r[0] + 1) >= thr] or runs
-    return [int(np.mean(r)) for r in keep]
+    return [int(np.mean(r)) for r in runs]
 
 
 def _boundaries(lines, total):
@@ -253,7 +209,7 @@ def row_bnds(dark, dark180):
     行 = 非白 run,内部边界 = 白 run 中心,首尾补 0/H(无框顶底无框线)。"""
     H, W = dark.shape
     runl = _runlen_lines(dark180.T, min_run=FRAME_MIN_RUN)
-    gapr = _gap_lines(dark.mean(axis=1), width_gate=False)
+    gapr = _gap_lines(dark.mean(axis=1))
     if len(runl) > 1 and len(runl) >= FRAME_GATE * len(gapr):
         # 不做"开边补界":个别开放边版式(行上画线、末行不封底,如 9c7857f3)会少估 1 行,
         # 但补界判据在"数据行/残条/表底注"间无稳判(三版实测 75/71/69%),不值复杂度——
@@ -333,9 +289,25 @@ def rows_misaligned(dark, dark180):
     return best >= 6 and full > MISALIGN_RATIO * best
 
 
-def _panel_seams(g):
-    """检测「左右并排子表」：横线在某竖直位置**断裂**（横墨跨多栏，但最长连续段只到
-    单栏宽）= N 个带框窄表并排印刷。返回中缝数（并排栏数 = 中缝数 + 1）。
+def band_blank(ink, lines180):
+    """空白判据(crop 子表缝扫描与 grid_ocr 空tile判定共用一把尺):真空 ⟺ 去线后每行
+    墨 <3px。先剔贯通竖线列(线墨=每行常数基线)与横线行(frac>LINE_FULL),剩余行墨
+    max<3 ⟺ 真空。旧均值判据尺度相关:大面积里的孤零内容(两行标题/一个"0.00")会被
+    稀释成"空白"静默吞掉(A榜0cd74f08/3b243a83;tile侧实测17tile/54格误杀)。
+    ink:计墨的二值图(grid_ocr 空tile用严档128;crop 空段用松档180);
+    lines180:剔线用松档(浅灰框线也剔干净)。"""
+    vk = lines180.mean(axis=0) <= LINE_FULL
+    b2 = ink[:, vk] if vk.any() else ink
+    rf = b2.mean(axis=1) if b2.size else np.zeros(1)
+    hk = rf <= LINE_FULL
+    rowink = b2[hk].sum(axis=1) if hk.any() else np.zeros(1)
+    return rowink.size == 0 or rowink.max() < 3
+
+
+def panel_seam_xs(g):
+    """检测「左右并排子表」的竖直中缝，返回缝的 x 坐标列表（缝数 = len；
+    并排栏数 = 缝数 + 1）：横线在某竖直位置**断裂**（横墨跨多栏，但最长连续段只到
+    单栏宽）= N 个带框窄表并排印刷。
 
     判据（实测，全 100 张仅命中 8c8c784c/bd843d61 两张真并排、零误拆）：
       - 先取「横线行」(最长横墨段 ≥0.25W)；无横线行 → borderless，竖线只是列分隔
@@ -368,10 +340,10 @@ def _panel_seams(g):
             if L >= minrun:
                 covx[s:e] = True
     if not found:
-        return 0
+        return []
     xs = np.where(covx)[0]
     xlo, xhi = xs[0], xs[-1]
-    seams = 0
+    seams = []
     i = xlo
     while i <= xhi:
         if not covx[i]:
@@ -379,11 +351,16 @@ def _panel_seams(g):
             while j <= xhi and not covx[j]:
                 j += 1
             if j - i > 0.03 * Ws:
-                seams += 1
+                seams.append((i + j) // 2 * step)
             i = j
         else:
             i += 1
     return seams
+
+
+def _panel_seams(g):
+    """中缝数（并排栏数 = 中缝数 + 1），见 panel_seam_xs。"""
+    return len(panel_seam_xs(g))
 
 
 def split_table_texts(im, hi_frac=0.05, wd_frac=0.40):

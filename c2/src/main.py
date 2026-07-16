@@ -3,12 +3,11 @@
 
 流程：对每张图 分类(LONG/TABLE) → 路由到对应流水线 → 生成 Markdown/HTML。
 LONG 走 空白带切+接缝去重；TABLE 走 网格切+空白跳过+2D重组。
-图片级串行（每张图内部已 16 路并发调 API），单图异常不影响整批。
+Pool 图级并行,每张图内部再按 MAX_CONCURRENCY 并发调 API;单图异常不影响整批。
 
 用法：
   python main.py --images DIR1 [DIR2 ...] --out submission.csv      # 推理出提交
   python main.py --a_test                                          # 跑 A 榜两目录
-  python main.py --train_eval --n 8                                # 训练集自评(带GT)
 """
 import os
 import csv
@@ -20,8 +19,7 @@ import traceback
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
-from common.config import (A_LONG_DIR, A_TABLE_DIR, TRAIN_LONG_DIR, TRAIN_TABLE_DIR,
-                    OUT_DIR, RUN_TARGETS)
+from common.config import A_LONG_DIR, A_TABLE_DIR, OUT_DIR, RUN_TARGETS
 from common.preprocess import prep
 from long.run_long import run_smart
 from table.run_table import parse_table as run_table_one   # 三段式:crop → ocr → merge
@@ -69,7 +67,7 @@ def run_batch(targets, out_csv, target_h=5000, timeout=240, limit=None):
     from functools import partial
     done = {}
     with Pool(6) as pool:                        # 图级进程并行(CPU段绕GIL);tile级API
-        results = pool.imap_unordered(           # 并发由 ocr_seg 内部线程池管
+        results = pool.imap_unordered(           # 并发由各流水线内部线程池管(table:ocr_seg / long:call_tiles)
             partial(_run_one, target_h=target_h, timeout=timeout), files)
         for i, (name, md, kind, ncalls) in enumerate(results):
             done[name] = md
@@ -87,59 +85,18 @@ def run_batch(targets, out_csv, target_h=5000, timeout=240, limit=None):
     return rows
 
 
-def train_eval(n=8, target_h=5000, timeout=240):
-    """训练集自评：各取 n 张 LONG/TABLE，跑流水线并与 GT 比三指标。"""
-    from metrics.evaluate import evaluate_one
-
-    def pick(dir_, n):
-        mds = sorted(glob.glob(os.path.join(dir_, "mds", "*.md")),
-                     key=os.path.getsize)
-        mid = len(mds) // 2
-        return mds[mid: mid + n]
-
-    pairs = []
-    for tag, d in [("long", TRAIN_LONG_DIR), ("table", TRAIN_TABLE_DIR)]:
-        for md in pick(d, n):
-            uuid = os.path.basename(md)[:-3]
-            img = os.path.join(d, "images", uuid + ".jpg")
-            if not os.path.exists(img):
-                continue
-            gt = open(md, encoding="utf-8").read()
-            try:
-                pred, kind, _ = process_image(img, tag, target_h, timeout)
-            except Exception as e:
-                print(f"  {os.path.basename(img)[:8]} 失败: {e}")
-                continue
-            r = evaluate_one(pred, gt)
-            print(f"  [{kind}] {uuid[:8]} overall2={r['overall_2term']:.1f} "
-                  f"text={r['text_score']:.1f} read={r['read_score']:.1f} "
-                  f"teds={r['teds_score']}")
-            pairs.append((tag, r))
-
-    for tag in ("long", "table"):
-        sub = [r for t, r in pairs if t == tag]
-        if not sub:
-            continue
-        o2 = sum(r["overall_2term"] for r in sub) / len(sub)
-        print(f"\n  === {tag} 均值 overall_2term = {o2:.1f} (n={len(sub)}) ===")
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--images", nargs="*", help="图片目录（可多个，需配 --kind）")
     ap.add_argument("--kind", choices=["long", "table"], help="--images 的类别")
     ap.add_argument("--a_test", action="store_true", help="跑 A 榜两目录")
-    ap.add_argument("--train_eval", action="store_true", help="训练集自评(带GT)")
     ap.add_argument("--out", default=os.path.join(OUT_DIR, "submission.csv"))
-    ap.add_argument("--n", type=int, default=8)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--target_h", type=int, default=5000)
     ap.add_argument("--timeout", type=int, default=240)
     args = ap.parse_args()
 
-    if args.train_eval:
-        train_eval(args.n, args.target_h, args.timeout)
-    elif args.a_test:
+    if args.a_test:
         targets = [(os.path.join(A_LONG_DIR, "images"), "long"),
                    (os.path.join(A_TABLE_DIR, "images"), "table")]
         run_batch(targets, args.out, args.target_h, args.timeout, args.limit)

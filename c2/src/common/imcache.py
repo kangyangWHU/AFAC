@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""prep / subtables 的磁盘缓存。
+"""纯几何计算的磁盘缓存(当前仅 crop.subtables 用)。
 
-这些是纯 CPU 重算(解码大图、几何分表/连通域/线检测),不依赖外部、对同一图确定。
-重跑评测时 API 结果由 api_client 缓存命中、不再调模型,但 prep/subtables 仍每图从头算
-→ CPU-bound 慢。这里把它们的结果按【输入图内容哈希 + 源文件 mtime】落盘:
+几何分表/连通域/线检测是纯 CPU 重算,不依赖外部、对同一图确定。重跑评测时 API 结果
+由 api_client 缓存命中,但几何仍每图从头算 → CPU-bound 慢。这里按
+【输入图内容哈希 + 依赖源文件 mtime】落盘:
   - 内容哈希:同一图命中;
-  - 源文件 mtime 进键:一旦改了 preprocess.py / crop.py,键变 → 自动失效重算,
-    无陈旧风险(不必手动清缓存)。
+  - 依赖源文件 mtime 进键:改了任一依赖文件,键变 → 自动失效重算(依赖列表由
+    @cached 调用点声明,见 crop.py——漏声明 = 陈旧缓存,教训见下)。
 """
 import os
 import pickle
