@@ -16,6 +16,10 @@ import time
 import argparse
 import traceback
 
+import sys
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
