@@ -9,6 +9,8 @@
   不调 API,直接按骨架补空 cell;半空 tile 的短行也按骨架列数补 "" 到位。
 - 列错位表(rows_misaligned)是唯一例外:骨架不可信,回退整段自由读(交上层 ocr_table)。
 """
+import re
+
 import numpy as np
 from collections import Counter
 from PIL import Image
@@ -123,51 +125,122 @@ def _grid_reread(im, rb, cb, r0, r1, c0, c1, ci, cj, timeout):
     return [[""] * left + g + [""] * right for g in grows]
 
 
+_DEC_SP = re.compile(r"(?<=\d)\.\s+(?=\d)")   # '914. 2'(小数点后误加空格)→'914.2'
+
+
+def _numeric(t):
+    return bool(t) and t.replace(".", "").replace(",", "").isdigit()
+
+
 def _cap_rows(cap):
     """caption → 行流。API 会把 tile 顶部的**前表尾行/节头行**降格为 <table> 前的
     文本(deb8de95: '103 7455.02...'三行三角尾+'## 二年交/男性'节头全在 caption 里,
     表内25物理行只进了19行)。逐行解析回行:数字密集行→按空格拆格(前表尾数据),
-    文本行→单格行(节头);markdown 井号剥掉。"""
+    文本行→单格行(节头);markdown 井号剥掉。拆格前先合并'914. 2'式误空格小数。"""
     out = []
     for ln in cap.splitlines():
         ln = ln.strip().lstrip("#").strip()
         if not ln:
             continue
+        ln = _DEC_SP.sub(".", ln)
         toks = ln.split()
-        num = sum(1 for t in toks if t.replace(".", "").replace(",", "").isdigit())
+        num = sum(1 for t in toks if _numeric(t))
         out.append(toks if (len(toks) >= 2 and num >= len(toks) - 1) else [ln])
     return out
 
 
-def ocr_seg(im, timeout=240):
-    """单个 seg 的骨架 OCR。返回 (grid, ncalls, meta);grid=None 表示骨架不可信需回退。
+def _split_packed(rows, nc, inkws=None):
+    """td 塌缩拆格(装配前规整):API 偶发把一行的多个 token 塞进**一个 <td>**(空格相连),
+    正常 tile 路径与画网格重读都会出(B榜 a4e24107/7a8f3a74/34821e6c)。两条**结构判据**
+    (无 magic 阈值,命中其一即拆,均容-1=API 漏读一格,与骨架对齐"容±1"同源):
+    ① 恰好补齐 nc:拆后该行格数(含空格)恰等于期望列数(34821e6c 表头 13 token→14=nc-1);
+    ② 恰好补齐墨迹宽:拆后该行**非空格数**恰等于该行骨架墨迹非空格数 inkw(墨证据当期望,
+      与 _diagnose 同哲学;救 nc 够不着的场合——画网格重读行'[8值挤1格,垫空×3]' nc=13
+      拆后 11 缺口太大,但墨迹恰 8 个非空格 → 拆。节头文本行墨迹仅 1 块、token≥2 → 不拆)。
+    合并误空格小数('914. 2'→'914.2')后再数 token,不误拆;文本/数字 token 一视同仁。
+    inkws[k] = 第 k 行的墨迹非空格数(与 rows 按序对齐,装配同款假设);None=不启用②。
+    nc≤3 的窄带不拆(无塌缩空间)。
 
-    组装 = **骨架行级墨证据 × tile 读数逐行核销**(替代 tile 级补零/众数):
-    · tile 的期望行 = 该 tile 列范围内**有文字墨**的骨架行(排除纯横线行——OCR 不输出
-      空行/线行,右侧 tile 因 colspan 区顶部空白整体上移一行的错位由此消除,1674392a)
-    · caption 回填:实读=期望-1 且有 caption → caption 是首个有墨行的内容(跨列表头)
-    · 差额核销:实读<期望 → 信骨架补空(OCR漏行是常态);实读>期望 → 需同带≥2 tile
-      佐证(或单tile带)才在带尾加一行,孤证=幻觉裁掉。"""
-    tiles, meta = slice_grid(im)
-    if meta["misaligned"]:
-        return None, 0, meta
-    up = meta["upsample"]
-    row_bands, col_bands = meta["row_bands"], meta["col_bands"]
-    rb, cb = meta["rb"], meta["cb"]
+    诊断门控(用户判据):塌缩的表征是【列明显变少】——行的**非空格数已达期望 nc**
+    (算上空格行宽与期望一致)= 没问题,整行原样不动;非空格数 < nc 才逐格怀疑拆分。"""
+    if nc <= 3:
+        return rows
+    out = []
+    for idx, row in enumerate(rows):
+        if sum(1 for s in row if s.strip()) >= nc:
+            out.append(row)
+            continue
+        iw = inkws[idx] if inkws is not None and idx < len(inkws) else None
+        new = []
+        for k, s in enumerate(row):
+            t = _DEC_SP.sub(".", s.strip()) if s and s.strip() else ""
+            toks = t.split()
+            rest = row[k + 1:]
+            fit_nc = (len(toks) >= 2
+                      and nc - 1 <= len(new) + len(toks) + len(rest) <= nc)
+            fit_ink = (iw is not None and len(toks) >= 2
+                       and iw - 1 <= sum(1 for x in new if x.strip()) + len(toks)
+                       + sum(1 for x in rest if x.strip()) <= iw)
+            if fit_nc or fit_ink:
+                new.extend(toks)
+            else:
+                new.append(s)
+        out.append(new)
+    return out
+
+
+# ═════════════════════════ 诊断层(纯函数,零 API) ═════════════════════════
+
+def _wstar(rws, dft):
+    """有效宽=到【最后一个非空格】的位置(尾部去空),不是整行格数——API常把稀疏行
+    补齐拖一堆尾部空<td>(e082 '9946.83,10244.56,0.00'+16空=19格),len会误判
+    列多读→空跑自愈。真实内容宽3<<nc,不该触发;稠密劈裂全非空则宽=格数照触发。"""
+    def w(x):
+        last = max((k for k, s in enumerate(x) if s.strip()), default=-1)
+        return last + 1
+    cs = [w(x) for x in rws if any(s.strip() for s in x)]
+    return Counter(cs).most_common(1)[0][0] if cs else dft
+
+
+def _diagnose(rows, E=None, nc=None, inkw=None):
+    """一致性诊断(架构核心,纯函数零 API):**按墨迹算出的期望非空行列** vs API 实读。
+    一致 → 空集 = 没问题,直接装配;不一致 → 标签集,按标签分派修复层。
+
+    · 行轴(传 E=有墨骨架行):实读行数或非空行数 < |E| → ROW_UNDER(漏读/caption降格/
+      灰内容);> |E| → ROW_OVER(幻觉 or 骨架欠行,由仲裁定夺)。
+    · 列轴(传 nc=期望列数):W* > nc+1 → COL_OVER(劈裂/口吃/重叠,tile 错→对半自愈)。
+    · 列少读(传 inkw=墨迹有效宽):W* < inkw-1 → COL_UNDER(实读比墨迹还窄=真漏列),
+      暂无修复手段,仅 audit 上报;W* 介于 [inkw-1, nc] 是稀疏表常态,**不是问题**
+      (边缘空列 VLM 少读天经地义,装配按位补空)。
+    · 塌缩(格级)在读数层解析时诊断(非空格数<nc 才拆,见 _split_packed),不在此重复。
+    EMPTY/FLAT 是原始输出的格式废品,构不成"读数",在读数层就地抢救,也不进本诊断。"""
+    labels = set()
+    if nc is not None and rows and _wstar(rows, nc) > nc + 1:
+        labels.add("COL_OVER")
+    if inkw is not None and rows and _wstar(rows, inkw) < inkw - 1:
+        labels.add("COL_UNDER")
+    if E is not None:
+        n = len(rows)
+        nz = sum(1 for x in rows if any(s.strip() for s in x))
+        if n < len(E) or nz < len(E):
+            labels.add("ROW_UNDER")
+        if n > len(E) or nz > len(E):
+            labels.add("ROW_OVER")
+    return labels
+
+
+# ═════════════════════════ 读数层(调 API + 解析 + 格式废品抢救) ═════════════════════════
+
+def _ink_evidence(im, rb, cb, R, C):
+    """格级墨证据:cell_ink[i][j] = 骨架格(i,j)内部(收缩2px避开框线)文字墨≥3px。
+    行对齐(哪些行有内容)和列摆放(哪些格有内容)共用——空白判定要求极低墨。
+    cell_gray = 淡灰内容(灰度129~180):d1752e16整张数字印成浅灰,128全隐形→cell_ink
+    判空→E欠数→裁多丢真值。180看得见,配API门控救回(仅当API确认时启用,_align_tile)。"""
     _gray = np.asarray(im.convert("L"))
     dark = _gray < BIN_INK
-    dark180 = _gray < BIN_FAINT                    # 淡灰内容(灰度129~180):d1752e16整张
-    #  数字印成浅灰,128全隐形→cell_ink判空→E欠数→裁多丢真值。180看得见,配API门控救回
-    flat = [(r, c) for r in range(len(tiles)) for c in range(len(tiles[r]))
-            if tiles[r][c] is not None]
-    outs = dict(zip(flat, call_tiles([tiles[r][c] for r, c in flat],
-                                     timeout=timeout, upsample=up)))
-
-    # 格级墨证据:cell_ink[i][j] = 骨架格(i,j)内部(收缩2px避开框线)文字墨≥3px。
-    # 行对齐(哪些行有内容)和列摆放(哪些格有内容)共用——空白判定要求极低墨。
-    R, C = meta["rows"], meta["cols"]
+    dark180 = _gray < BIN_FAINT
     cell_ink = np.zeros((R, C), dtype=bool)
-    cell_gray = np.zeros((R, C), dtype=bool)       # 淡灰内容(180),仅当API确认时才启用(下方)
+    cell_gray = np.zeros((R, C), dtype=bool)
     for i in range(R):
         y0, y1 = rb[i] + 2, rb[i + 1] - 2
         if y1 <= y0:
@@ -193,10 +266,28 @@ def ocr_seg(im, timeout=240):
                 for s in (1, 2):
                     lmg[:-s] |= lg[s:]; lmg[s:] |= lg[:-s]
                 cell_gray[i, j] = bool(((cg >= 3) & ~lmg).any())
+    return cell_ink, cell_gray
 
-    # 先解析全部 tile;**行数越界=废品**(行期望偏差≤1 的先验即废品检测器:实读 >
-    # 期望+1 物理上不可能,必是错误页/幻觉)→绕过缓存重读一次(垃圾可能已污染缓存),
-    # 重读好则回写缓存;仍废 → 置空(补空,不投票不入表)
+
+def _read_tiles(im, tiles, meta, cell_ink, timeout):
+    """批量调用 + 解析 + **格式废品就地抢救**(不进诊断——EMPTY/FLAT 是输出格式问题,
+    构不成"读数",谈不上与骨架一致):
+    · EMPTY(有墨tile实读0行)= API重试耗尽后的静默空响应(空不入缓存,直接重调)。
+    · FLAT(方案B'):tile有内容却返回【无<table>】=VLM放弃表结构竖排输出(稀疏tile左上角
+      几个数被拍扁成一竖列,丢列位置)。只打这类废tile(全A榜~17个),正常tile一律不动、
+      零副作用。判据看 raw 有内容(非rows)——单值flat如'71557.9'被parse_tile解析成空rows,
+      但raw明明有值,若看rows会漏救(71557.9在v2/v3都丢)。raw非空+无table即抢救:
+      单列/单行墨=几何完全确定→直拼零调用;真2D歧义→裁有墨包围盒+画网格逼它结构化;
+      仍失败→几何兜底按包围盒放值保内容。
+    · 塌缩行在此拆格(_split_packed 自带"非空格数<nc"诊断门控)。
+    返回 parsed[(r,c)] = (caption, rows)。"""
+    up = meta["upsample"]
+    row_bands, col_bands = meta["row_bands"], meta["col_bands"]
+    rb, cb = meta["rb"], meta["cb"]
+    flat = [(r, c) for r in range(len(tiles)) for c in range(len(tiles[r]))
+            if tiles[r][c] is not None]
+    outs = dict(zip(flat, call_tiles([tiles[r][c] for r, c in flat],
+                                     timeout=timeout, upsample=up)))
     parsed = {}
     need_grid = []                                  # flat抢救待重调: (r,c,r0,r1,c0,c1,ci,cj)
     for r in range(len(row_bands)):
@@ -210,11 +301,6 @@ def ocr_seg(im, timeout=240):
                 # 有墨tile实读0行 = API重试耗尽后的静默空响应(空不入缓存,直接重调)
                 raw = api.call_safe(upscale(tiles[r][c], up), timeout=timeout)
                 cap, rows = _parse_cap(raw)
-            # flat抢救(方案B'):tile有内容却返回【无<table>】=VLM放弃表结构竖排输出
-            # (稀疏tile左上角几个数被拍扁成一竖列,丢列位置)。裁有墨包围盒+画网格逼它
-            # 结构化。只打这类废tile(全A榜~17个),正常tile一律不动、零副作用。
-            # 判据看 raw 有内容(非rows)——单值flat如'71557.9'被parse_tile解析成空rows,
-            # 但raw明明有值,若看rows会漏救(71557.9在v2/v3都丢)。raw非空+无table即抢救。
             if (tiles[r][c] is not None and raw and raw.strip()
                     and "<table" not in raw.lower()):
                 ir = [i for i in range(ri, rj) if cell_ink[i, ci:cj].any()]
@@ -260,11 +346,27 @@ def ocr_seg(im, timeout=240):
                 else:
                     parsed[(r, c)] = (parsed[(r, c)][0], grows)
                     meta.setdefault("adopt", []).append(f"tile[{r}][{c}] flat→画网格重读")
+    # 读数层出口:塌缩拆格统一规整一次(覆盖正常解析/画网格重读/几何兜底所有行流来源;
+    # 必须在列校准之前——投票看的行宽须是拆格后的)。caption 行流在装配中才诞生,
+    # 其拆格在 _align_tile 回收处(全管线仅此两处)。inkws=各有墨骨架行的墨迹非空格数
+    # (判据②的期望;rows 与有墨行按序对齐,与装配同一假设)。
+    for c, (ci, cj) in enumerate(col_bands):
+        for r, (ri, rj) in enumerate(row_bands):
+            cap, rows = parsed[(r, c)]
+            inkws = [int(cell_ink[i, ci:cj].sum())
+                     for i in range(ri, rj) if cell_ink[i, ci:cj].any()]
+            parsed[(r, c)] = (cap, _split_packed(rows, cj - ci, inkws))
+    return parsed
 
-    # **列校准**(行列职责不对称:行估计=真值,列在稀疏区/标签区可能少):非空 tile 的行
-    # 格数众数若一致 = 骨架列数+k(k>0),且 ≥2 个行带的 tile 同票(或该列带只有 1 个非空
-    # tile) → 采纳 nc+k(5fdf46b0 三标签列被并 1 列,429 行每行一致多读 2 格=最强信号;
-    # 稀疏空 tile 不投票)。
+
+# ═════════════ 修复层(原则:孤立异常=tile 错→修 tile;多 tile 一致异常=骨架错→改期望) ═════════════
+
+def _calibrate_cols(parsed, meta):
+    """**列校准**(骨架级修复,一致性仲裁。行列职责不对称:行估计=真值,列在稀疏区/标签区
+    可能少):非空 tile 的行格数众数若一致 = 骨架列数+k(k>0),且 ≥2 个行带的 tile 同票
+    (或该列带只有 1 个非空 tile) → 采纳 nc+k(5fdf46b0 三标签列被并 1 列,429 行每行
+    一致多读 2 格=最强信号;稀疏空 tile 不投票)。返回各列带的期望列数 band_nc。"""
+    row_bands, col_bands = meta["row_bands"], meta["col_bands"]
     band_nc = []
     for c, (ci, cj) in enumerate(col_bands):
         nc = cj - ci
@@ -287,21 +389,21 @@ def ocr_seg(im, timeout=240):
                     f"列带{c} 列校准采纳 骨架{cj - ci}列→{top}列({n}票)")
                 nc = top
         band_nc.append(nc)
+    return band_nc
 
-    # ── 统一自愈(用户设计,顺序:①空解释已由E对齐承担 ②一致性投票(上面的列校准/
-    # 下面的佐证)已改完期望 ③与【最终期望】仍不符的孤立tile=读错 → 升采样3×重读
-    # → 对半重读 → 放弃。行列同构:列看行宽众数 vs band_nc;行看非空行数 vs E(欠读
-    # <E-1 也走此梯,封 1829 欠读洞)。先投票后自愈——5fdf带0(14→17,18票一致)此前被
-    # 先送自愈白烧50次调用的教训。
-    def _wstar(rws, dft):
-        # 有效宽=到【最后一个非空格】的位置(尾部去空),不是整行格数——API常把稀疏行
-        # 补齐拖一堆尾部空<td>(e082 '9946.83,10244.56,0.00'+16空=19格),len会误判
-        # 列多读→空跑自愈。真实内容宽3<<nc,不该触发;稠密劈裂全非空则宽=格数照触发。
-        def w(x):
-            last = max((k for k, s in enumerate(x) if s.strip()), default=-1)
-            return last + 1
-        cs = [w(x) for x in rws if any(s.strip() for s in x)]
-        return Counter(cs).most_common(1)[0][0] if cs else dft
+
+def _heal_col_over(im, tiles, parsed, meta, band_nc, timeout):
+    """自愈(tile 级修复,只治 COL_OVER=列多读:劈裂/口吃/重叠 W*>nc+1)。
+    列少读(W*<nc)对稀疏表正常——边缘空列VLM少读天经地义,切列救不了纯浪费,交装配
+    补空;行数不符是行轴问题→投票(佐证加行)+E对齐。只留上界单向触发。
+    顺序(用户设计):①空解释已由E对齐承担 ②一致性投票(列校准/佐证)已改完期望
+    ③与【最终期望】仍不符的孤立tile=读错。**先投票后自愈**——5fdf带0(14→17,18票一致)
+    此前被先送自愈白烧50次调用的教训。
+    修法=列边界对半重读,读取即真值(用户终稿:3x不可靠,不做二次质检;半块+1行首空格
+    由溢出弃空格消化;装配照常按E/期望收束)。"""
+    row_bands, col_bands = meta["row_bands"], meta["col_bands"]
+    rb, cb = meta["rb"], meta["cb"]
+    up = meta["upsample"]
     for r in range(len(row_bands)):
         ri, rj = row_bands[r]
         for c in range(len(col_bands)):
@@ -310,14 +412,8 @@ def ocr_seg(im, timeout=240):
                 continue
             cap, rows = parsed[(r, c)]
             enc = band_nc[c]
-            # 自愈=切列重读,只治【列多读】(劈裂/口吃/重叠 W*>nc+1)。
-            # 列少读(W*<nc)对稀疏表正常——边缘空列VLM少读天经地义,切列救不了纯浪费,
-            # 交装配补空;行数不符是行轴问题→投票(佐证加行)+E对齐。只留上界单向触发。
-            col_bad = rows and _wstar(rows, enc) > enc + 1
-            if not col_bad:
+            if "COL_OVER" not in _diagnose(rows, nc=enc):
                 continue
-            # 自愈=列边界对半重读,读取即真值(用户终稿:3x不可靠,不做二次质检;
-            # 半块+1行首空格由溢出弃空格消化;装配照常按E/期望收束)
             mid = (ci + cj) // 2
             halves = []
             for lo, hi in ((ci, mid), (mid, cj)):
@@ -341,80 +437,107 @@ def ocr_seg(im, timeout=240):
                 meta.setdefault("audit", []).append(
                     f"tile[{r}][{c}] 自愈:对半空读⚠ W*{_wstar(rows, enc)}/exp{enc}")
 
+
+def _align_tile(cap, rows, E, band_idx, r, c, ci, cj, cell_ink, cell_gray, meta, band_row0):
+    """单 tile 行轴修复(免 API)。诊断一致(实读行数与非空行数都=|E|)→ 原样返回不修;
+    不一致才按固定顺序过修复链(顺序=等价性关键,不可重排):
+    灰救回 → 空行条件丢弃 → caption 行流回收 → 斜线表头合并 → 拆行墨测试合并。
+    返回修复后的 (E, rows)(灰救回会扩 E)。"""
+    if not (_diagnose(rows, E=E) & {"ROW_UNDER", "ROW_OVER"}):
+        return E, rows
+    # 淡灰内容救回(API门控):d1752e16整张数字印浅灰,128判空→E欠数→真值被裁多丢。
+    # 仅当【API实读非空行数 > E】(API确认有更多内容)时,从灰行(180判有墨、128判空)
+    # 按位置补足差额。幻觉(落在128&180都空的行)无灰墨→补不进→仍裁,不误纳;框线
+    # 灰边被cell_gray的frac>0.7+膨胀挡掉。灰行只在API确认时启用,平时零影响。
+    nz_k = sum(1 for x in rows if any(s.strip() for s in x))
+    if nz_k > len(E):
+        gray = [i for i in band_idx if i not in E and cell_gray[i, ci:cj].any()]
+        if gray:
+            add = gray[:nz_k - len(E)]
+            E = sorted(E + add)
+            meta.setdefault("adopt", []).append(
+                f"tile[{r}][{c}] 灰内容救回 +{len(add)}行(128判空/180有墨,API确认)")
+    while len(rows) > len(E):              # 空行**条件丢弃**(仅实读超期望时):
+        empt = [k for k, x in enumerate(rows)      # 白pad后残影幻觉空行已绝源,
+                if not any(s.strip() for s in x)]  # 这里只兜画线后VLM老实输出的
+        if not empt:                               # 空行(数量超出有墨行数的部分);
+            break                                  # 真空行内容由骨架按位置补"",
+        rows.pop(empt[0])                          # 不因丢弃而丢失
+    if cap and len(rows) < len(E):         # 实读不足额 → caption行流回收补进
+        crows = _cap_rows(cap)             # (跨列表头单行/前表尾行/节头行按行序回填)
+        crows = _split_packed(crows, cj - ci,   # 文本表头挤一格('第40..第52保单年度')
+                              [int(cell_ink[i, ci:cj].sum()) for i in E])
+        rows = crows + rows                     # 按恰好补齐/墨迹宽判据拆(34821e6c)
+        while len(rows) > len(E):          # 溢出(骨架在零缝junction并行,物理行
+            for k in range(len(crows)):    # 多于骨架):优先裁cap里的**文本行**,
+                if k < len(rows) and not any(                 # 但不丢弃——改道进
+                        t.replace(".", "").replace(",", "").isdigit()  # 表间文本通道
+                        for t in rows[k]):                    # (拆表时作节头输出);
+                    meta.setdefault("split_txt", {}).setdefault(
+                        band_row0, []).append(" ".join(x for x in rows[k] if x.strip()))
+                    del rows[k]
+                    break
+            else:
+                del rows[0]                # 全是数据行才裁最前(不得已)
+    if r == 0 and len(rows) >= len(E) + 1 and len(rows) >= 2:
+        a, b = rows[0], rows[1]            # 斜线表头:一个高格斜线分写两行,OCR
+        ov = [t for t in range(min(len(a), len(b)))   # 拆成两行且仅第0格重叠
+              if a[t].strip() and b[t].strip()]       # → 合并,格0='下\上'
+        if ov == [0]:                                 # (GT 口径:保单年度末\投保年龄)
+            m = [b[0] + "\\" + a[0]] + [x if x.strip() else y
+                 for x, y in zip(a[1:] + [""] * (len(b) - len(a)),
+                                 b[1:] + [""] * (len(a) - len(b)))]
+            rows = [m] + rows[2:]
+    if len(rows) == len(E) + 1:
+        # 拆行合并(行线/墨测试,非打分):拆出的两行本是同一条骨架行——相邻互补对
+        # 合并后的非空格数须**恰等**该骨架行墨格数;真表头两行合并后对不上。
+        # 通过者唯一才合并,否则保守裁尾。行是真值,读数必须与骨架一致。
+        hits = []
+        for k in range(len(rows) - 1):
+            a, b = rows[k], rows[k + 1]
+            L = max(len(a), len(b))
+            aa = a + [""] * (L - len(a))
+            bb = b + [""] * (L - len(b))
+            if not (any(x.strip() for x in aa) and any(x.strip() for x in bb)):
+                continue
+            if any(x.strip() and y.strip() for x, y in zip(aa, bb)):
+                continue
+            merged = [x if x.strip() else y for x, y in zip(aa, bb)]
+            nz = sum(1 for x in merged if x.strip())
+            if k < len(E) and nz == int(cell_ink[E[k], ci:cj].sum()):
+                hits.append((k, merged))
+        if len(hits) == 1:
+            k, merged = hits[0]
+            rows = rows[:k] + [merged] + rows[k + 2:]
+    return E, rows
+
+
+# ═════════════════════════ 装配层(纯摆放,零 API 零修复) ═════════════════════════
+
+def _assemble(parsed, meta, band_nc, cell_ink, cell_gray):
+    """只信骨架:行多裁少补、溢出弃空格、按位补空。修复层没治好的在此强制收束,
+    并 audit 真损失上报(找问题,不藏问题):
+      补空有墨位: 骨架该tile有E个有墨行,实读不足→末尾几个有墨行拿不到内容,补空丢行
+      裁多有内容: 实读>E,多出的行有内容→被裁(佐证加行至多救1行),丢内容
+    返回 (grid, cap_rows_global)。"""
+    row_bands, col_bands = meta["row_bands"], meta["col_bands"]
     grid = []
-    cap_rows_global = []                       # (条件1)非首带出现caption的带 → 其全局行范围
+    cap_rows_global = []                       # (拆表条件1)非首带出现caption的带 → 其全局行范围
     for r, (ri, rj) in enumerate(row_bands):
         band_idx = list(range(ri, rj))
         aligned = {}
         for c, (ci, cj) in enumerate(col_bands):
             cap, rows = parsed[(r, c)]
             E = [i for i in band_idx if cell_ink[i, ci:cj].any()]
-            # 淡灰内容救回(API门控):d1752e16整张数字印浅灰,128判空→E欠数→真值被裁多丢。
-            # 仅当【API实读非空行数 > E】(API确认有更多内容)时,从灰行(180判有墨、128判空)
-            # 按位置补足差额。幻觉(落在128&180都空的行)无灰墨→补不进→仍裁,不误纳;框线
-            # 灰边被cell_gray的frac>0.7+膨胀挡掉。灰行只在API确认时启用,平时零影响。
-            nz_k = sum(1 for x in rows if any(s.strip() for s in x))
-            if nz_k > len(E):
-                gray = [i for i in band_idx if i not in E and cell_gray[i, ci:cj].any()]
-                if gray:
-                    add = gray[:nz_k - len(E)]
-                    E = sorted(E + add)
-                    meta.setdefault("adopt", []).append(
-                        f"tile[{r}][{c}] 灰内容救回 +{len(add)}行(128判空/180有墨,API确认)")
-            while len(rows) > len(E):              # 空行**条件丢弃**(仅实读超期望时):
-                empt = [k for k, x in enumerate(rows)      # 白pad后残影幻觉空行已绝源,
-                        if not any(s.strip() for s in x)]  # 这里只兜画线后VLM老实输出的
-                if not empt:                               # 空行(数量超出有墨行数的部分);
-                    break                                  # 真空行内容由骨架按位置补"",
-                rows.pop(empt[0])                          # 不因丢弃而丢失
-            if cap and len(rows) < len(E):         # 实读不足额 → caption行流回收补进
-                crows = _cap_rows(cap)             # (跨列表头单行/前表尾行/节头行按行序回填)
-                rows = crows + rows
-                while len(rows) > len(E):          # 溢出(骨架在零缝junction并行,物理行
-                    for k in range(len(crows)):    # 多于骨架):优先裁cap里的**文本行**,
-                        if k < len(rows) and not any(                 # 但不丢弃——改道进
-                                t.replace(".", "").replace(",", "").isdigit()  # 表间文本通道
-                                for t in rows[k]):                    # (拆表时作节头输出);
-                            meta.setdefault("split_txt", {}).setdefault(
-                                len(grid), []).append(" ".join(x for x in rows[k] if x.strip()))
-                            del rows[k]
-                            break
-                    else:
-                        del rows[0]                # 全是数据行才裁最前(不得已)
-            if r == 0 and len(rows) >= len(E) + 1 and len(rows) >= 2:
-                a, b = rows[0], rows[1]            # 斜线表头:一个高格斜线分写两行,OCR
-                ov = [t for t in range(min(len(a), len(b)))   # 拆成两行且仅第0格重叠
-                      if a[t].strip() and b[t].strip()]       # → 合并,格0='下\上'
-                if ov == [0]:                                 # (GT 口径:保单年度末\投保年龄)
-                    m = [b[0] + "\\" + a[0]] + [x if x.strip() else y
-                         for x, y in zip(a[1:] + [""] * (len(b) - len(a)),
-                                         b[1:] + [""] * (len(a) - len(b)))]
-                    rows = [m] + rows[2:]
-            if len(rows) == len(E) + 1:
-                # 拆行合并(行线/墨测试,非打分):拆出的两行本是同一条骨架行——相邻互补对
-                # 合并后的非空格数须**恰等**该骨架行墨格数;真表头两行合并后对不上。
-                # 通过者唯一才合并,否则保守裁尾。行是真值,读数必须与骨架一致。
-                hits = []
-                for k in range(len(rows) - 1):
-                    a, b = rows[k], rows[k + 1]
-                    L = max(len(a), len(b))
-                    aa = a + [""] * (L - len(a))
-                    bb = b + [""] * (L - len(b))
-                    if not (any(x.strip() for x in aa) and any(x.strip() for x in bb)):
-                        continue
-                    if any(x.strip() and y.strip() for x, y in zip(aa, bb)):
-                        continue
-                    merged = [x if x.strip() else y for x, y in zip(aa, bb)]
-                    nz = sum(1 for x in merged if x.strip())
-                    if k < len(E) and nz == int(cell_ink[E[k], ci:cj].sum()):
-                        hits.append((k, merged))
-                if len(hits) == 1:
-                    k, merged = hits[0]
-                    rows = rows[:k] + [merged] + rows[k + 2:]
+            if rows and E:                     # 列少读诊断(audit-only,暂无修复手段):
+                ws = [int(np.where(cell_ink[i, ci:cj])[0].max()) + 1 for i in E]
+                inkw = Counter(ws).most_common(1)[0][0]
+                if "COL_UNDER" in _diagnose(rows, inkw=inkw):
+                    meta.setdefault("audit", []).append(
+                        f"tile[{r}][{c}] 列少读⚠ W*{_wstar(rows, inkw)}<墨迹宽{inkw}")
+            E, rows = _align_tile(cap, rows, E, band_idx, r, c, ci, cj,
+                                  cell_ink, cell_gray, meta, len(grid))
             aligned[c] = (E, rows)
-            # 真损失上报(audit找问题,不藏问题):经投票/自愈/caption/拆行后仍不一致的才是问题
-            #   补空有墨位: 骨架该tile有E个有墨行,实读不足→末尾几个有墨行拿不到内容,补空丢行
-            #   裁多有内容: 实读>E,多出的行有内容→被裁(佐证加行至多救1行),丢内容
             nz_rows = [x for x in rows if any(s.strip() for s in x)]
             pos = "首带" if r == 0 else ("末带" if r == len(row_bands) - 1 else "中带!")
             if len(nz_rows) > len(E) + 1:              # 裁多(+1留给佐证加行):在aligned阶段判,
@@ -463,9 +586,10 @@ def ocr_seg(im, timeout=240):
         if extra_votes >= 2 or (extra_votes == 1 and len(col_bands) == 1):
             meta.setdefault("adopt", []).append(
                 f"带{r} 佐证加行 +1行({extra_votes}票)")
-            # **佐证加行**:拆行墨测试没吃掉的多余实读行,≥2 tile 同票(或单tile带)=骨架
-            # 真欠一行(微距表 <3px 缝并行,a1aaef73 列号行+年1行挤在一个骨架行,API 实读
-            # 6>骨架5,0.00 末行被裁)→带尾补一行,实读顺序本身即正确顺序。孤证=幻觉仍裁
+            # **佐证加行**(骨架级修复,一致性仲裁):拆行墨测试没吃掉的多余实读行,≥2 tile
+            # 同票(或单tile带)=骨架真欠一行(微距表 <3px 缝并行,a1aaef73 列号行+年1行挤在
+            # 一个骨架行,API 实读 6>骨架5,0.00 末行被裁)→带尾补一行,实读顺序本身即正确
+            # 顺序。孤证=幻觉仍裁
             rowcells = []
             for c, (ci, cj) in enumerate(col_bands):
                 E, rows = aligned[c]
@@ -473,9 +597,13 @@ def ocr_seg(im, timeout=240):
                 nc = band_nc[c]
                 rowcells += list(cells[:nc]) + [""] * max(0, nc - len(cells))
             grid.append(rowcells)
-    # 表边界(用户双条件): ①非首带tile出现caption ②该带行流含轴行(连续整数序列>10)
-    # → 在轴行处拆表(deb8de95 '二年交'新块自带[0..14]轴行;1674392a 轴行在首带且
-    #   caption带无轴行,双条件互锁不误拆)
+    return grid, cap_rows_global
+
+
+def _find_splits(grid, cap_rows_global):
+    """表边界(用户双条件): ①非首带tile出现caption ②该带行流含轴行(连续整数序列>10)
+    → 在轴行处拆表(deb8de95 '二年交'新块自带[0..14]轴行;1674392a 轴行在首带且
+      caption带无轴行,双条件互锁不误拆)"""
     def _axis_at(i):
         vals = [c.strip() for c in grid[i] if c.strip()]
         run = best = 0
@@ -495,5 +623,34 @@ def ocr_seg(im, timeout=240):
         for i in range(max(1, lo), min(hi, len(grid))):
             if _axis_at(i) and i not in splits:
                 splits.append(i)
-    meta["splits"] = sorted(set(splits))
-    return grid, len(flat), meta
+    return sorted(set(splits))
+
+
+# ═════════════════════════ 编排 ═════════════════════════
+
+def ocr_seg(im, timeout=240):
+    """单个 seg 的骨架 OCR — 四段式:读数 → 诊断 → 修复 → 装配。
+    返回 (grid, ncalls, meta);grid=None 表示骨架不可信需回退(交上层 ocr_table 自由读)。
+
+    · 骨架 = 行列估计(slice_grid);misaligned → 早退。
+    · 读数层(_read_tiles):API 调用+解析+格式废品就地抢救(EMPTY 重调 / FLAT 直拼、
+      画网格重读、几何兜底 / 塌缩拆格)。
+    · 诊断层(_diagnose,纯函数):按墨迹算期望非空行列,与实读一致=没问题直接装配;
+      不一致才贴标签进修复。
+    · 修复层:孤立异常=tile 错→修 tile(COL_OVER 对半自愈 / 行轴 _align_tile 免API重排);
+      多 tile 一致异常=骨架错→改期望(_calibrate_cols 列校准、_assemble 内佐证加行,
+      一致性铁律≥2票)。先仲裁后自愈(5fdf 先自愈白烧50次调用的教训)。修不好→audit。
+    · 装配层(_assemble):只信骨架,多裁少补;组装 = **骨架行级墨证据 × tile 读数逐行
+      核销**(替代 tile 级补零/众数)。表边界 _find_splits 轴行拆表。"""
+    tiles, meta = slice_grid(im)
+    if meta["misaligned"]:
+        return None, 0, meta
+    rb, cb = meta["rb"], meta["cb"]
+    cell_ink, cell_gray = _ink_evidence(im, rb, cb, meta["rows"], meta["cols"])
+    parsed = _read_tiles(im, tiles, meta, cell_ink, timeout)
+    band_nc = _calibrate_cols(parsed, meta)                    # 骨架仲裁在前…
+    _heal_col_over(im, tiles, parsed, meta, band_nc, timeout)  # …tile 自愈在后
+    grid, cap_rows_global = _assemble(parsed, meta, band_nc, cell_ink, cell_gray)
+    meta["splits"] = _find_splits(grid, cap_rows_global)
+    ncalls = sum(1 for row in tiles for t in row if t is not None)
+    return grid, ncalls, meta
