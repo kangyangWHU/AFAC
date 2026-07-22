@@ -124,55 +124,32 @@ def _grid_reread(im, rb, cb, r0, r1, c0, c1, ci, cj, timeout):
     return [[""] * left + g + [""] * right for g in grows]
 
 
-def _repair_truncated(im, rb, cb, items, up, timeout):
-    """截断 tile 批量拆半重读(**波次并发**,统一发送层驱动,零自办线程池):
-    按骨架**行界**上下对半切(切在缝上不劈单元格);波0=全部半块一起发,仍截断且≥2行的
-    半块在波1/波2 再对半加密。段的 caption(被 API 挤出表外的段首行,首段除外)经
-    _cap_rows 回收为行。**不做前缀掩盖**——结果好坏由调用方按墨迹诊断裁决。
-    items = [(key, ri, rj, ci, cj)];返回 {key: (cap, rows) | None(两半皆空,修复失败)}。"""
-    segs = {}
-    for key, ri, rj, ci, cj in items:
-        mid = (ri + rj) // 2
-        segs[key] = ([[ri, mid, ci, cj, None], [mid, rj, ci, cj, None]]
-                     if ri < mid < rj else None)
-
-    def _img(s):
-        return upscale(pad_white(im.crop((cb[s[2]], rb[s[0]], cb[s[3]], rb[s[1]]))), up)
-
-    pend = [(key, s) for key, ss in segs.items() if ss for s in ss]
-    for _ in range(3):                          # 波0=半块;波1/2=仍截断者再对半
-        if not pend:
-            break
-        outs = api.call_many([_img(s) for _, s in pend], timeout=timeout)
-        for (_, s), o in zip(pend, outs):
-            s[4] = o
-        nxt = []
-        for key, s in pend:
-            lo, hi = s[0], s[1]
-            mid = (lo + hi) // 2
-            if s[4] and api.is_truncated(s[4]) and hi - lo >= 2 and lo < mid < hi:
-                a = [lo, mid, s[2], s[3], None]
-                b = [mid, hi, s[2], s[3], None]
-                ss = segs[key]
-                i = ss.index(s)
-                ss[i:i + 1] = [a, b]
-                nxt += [(key, a), (key, b)]
-        pend = nxt
-    out = {}
-    for key, ss in segs.items():
-        if not ss:
-            out[key] = None
-            continue
-        cap0, rows = "", []
-        for i, s in enumerate(ss):
-            c, r_ = _parse_cap(s[4])
-            if i == 0:
-                cap0 = c
-            elif c:                              # 后段 cap = 被挤出的段首行,回收为行
-                rows += _cap_rows(c)
-            rows += r_
-        out[key] = (cap0, rows) if (rows or cap0) else None
-    return out
+def _reread_halved(im, rb, cb, cands, up, timeout):
+    """**列界对半重读原语**(自愈对半与截断修复共用;统一发送层一波齐发,零串行等待):
+    每个 tile 沿骨架列界切左右两半、各读一次,左右行流按行号横拼(短侧补空)。
+    读取即真值,不做二次质检——行列若与骨架不符,由装配的补空/裁多收束并 audit 记录。
+    cands = [(key, ri, rj, ci, cj)];返回 {key: joined_rows}(两半皆空 → [])。"""
+    imgs, slots = [], []
+    for k, (key, ri, rj, ci, cj) in enumerate(cands):
+        mid = (ci + cj) // 2
+        for j, (lo, hi) in enumerate(((ci, mid), (mid, cj))):
+            if hi <= lo:
+                continue
+            imgs.append(upscale(pad_white(im.crop((cb[lo], rb[ri], cb[hi], rb[rj]))), up))
+            slots.append((k, j))
+    outs = api.call_many(imgs, timeout=timeout)
+    hv = {k: [[], []] for k in range(len(cands))}
+    for (k, j), o in zip(slots, outs):
+        hv[k][j] = _parse_cap(o)[1]
+    res = {}
+    for k, (key, ri, rj, ci, cj) in enumerate(cands):
+        mid = (ci + cj) // 2
+        hl, hr_ = hv[k]
+        n_ = max(len(hl), len(hr_)) if (hl or hr_) else 0
+        res[key] = [(hl[i] if i < len(hl) else [""] * (mid - ci))
+                    + (hr_[i] if i < len(hr_) else [""] * (cj - mid))
+                    for i in range(n_)]
+    return res
 
 
 _DEC_SP = re.compile(r"(?<=\d)\.\s+(?=\d)")   # '914. 2'(小数点后误加空格)→'914.2'
@@ -353,12 +330,13 @@ def _read_tiles(im, tiles, meta, cell_ink, timeout):
             if o:
                 outs[(r, c)] = o
 
-    # 截断批量拆半(波次并发):截断=输出撞12k上限的**确定性**事件,同图重打无用,
-    # 拆小输出减半才有解(B榜实测51个tile,bc0ccbea 64414.74 这类尾值就是这么没的)
+    # 截断批量修复(自愈对半同款,列界对半+无条件采纳):截断=输出撞12k上限的**确定性**
+    # 事件,同图重打无用,拆小输出减半才有解(B榜实测51个tile,bc0ccbea 64414.74 这类
+    # 尾值就是这么没的)。对半为真,行列不符交装配补空/裁多收束 + audit 记录
     trunc = [(rc, row_bands[rc[0]][0], row_bands[rc[0]][1],
               col_bands[rc[1]][0], col_bands[rc[1]][1]) for rc in flat
              if outs.get(rc) and api.is_truncated(outs[rc])]
-    fixes = _repair_truncated(im, rb, cb, trunc, up, timeout) if trunc else {}
+    fixes = _reread_halved(im, rb, cb, trunc, up, timeout) if trunc else {}
 
     parsed = {}
     need_grid = []                                  # flat抢救待重调: (r,c,r0,r1,c0,c1,ci,cj)
@@ -369,27 +347,20 @@ def _read_tiles(im, tiles, meta, cell_ink, timeout):
             raw = outs.get((r, c))
             cap, rows = _parse_cap(raw)
             if (r, c) in fixes:
-                # 采纳门(墨迹诊断,不做前缀掩盖):拆半结果**非空行数恰等墨迹期望**才采纳
-                # 并回填缓存;不等 = 拆半自身塌读/爆行(单调区'3000×N'、稀疏半块),不采纳、
-                # 保留原半截 + audit 暴露,等看清全貌再治根
-                fixed = fixes[(r, c)]
+                joined = fixes[(r, c)]
                 E_n = _E_n(r, c)
-                if fixed is not None:
-                    cap2, rows2 = fixed
-                    nz2 = sum(1 for x in rows2 if any(s.strip() for s in x))
-                    if nz2 == E_n:
-                        cap, rows = cap2, rows2
-                        html = (cap + "\n" if cap else "") + rows_to_html(rows)
-                        api.write_cache(upscale(tiles[r][c], up), html)
-                        raw = html               # 修复后是合法表输出,不再触发flat抢救
-                        meta.setdefault("adopt", []).append(
-                            f"tile[{r}][{c}] 截断→拆半采纳(nz{nz2}==E,回填)")
-                    else:
-                        meta.setdefault("audit", []).append(
-                            f"tile[{r}][{c}] 截断⚠ 拆半nz{nz2}≠E{E_n},不采纳保留半截")
+                if joined:
+                    nz2 = sum(1 for x in joined if any(s.strip() for s in x))
+                    rows = joined                # 列对半为真,无条件采纳;cap 保留原读的
+                    html = (cap + "\n" if cap else "") + rows_to_html(rows)
+                    api.write_cache(upscale(tiles[r][c], up), html)
+                    raw = html                   # 修复后是合法表输出,不再触发flat抢救
+                    meta.setdefault("adopt" if nz2 == E_n else "audit", []).append(
+                        f"tile[{r}][{c}] 截断→列对半为真(nz{nz2}/E{E_n},回填)"
+                        + ("" if nz2 == E_n else " ⚠行数不符,装配收束"))
                 else:
                     meta.setdefault("audit", []).append(
-                        f"tile[{r}][{c}] 截断⚠ 拆半失败,半截行进装配")
+                        f"tile[{r}][{c}] 截断⚠ 对半空读,半截行进装配")
             if (tiles[r][c] is not None and raw and raw.strip()
                     and "<table" not in raw.lower()):
                 ir = [i for i in range(ri, rj) if cell_ink[i, ci:cj].any()]
@@ -505,25 +476,12 @@ def _heal_col_over(im, tiles, parsed, meta, band_nc, timeout):
                 cands.append((r, c, ri, rj, ci, cj, cap, rows, enc))
     if not cands:
         return
-    imgs, slots = [], []                           # …两半图统一发送层一波发出(零串行等待)
+    fixes = _reread_halved(im, rb, cb,             # 共用列对半原语,一波齐发
+                           [(k, ri, rj, ci, cj) for k, (r, c, ri, rj, ci, cj,
+                                                        cap, rows, enc) in enumerate(cands)],
+                           up, timeout)
     for k, (r, c, ri, rj, ci, cj, cap, rows, enc) in enumerate(cands):
-        mid = (ci + cj) // 2
-        for j, (lo, hi) in enumerate(((ci, mid), (mid, cj))):
-            if hi <= lo:
-                continue
-            imgs.append(upscale(pad_white(im.crop((cb[lo], rb[ri], cb[hi], rb[rj]))), up))
-            slots.append((k, j))
-    outs = api.call_many(imgs, timeout=timeout)
-    hv = {k: [[], []] for k in range(len(cands))}
-    for (k, j), o in zip(slots, outs):
-        hv[k][j] = _parse_cap(o)[1]
-    for k, (r, c, ri, rj, ci, cj, cap, rows, enc) in enumerate(cands):
-        mid = (ci + cj) // 2
-        hl, hr_ = hv[k]
-        n_ = max(len(hl), len(hr_)) if (hl or hr_) else 0
-        joined = [(hl[i] if i < len(hl) else [""] * (mid - ci))
-                  + (hr_[i] if i < len(hr_) else [""] * (cj - mid))
-                  for i in range(n_)]
+        joined = fixes.get(k) or []
         if joined:
             parsed[(r, c)] = (cap, joined)     # 保留原caption!拆表双条件与行流回收
             w = _wstar(joined, enc)            # 都靠它(抹掉曾致deb8表数3→2)
