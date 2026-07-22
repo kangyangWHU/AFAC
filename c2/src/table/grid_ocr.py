@@ -124,10 +124,11 @@ def _grid_reread(im, rb, cb, r0, r1, c0, c1, ci, cj, timeout):
     return [[""] * left + g + [""] * right for g in grows]
 
 
-def _reread_halved(im, rb, cb, cands, up, timeout):
+def _reread_halved(im, rb, cb, cands, up, timeout, meta=None):
     """**列界对半重读原语**(自愈对半与截断修复共用;统一发送层一波齐发,零串行等待):
     每个 tile 沿骨架列界切左右两半、各读一次,左右行流按行号横拼(短侧补空)。
     读取即真值,不做二次质检——行列若与骨架不符,由装配的补空/裁多收束并 audit 记录。
+    半块自身仍截断 = 未完全恢复(简化版无二次加密),audit 点名不静默(暴露原则)。
     cands = [(key, ri, rj, ci, cj)];返回 {key: joined_rows}(两半皆空 → [])。"""
     imgs, slots = [], []
     for k, (key, ri, rj, ci, cj) in enumerate(cands):
@@ -141,6 +142,9 @@ def _reread_halved(im, rb, cb, cands, up, timeout):
     hv = {k: [[], []] for k in range(len(cands))}
     for (k, j), o in zip(slots, outs):
         hv[k][j] = _parse_cap(o)[1]
+        if meta is not None and o and api.is_truncated(o):
+            meta.setdefault("audit", []).append(
+                f"tile{cands[k][0]} 对半{'左' if j == 0 else '右'}半块仍截断⚠ 部分行未恢复")
     res = {}
     for k, (key, ri, rj, ci, cj) in enumerate(cands):
         mid = (ci + cj) // 2
@@ -336,7 +340,7 @@ def _read_tiles(im, tiles, meta, cell_ink, timeout):
     trunc = [(rc, row_bands[rc[0]][0], row_bands[rc[0]][1],
               col_bands[rc[1]][0], col_bands[rc[1]][1]) for rc in flat
              if outs.get(rc) and api.is_truncated(outs[rc])]
-    fixes = _reread_halved(im, rb, cb, trunc, up, timeout) if trunc else {}
+    fixes = _reread_halved(im, rb, cb, trunc, up, timeout, meta) if trunc else {}
 
     parsed = {}
     need_grid = []                                  # flat抢救待重调: (r,c,r0,r1,c0,c1,ci,cj)
@@ -477,11 +481,11 @@ def _heal_col_over(im, tiles, parsed, meta, band_nc, timeout):
     if not cands:
         return
     fixes = _reread_halved(im, rb, cb,             # 共用列对半原语,一波齐发
-                           [(k, ri, rj, ci, cj) for k, (r, c, ri, rj, ci, cj,
-                                                        cap, rows, enc) in enumerate(cands)],
-                           up, timeout)
+                           [((r, c), ri, rj, ci, cj) for (r, c, ri, rj, ci, cj,
+                                                          cap, rows, enc) in cands],
+                           up, timeout, meta)
     for k, (r, c, ri, rj, ci, cj, cap, rows, enc) in enumerate(cands):
-        joined = fixes.get(k) or []
+        joined = fixes.get((r, c)) or []
         if joined:
             parsed[(r, c)] = (cap, joined)     # 保留原caption!拆表双条件与行流回收
             w = _wstar(joined, enc)            # 都靠它(抹掉曾致deb8表数3→2)
