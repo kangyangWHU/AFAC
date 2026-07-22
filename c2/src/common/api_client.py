@@ -250,6 +250,64 @@ def call_safe(image, **kw):
         return ""
 
 
+# ---------------------------------------------------------------------------
+# 统一发送层(唯一的并发出口):所有需要发 tile 的地方一律经此,调用方不自办线程池。
+# API 是纯 IO 等待 → 线程池;CPU 并行仍由上层图级进程池负责,两层各司其职。
+# ---------------------------------------------------------------------------
+_EXEC = None
+
+
+def _pool():
+    """每进程惰性建一个共享线程池(fork 后子进程各自新建,互不串台)。"""
+    global _EXEC
+    if _EXEC is None:
+        from concurrent.futures import ThreadPoolExecutor
+        from common.config import MAX_CONCURRENCY
+        _EXEC = ThreadPoolExecutor(max_workers=MAX_CONCURRENCY)
+    return _EXEC
+
+
+def submit(image, **kw):
+    """单发:返回 Future(call_safe 语义,异常置空)。"""
+    return _pool().submit(call_safe, image, **kw)
+
+
+def call_many(images, *, rotate_user=True, retry_rounds=0, **kw):
+    """批量发送,次序保持。userId 轮询;retry_rounds>0 对"非空图空返回"(限流被
+    call_safe 静默置空 → 随机丢行、跑分不可复现)按 ≤6 并发分组重试,直到拿到内容
+    或轮次用尽;CACHE_ONLY 离线评测下跳过重试(空=未缓存,重试无意义)。"""
+    if not images:
+        return []
+    futs = [_pool().submit(call_safe, im,
+                           user_id=(API_USER_IDS[i % len(API_USER_IDS)]
+                                    if rotate_user else None), **kw)
+            for i, im in enumerate(images)]
+    outs = [f.result() for f in futs]
+    if retry_rounds and not CACHE_ONLY:
+        for _ in range(retry_rounds):
+            empt = [i for i, o in enumerate(outs) if not (o or "").strip()]
+            if not empt:
+                break
+            for k in range(0, len(empt), 6):          # 降并发重试(≤6 在飞)
+                grp = empt[k:k + 6]
+                fs = [_pool().submit(call_safe, images[i], **kw) for i in grp]
+                for i, f in zip(grp, fs):
+                    o = f.result()
+                    if (o or "").strip():
+                        outs[i] = o
+    return outs
+
+
+def map_io(fn, items):
+    """把一批**含内部串行 API 调用**的任务函数并发跑(如坏 tile 修复:拆半→判→再拆)。
+    fn 内部只允许用 call_safe(同步直连),不得再 submit/call_many —— 单层池无嵌套等待,
+    天然无死锁。返回与 items 同序的结果列表。"""
+    if not items:
+        return []
+    futs = [_pool().submit(fn, it) for it in items]
+    return [f.result() for f in futs]
+
+
 def probe(image, timeout=120, user_id=None):
     """探测用：返回原始 HTTP 信息，用于第一次确认返回体格式。不走缓存。"""
     raw_bytes, fname = _img_bytes(image)

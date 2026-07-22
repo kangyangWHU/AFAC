@@ -2,11 +2,9 @@
 """tile 公共层：两条 OCR 流水线（主路 grid_ocr / 回退路 run_table.ocr_table）共用的
 tile 尺寸策略、上采样策略、图像准备（白pad/放大）与 API 并发调用。策略常数只在这里定义。
 """
-from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
 import common.api_client as api
-from common.config import MAX_CONCURRENCY, API_USER_IDS
 
 MAX_TILE_COLS = 15   # 单 tile 最大列数。OCR 在"宽 tile × 长数字"上会漏列(b326 26列/tile
 # 读不全),限 15 列后 015bd47c +16、b326dfb6 +15、密集表零退化。
@@ -45,24 +43,8 @@ def pad_white(core, pad=EDGE_PAD):
 
 
 def call_tiles(imgs, timeout=240, upsample=1, cache_dir=None, retry_rounds=0):
-    """并发调用一组 tile（轮询 userId，可选上采样/独立缓存）。
-    retry_rounds>0:对"非空图却空返回"(限流被 call_safe 置空→随机丢行、跑分不可复现)
-    降并发重试,直到拿到内容或轮次用尽。CACHE_ONLY 离线评测下跳过(空=未缓存)。"""
-    def _call_set(idxs, workers):
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            return list(ex.map(
-                lambda x: api.call_safe(upscale(imgs[x[1]], upsample), timeout=timeout,
-                                        user_id=API_USER_IDS[x[0] % len(API_USER_IDS)],
-                                        cache_dir=cache_dir),
-                list(enumerate(idxs))))
-    idxs = list(range(len(imgs)))
-    outs = list(_call_set(idxs, min(MAX_CONCURRENCY, max(1, len(idxs))))) if idxs else []
-    if retry_rounds and not api.CACHE_ONLY:
-        for _ in range(retry_rounds):
-            empt = [i for i in idxs if not (outs[i] or "").strip()]
-            if not empt:
-                break
-            for i, o in zip(empt, _call_set(empt, max(1, min(6, len(empt))))):
-                if (o or "").strip():
-                    outs[i] = o
-    return outs
+    """一组 tile 上采样后经统一发送层(api.call_many)批量调用——本模块不再自办线程池,
+    userId 轮询/空重试轮/并发宽度全部内聚在发送层。"""
+    return api.call_many([upscale(im, upsample) for im in imgs],
+                         timeout=timeout, cache_dir=cache_dir,
+                         retry_rounds=retry_rounds)

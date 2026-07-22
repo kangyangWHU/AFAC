@@ -9,7 +9,6 @@ import re
 import glob
 import argparse
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
@@ -118,7 +117,6 @@ def _repair_bad_tile(img, html, reason, timeout, expected_rows=None, cache_dir=N
 def _refine_bad_tiles(tiles, outs, meta, timeout=240, upsample=1, cache_dir=None):
     """对所有高置信坏 tile 局部裁剪重读。upsample>1 时坏块按上采样后的图重读、
     回写进 cache_dir(与原始缓存分离)。"""
-    from common.config import MAX_CONCURRENCY
     row_cells = meta.get("row_cells", []) if meta else []
     todo = []
     for r in range(len(outs)):
@@ -133,14 +131,12 @@ def _refine_bad_tiles(tiles, outs, meta, timeout=240, upsample=1, cache_dir=None
         return outs
     priority = {"flat": 0, "too_wide": 1, "truncated": 2, "row_under": 3}
     todo = sorted(todo, key=lambda x: priority.get(x[2], 9))
-    workers = min(MAX_CONCURRENCY, max(1, len(todo)))
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        fixed = list(ex.map(
-            lambda item: _repair_bad_tile(
-                upscale(tiles[item[0]][item[1]], upsample), outs[item[0]][item[1]], item[2],
-                timeout, row_cells[item[0]] if item[0] < len(row_cells) else None,
-                cache_dir=cache_dir),
-            todo))
+    fixed = api.map_io(                              # 统一发送层并发(修复函数内部只用
+        lambda item: _repair_bad_tile(               # 同步 call_safe,单层池无死锁)
+            upscale(tiles[item[0]][item[1]], upsample), outs[item[0]][item[1]], item[2],
+            timeout, row_cells[item[0]] if item[0] < len(row_cells) else None,
+            cache_dir=cache_dir),
+        todo)
     for (r, c, _), o in zip(todo, fixed):
         outs[r][c] = o
         # 修复成功的**完整**结果回写缓存：截断 tile 此前未落盘（api 不缓存截断），
