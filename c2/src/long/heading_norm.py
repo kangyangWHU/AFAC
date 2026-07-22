@@ -159,11 +159,40 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
     series_last = {}                 # sk -> 该序列最近一次出现的 marker
     last_marker = None
     last_level = None
+    toc_level = None                 # 「目录」标题层级；目录编号不污染正文编号状态
+    toc_seen_first = False           # 目录中已见过顶层 1；再次出现 1 视为正文重启
 
     for idx, text in enumerate(texts):
         marker = parse_marker(text)
         kind, path = marker
         sk = _series_key(marker)
+
+        # 目录是一个独立编号作用域：「目录」=L1时，1=L2、1.1=L3。
+        # 若直接复用下方的全局 series_levels，目录中的 1..8 会把正文
+        # 再次出现的 1..8 锁在错误层级。新文档标题或顶层 1 重启时退出目录。
+        in_toc = toc_level is not None
+        toc_restart = (in_toc and kind == "int" and path == (1,) and toc_seen_first)
+        toc_ended_by_title = in_toc and kind == "title" and "目录" not in text
+        if toc_restart or toc_ended_by_title:
+            toc_level = None
+            toc_seen_first = False
+            stack.clear()
+            series_levels.clear()
+            series_last.clear()
+            last_marker = None
+            last_level = None
+            in_toc = False
+
+        if in_toc and kind != "title":
+            if kind == "dec":
+                level = toc_level + max(1, len(path))
+            else:
+                level = toc_level + 1
+            levels[idx] = _clamp_level(level)
+            if kind == "int" and path == (1,):
+                toc_seen_first = True
+            # 目录内部不更新正文的 stack / series_levels / last_marker。
+            continue
 
         if idx == anchor_index:
             level = anchor_level
@@ -244,6 +273,16 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
                 series_last[sk] = marker
         last_marker, last_level = marker, level
 
+        if kind == "title" and "目录" in text:
+            toc_level = level
+            toc_seen_first = False
+            # 进入目录时也切断之前的编号历史。
+            stack.clear()
+            series_levels.clear()
+            series_last.clear()
+            last_marker = marker
+            last_level = level
+
     return levels
 
 
@@ -285,9 +324,20 @@ def _promote_leading_title(md):
 
 
 def _anchor_for(text):
-    """首标题 → 锚点绝对层级:无编号描述性标题=L1;任何编号首标题(B/C)=L2
-    (视作隐含文档标题之下的大标题)。"""
-    return 1 if parse_marker(text)[0] == "title" else 2
+    """首标题 → 锚点绝对层级。
+
+    能看到描述性文档标题时它是 L1。页面从正文中途开始时不能再
+    凭空假设一个「隐含文档标题」：8 释义/第十四条应从 L1 锚定，
+    8.1/8.1.1 则按编号深度锚定。其他无法从文本确定绝对层级的
+    列表型编号保持原来的 L2 保守值。"""
+    kind, path = parse_marker(text)
+    if kind == "title":
+        return 1
+    if kind == "dec":
+        return _clamp_level(len(path))
+    if kind in ("int", "art", "chap"):
+        return 1
+    return 2
 
 
 def relevel_strips(strips, anchor_level=None):
@@ -311,6 +361,14 @@ def relevel_strips(strips, anchor_level=None):
             headings.append((doc_i, i, len(m.group(1)), m.group(2)))
 
     if not headings:
+        return strips
+
+    # 无文档标题/父级上下文，却从「(四十八)…」这类中途括号列表
+    # 开始时，文本本身无法判断它是 L2/L3 还是普通列表。训练集上强制
+    # 全局重排稳定退化，因此只对「非一起始」的孤立括号序列保留 API 层级。
+    first_marker = parse_marker(headings[0][3])
+    if (first_marker[0] == "cnpar" and first_marker[1]
+            and first_marker[1][0] != 1):
         return strips
 
     if anchor_level is None:
