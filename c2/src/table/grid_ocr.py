@@ -573,12 +573,16 @@ def _align_tile(cap, rows, E, band_idx, r, c, ci, cj, cell_ink, cell_gray, meta,
 
 # ═════════════════════════ 装配层(纯摆放,零 API 零修复) ═════════════════════════
 
-def _assemble(parsed, meta, band_nc, cell_ink, cell_gray):
+def _assemble(im, parsed, meta, band_nc, cell_ink, cell_gray):
     """只信骨架:行多裁少补、溢出弃空格、按位补空。修复层没治好的在此强制收束,
     并 audit 真损失上报(找问题,不藏问题):
       补空有墨位: 骨架该tile有E个有墨行,实读不足→末尾几个有墨行拿不到内容,补空丢行
       裁多有内容: 实读>E,多出的行有内容→被裁(佐证加行至多救1行),丢内容
+    **残差格级重读**(最后一道修复):经全部修复链仍与墨迹不一致的 tile,交本地小模型
+    (PP-OCRv6 small rec,cell_ocr)按骨架逐格重读——行=E、列=墨迹格,结构由代码给定,
+    VLM 计数病(单调爆行/漏行/首列错位/行跳读)结构性不可能;正常 tile 一律不碰。
     返回 (grid, cap_rows_global)。"""
+    rb, cb = meta["rb"], meta["cb"]
     row_bands, col_bands = meta["row_bands"], meta["col_bands"]
     grid = []
     cap_rows_global = []                       # (拆表条件1)非首带出现caption的带 → 其全局行范围
@@ -588,14 +592,25 @@ def _assemble(parsed, meta, band_nc, cell_ink, cell_gray):
         for c, (ci, cj) in enumerate(col_bands):
             cap, rows = parsed[(r, c)]
             E = [i for i in band_idx if cell_ink[i, ci:cj].any()]
-            if rows and E:                     # 列少读诊断(audit-only,暂无修复手段):
+            inkw = None
+            if rows and E:
                 ws = [int(np.where(cell_ink[i, ci:cj])[0].max()) + 1 for i in E]
                 inkw = Counter(ws).most_common(1)[0][0]
-                if "COL_UNDER" in _diagnose(rows, inkw=inkw):
-                    meta.setdefault("audit", []).append(
-                        f"tile[{r}][{c}] 列少读⚠ W*{_wstar(rows, inkw)}<墨迹宽{inkw}")
             E, rows = _align_tile(cap, rows, E, band_idx, r, c, ci, cj,
                                   cell_ink, cell_gray, meta, len(grid))
+            # 残差诊断(行/列任一轴仍与墨迹不符)→ 格级本地重读整 tile 替换
+            resid = _diagnose(rows, E=E, nc=band_nc[c], inkw=inkw)
+            if resid:
+                from table.cell_ocr import read_cells
+                # 墨格 ∪ 灰格:淡灰印刷内容(d1752e16 式,cell_ink 128 档不可见)也要读——
+                # 只读严墨格会把灰格('1''2'等浅印小值)漏成空,灰救回扩进 E 的行更是整行空
+                cells = [(i, j) for i in E for j in range(ci, cj)
+                         if cell_ink[i, j] or cell_gray[i, j]]
+                vals = read_cells(im, rb, cb, cells)
+                rows = [[vals.get((i, j), "") for j in range(ci, cj)] for i in E]
+                meta.setdefault("adopt", []).append(
+                    f"tile[{r}][{c}] 残差{'+'.join(sorted(resid))}→格级本地重读"
+                    f"({len(cells)}格,PP-OCRv6s)")
             aligned[c] = (E, rows)
             nz_rows = [x for x in rows if any(s.strip() for s in x)]
             pos = "首带" if r == 0 else ("末带" if r == len(row_bands) - 1 else "中带!")
@@ -709,7 +724,7 @@ def ocr_seg(im, timeout=240):
     parsed = _read_tiles(im, tiles, meta, cell_ink, timeout)
     band_nc = _calibrate_cols(parsed, meta)                    # 骨架仲裁在前…
     _heal_col_over(im, tiles, parsed, meta, band_nc, timeout)  # …tile 自愈在后
-    grid, cap_rows_global = _assemble(parsed, meta, band_nc, cell_ink, cell_gray)
+    grid, cap_rows_global = _assemble(im, parsed, meta, band_nc, cell_ink, cell_gray)
     meta["splits"] = _find_splits(grid, cap_rows_global)
     ncalls = sum(1 for row in tiles for t in row if t is not None)
     return grid, ncalls, meta
