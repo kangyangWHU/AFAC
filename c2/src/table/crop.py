@@ -215,7 +215,43 @@ def _tighten(im, bb, drop_lines=False):
 
 _SPAN_MIN = DATA_SPAN_MIN   # 真数据行判据与 geom 共用(0.4:数据常不填满,如 4f27636c span0.54)
 _RUN_MIN = DATA_RUN_MIN     # 列向独立墨段 ≥3;标题=1~2 连续块
-_PEEL_MAX = 3       # 保数据底线:最多剥 ~3 行标题,剥超过=判据出错,宁可不剥
+
+
+def _datalike(g, band, cbnd, tol=3):
+    """带是否【数据行样】(列对齐判据,替代 _PEEL_MAX 深度魔数的护栏):
+    ≥2 个独立墨成分,且每个成分都落在**单个身体列区间**内(±tol 抗反锯齿灰边)
+    = 稀疏数据行(三角顶:行号+值各居其列)→ 不可剥。
+    标题的反例二形:长成分横跨多条列线('新华人寿…价值表'),或孤零单成分('单位:元')
+    ——都不满足,判非数据、可剥。"""
+    s, e = band
+    cols = g[s:e].any(axis=0)
+    runs = []
+    x, W = 0, len(cols)
+    while x < W:
+        if cols[x]:
+            x0 = x
+            while x < W and cols[x]:
+                x += 1
+            runs.append((x0, x))
+        else:
+            x += 1
+    # 字缝桥接:间隙 ≤ 0.6×行高(字号代理,自适应无绝对常数)的相邻墨段并成一个
+    # 短语级成分——否则标题按【字】散成几十个小段,个个都能塞进宽列,误判数据行样
+    bridge = max(2, int((e - s) * 0.6))
+    merged = []
+    for a, b in runs:
+        if merged and a - merged[-1][1] <= bridge:
+            merged[-1][1] = b
+        else:
+            merged.append([a, b])
+    runs = [(a, b) for a, b in merged]
+    if len(runs) < 2:
+        return False
+    for (a, b) in runs:
+        if not any(lo - tol <= a and b <= hi + tol
+                   for lo, hi in zip(cbnd[:-1], cbnd[1:])):
+            return False                    # 该成分跨列界 → 非数据
+    return True
 
 
 def _peel_title(im, bb):
@@ -266,10 +302,18 @@ def _peel_title(im, bb):
         return span >= _SPAN_MIN and runs >= _RUN_MIN   # 铺满全宽 且 多列墨段 = 数据行
 
     k = 0
-    while k < len(bands) and not is_data_row(*bands[k]):   # 从顶剥到第一数据行
+    while k < len(bands) and not is_data_row(*bands[k]):   # 从顶扫到第一数据行(不设深度上限)
         k += 1
-    if k == 0 or k >= len(bands) or k > _PEEL_MAX:         # 无标题/全非数据/剥超上限 → 不剥
+    if k == 0 or k >= len(bands):                          # 无标题/全非数据 → 不剥
         return [], bb
+    if k > 3:
+        # 深标题栈(>3行)复核:旧版在此一刀切拒绝(9938b1eb 四行标题全留表内被逐格读碎);
+        # 现改为证据门控——前缀带**全部非数据行样**(_datalike:≥2成分且各居单列=三角顶
+        # 稀疏行签名)才剥。浅栈(≤3)保持原样零复核:一年验证过的行为,且干跑实测列对齐
+        # 判据在宽列表上会误否决真标题(caption片段恰好各居宽列,21变化中19为此类误伤)
+        cbnd, _ = col_bnds(g[bands[k][0]:], g180[bands[k][0]:])
+        if any(_datalike(g, bands[b], cbnd) for b in range(k)):
+            return [], bb
     cut = bands[k][0]
     if cut < 8:            # <8px 的"标题"是上段字脚残余(pad重叠带入,如 945e8fe9 4px屑,
         return [], bb      #  4473×4=1118:1 被API 400拒)——真标题行至少一个字高
