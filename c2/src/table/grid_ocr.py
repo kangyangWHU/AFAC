@@ -50,9 +50,10 @@ def _split_merged_cols(im, dark, rb, cb, meta):
     对齐缝)与真漏检几何同构,只能靠内容分辨——抽样 6 格本地 rec,
     『整数 + 完整小数』(9 3421.59)≥2/3 → 真漏检,采纳插线;其余(88. 81 /
     文本/单数)→ 拒绝。命中的边界插入缝心。"""
-    # 真合并格形态:纯整数 + 第二簇——数字值(9 3421.59)或非数字标签(2男,rec常不给
-    # 空格)。"88. 81"小数空格型整数后紧跟'.',两分支都不中
-    two_num = re.compile(r"\d{1,4}(\s+[\d,]+(\.\d+)?|\s*[^\s\d.,]\S*)$")
+    # 真合并格形态:首簇=完整数字(纯整数或带完整小数,不得以'.'收尾)+ 第二簇——
+    # 数字值(9 3421.59 / 0.00 0.00 双小数,e62e178c 三列并一)或非数字标签(2男,
+    # rec常不给空格)。"88. 81"小数空格型首簇后紧跟'.',所有分支都不中
+    two_num = re.compile(r"[\d,]{1,7}(\.\d+)?(\s+[\d,]+(\.\d+)?|\s*[^\s\d.,]\S*)$")
     inserts = []
     for j in range(len(cb) - 1):
         x0, x1 = cb[j] + 2, cb[j + 1] - 2
@@ -98,6 +99,72 @@ def _split_merged_cols(im, dark, rb, cb, meta):
     return cb
 
 
+def _isolated_ink(dark, x0, x1, pad=40):
+    """列条 [x0,x1) 内(独立墨像素数, 总墨数)。独立 = 连通域完全落在条内±2px,
+    不与邻列连通——幻影窄列的墨几乎全是邻列文字漏入(7cd180ab col2 实测 89.5%)。"""
+    from collections import deque
+    lo, hi = max(0, x0 - pad), min(dark.shape[1], x1 + pad)
+    ctx = dark[:, lo:hi]
+    il, ir = x0 - lo, x1 - lo
+    total = int(ctx[:, il:ir].sum())
+    if total == 0 or total > 6000:          # 全空=幻影;墨太多=真内容列,不必细算
+        return 0, total
+    seen = np.zeros_like(ctx, dtype=bool)
+    iso = 0
+    ys, xs = np.where(ctx[:, il:ir])
+    for y0_, xx in zip(ys, xs):
+        x0_ = xx + il
+        if seen[y0_, x0_]:
+            continue
+        q = deque([(y0_, x0_)])
+        seen[y0_, x0_] = True
+        comp, inside = [], True
+        while q:
+            y, x = q.popleft()
+            comp.append((y, x))
+            if x < il + 2 or x >= ir - 2:
+                inside = False
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    ny, nx = y + dy, x + dx
+                    if (0 <= ny < ctx.shape[0] and 0 <= nx < ctx.shape[1]
+                            and ctx[ny, nx] and not seen[ny, nx]):
+                        seen[ny, nx] = True
+                        q.append((ny, nx))
+        if inside:
+            iso += sum(1 for _, x in comp if il <= x < ir)
+    return iso, total
+
+
+def _drop_phantom_cols(dark, cb, meta):
+    """幻影窄列删除(装饰双线中缝被当独立列,GT 无此列):宽<0.5×中位列宽 且
+    独立墨≈0(≤20%总墨且≤200px;全空恒幻影)→ 删除与"跨界文字所属侧"之间的边界,
+    窄条并入该侧列。真窄列(序号列等)独立墨大,天然不触发。"""
+    ws = np.diff(cb)
+    if len(ws) < 4:
+        return cb
+    med = float(np.median(ws))
+    removed = set()
+    for j in range(len(ws)):
+        if ws[j] >= 0.5 * med or ws[j] < 6:
+            continue
+        iso, total = _isolated_ink(dark, int(cb[j]) + 1, int(cb[j + 1]))
+        if total > 6000 or iso > max(0.2 * total, 200):
+            continue
+        lm = int(dark[:, max(0, cb[j] - 3):cb[j] + 3].sum())
+        rm = int(dark[:, max(0, cb[j + 1] - 3):cb[j + 1] + 3].sum())
+        b = (cb[j] if (lm >= rm and j > 0) else
+             cb[j + 1] if j + 1 < len(cb) - 1 else None)
+        if b is None or b in removed:
+            continue
+        removed.add(b)
+        meta.setdefault("adopt", []).append(
+            f"幻影窄列col{j}(宽{int(ws[j])}/中位{int(med)},独立墨{iso}/{total})删边界@x{int(b)}")
+    if removed:
+        return np.asarray([x for x in cb if x not in removed])
+    return cb
+
+
 def slice_grid(im):
     """按几何骨架切 tile。返回 (tiles, meta);tiles[r][c]=PIL.Image|None(空白)。
 
@@ -110,6 +177,7 @@ def slice_grid(im):
     meta = {"misaligned": False, "col_framed": bool(cf)}
     if len(rb) >= 5 and len(cb) >= 2:
         cb = _split_merged_cols(im, dark, rb, cb, meta)   # 漏检列线修复(见函数注释)
+        cb = _drop_phantom_cols(dark, cb, meta)           # 幻影窄列删除(见函数注释)
     R, C = len(rb) - 1, len(cb) - 1
     meta.update({"rows": R, "cols": C, "rb": rb, "cb": cb})
     if R < 1 or C < 1 or (R >= 2 and float(np.median(np.diff(rb))) >= 12
@@ -307,6 +375,14 @@ def _norm_numeric(grid, marks):
         return
     pat = re.compile(r"\d{1,3}(?:,\d{3})*(?:\.(\d+))?")
     ncols = max(len(r) for r in grid)
+    allv = []                                # 全表模板(整列被重读无票时的回退)
+    for i, row in enumerate(grid):
+        for j, s in enumerate(row):
+            if (i, j) not in marks:
+                m = pat.fullmatch(s.strip())
+                if m:
+                    allv.append(("," in s, len(m.group(1) or "")))
+    tbl_tpl = Counter(allv).most_common(1)[0][0] if len(allv) >= 10 else None
     for j in range(ncols):
         votes = []
         for i, row in enumerate(grid):
@@ -315,17 +391,20 @@ def _norm_numeric(grid, marks):
             m = pat.fullmatch(row[j].strip())
             if m:
                 votes.append(("," in row[j], len(m.group(1) or "")))
-        if not votes:
-            continue
-        (has_c, ndec), n = Counter(votes).most_common(1)[0]
-        if n < 3:
+        if votes and votes and Counter(votes).most_common(1)[0][1] >= 3:
+            has_c, ndec = Counter(votes).most_common(1)[0][0]
+        elif tbl_tpl:
+            has_c, ndec = tbl_tpl
+        else:
             continue
         for i, row in enumerate(grid):
             if (i, j) not in marks or j >= len(row):
                 continue
             v = row[j].strip()
-            if (not v or not re.fullmatch(r"[0-9.,\s]+", v)
-                    or not any(ch.isdigit() for ch in v)):
+            # 界内破折号/空格可归一('3 123-02'=逗号→空格+点→连字符的rec损伤);
+            # 首字符'-'(疑似负数)不碰,数字位恒不动
+            if (not v or not any(ch.isdigit() for ch in v)
+                    or not re.fullmatch(r"\d[\d.,\s\-–—]*", v)):
                 continue
             digits = re.sub(r"\D", "", v)
             if ndec:
@@ -514,26 +593,41 @@ def ocr_seg(im, timeout=240):
     parsed = _read_tiles(tiles, meta, timeout)
     band_nc = _calibrate_cols(parsed, meta)
     grid, cap_rows_global = _assemble(im, parsed, meta, band_nc, cell_ink, cell_gray)
-    # 首行单内容(GT 口径,table集实证):短文本=悬浮轴标签(保单年度/投保年龄...)
-    # → 折入下一行角格"角\标签"并删行(96/115 斜线角格主流);长文本=标题
-    # → 整行 colspan(34e53b1c 标题+副标题 colspan 连排)。用户拍板阈值:≤8字=短。
-    if grid and len(grid[0]) > 1:
-        ne = [j for j, s in enumerate(grid[0]) if s.strip() and s != COLSPAN]
-        if len(ne) == 1:
-            t = grid[0][ne[0]]
-            nxt_hdr = (len(grid) > 1 and grid[1] and grid[1][0].strip()
-                       and sum(1 for s in grid[1] if s.strip()) >= 3)
-            if nxt_hdr and len(t) <= 8:
-                grid[1][0] = grid[1][0] + "\\" + t
-                grid.pop(0)
-                cap_rows_global = [(max(0, lo - 1), hi - 1)
-                                   for lo, hi in cap_rows_global]
-                meta["local_cells"] = [(i - 1, j) for (i, j)
-                                       in meta.get("local_cells", []) if i > 0]
-                meta.setdefault("adopt", []).append(
-                    f"悬浮轴标签'{t}'折入角格(斜线口径)")
-            else:
-                grid[0] = [t] + [COLSPAN] * (len(grid[0]) - 1)
+    # 首行整形(GT 口径,table集实证;仅动 grid 首行):
+    # · 单内容且短(≤8字)=悬浮轴标签(保单年度/投保年龄...)→ 折入下一行角格
+    #   "角\标签"并删行(96/115 斜线角格主流);
+    # · 其余带空档的首行 → 分段 colspan:每个文字格吞并右侧空档至下一文字格,
+    #   行首空档并入首格(dd955f1c 尾空98格归最右'保单年度末';d84b025f
+    #   '保单年度'|'年龄(周岁)'各跨半行;标题行=单内容长文本整行贯穿)。
+    if grid and len(grid[0]) > 1 and COLSPAN not in grid[0]:
+        row = grid[0]
+        ne = [j for j, s in enumerate(row) if s.strip()]
+        # 数据行守卫(GT实证):首行带尾空td的7例全是数字为主的数据行(三角表裁页
+        # 首行/90c8cdb9属性行),GT保留空td;只有文本表头行才colspan/折角
+        numlike = sum(1 for j in ne
+                      if re.fullmatch(r"[\d.,%\-\s]+", row[j].strip()))
+        is_data = ne and numlike * 2 > len(ne)
+        nxt_hdr = (len(grid) > 1 and grid[1] and grid[1][0].strip()
+                   and sum(1 for s in grid[1] if s.strip()) >= 3)
+        if is_data:
+            pass
+        elif len(ne) == 1 and nxt_hdr and len(row[ne[0]]) <= 8:
+            grid[1][0] = grid[1][0] + "\\" + row[ne[0]]
+            grid.pop(0)
+            cap_rows_global = [(max(0, lo - 1), hi - 1)
+                               for lo, hi in cap_rows_global]
+            meta["local_cells"] = [(i - 1, j) for (i, j)
+                                   in meta.get("local_cells", []) if i > 0]
+            meta.setdefault("adopt", []).append(
+                f"悬浮轴标签'{row[ne[0]]}'折入角格(斜线口径)")
+        elif ne and len(ne) < len(row):
+            texts = [row[j] for j in ne]
+            new = [COLSPAN] * len(row)
+            for b, t in zip([0] + ne[1:], texts):
+                new[b] = t
+            grid[0] = new
+            meta.setdefault("adopt", []).append(
+                f"首行分段colspan({len(ne)}段/{len(row)}格)")
     meta["splits"] = _find_splits(grid, cap_rows_global)
     _norm_numeric(grid, meta.get("local_cells", []))
     ncalls = sum(1 for row in tiles for t in row if t is not None)
