@@ -282,6 +282,8 @@ def ocr(im, blocks, timeout=240):
             print(f"  [adopt] seg@y{bb[1]} {a}", flush=True)
         ncalls += nc
         if grid is not None:
+            for txt in gmeta.get("pre_text", []):   # 无框表标题弹出为表前文本(caption)
+                items.append(["text", txt, None])
             grid = _fix_grid(grid)
             for sp in reversed(gmeta.get("splits") or []):
                 # API证词拆表(caption+轴行双条件):轴行前的连续"文本行"(≤3非空且含中文)

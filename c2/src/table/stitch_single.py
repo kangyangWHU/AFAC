@@ -218,28 +218,38 @@ def _is_caption_like(text):
     return cjk >= 4 and cjk > dig
 
 
-# colspan 哨兵:表首条带行被并入左侧格的格位(grid_ocr 写入,仅表首带压线行)。
-# 渲染时"文本格+连续哨兵"折叠为 <td colspan=N>(GT 表头口径,d9a99684 colspan=46)
+# 结构哨兵(grid_ocr 表头重建写入,渲染层折叠):
+# COLSPAN=被左侧格横向吞并的格位 → 左格发 colspan=N
+# ROWSPAN=被上方格纵向吞并的格位 → 上格发 rowspan=N,本格不发 td(cc1ea3a3 GT口径)
 COLSPAN = "\x00cs"
+ROWSPAN = "\x00rs"
 
 
 def _one_table(rows):
     # 不修剪尾空列:有框表的尾空列由框线定义、GT保留为空td(90c8cdb9尾部10列全空,
     # 修剪致td-690);自由读时代的补齐残留不值得为它杀真列
     out = [_GT_TABLE_OPEN]
-    for row in rows:
+    for ri, row in enumerate(rows):
         tds = []
         j = 0
         while j < len(row):
             c = row[j] if row[j] is not None else ""
+            if c == ROWSPAN:                     # 被上格纵向吞并,不发td
+                j += 1
+                continue
             span = 1
             while j + span < len(row) and row[j + span] == COLSPAN:
                 span += 1
+            rs = 1
+            while (ri + rs < len(rows) and j < len(rows[ri + rs])
+                   and rows[ri + rs][j] == ROWSPAN):
+                rs += 1
+            attrs = ""
             if span > 1:
-                tds.append('<td colspan="%d">%s</td>'
-                           % (span, "" if c == COLSPAN else c))
-            else:
-                tds.append("<td>%s</td>" % ("" if c == COLSPAN else c))
+                attrs += ' colspan="%d"' % span
+            if rs > 1:
+                attrs += ' rowspan="%d"' % rs
+            tds.append("<td%s>%s</td>" % (attrs, "" if c == COLSPAN else c))
             j += span
         out.append("      <tr>%s</tr>" % "".join(tds))
     out.append("</table>")

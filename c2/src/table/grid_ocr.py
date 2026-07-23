@@ -18,9 +18,10 @@ from collections import Counter
 
 from common.config import BIN_INK, BIN_FAINT
 from table.geom import row_bnds, col_bnds, rows_misaligned, band_blank
+import common.api_client as api
 from table.tiles import (MAX_TILE_ROWS, MAX_TILE_COLS, ASPECT_SAFE,
-                         upsample_for, pad_white, call_tiles)
-from table.stitch_single import parse_tile, COLSPAN
+                         upsample_for, upscale, pad_white, call_tiles)
+from table.stitch_single import parse_tile, COLSPAN, ROWSPAN
 from table.cell_ocr import read_cells, read_strip
 
 
@@ -53,49 +54,93 @@ def _split_merged_cols(im, dark, rb, cb, meta):
     # 真合并格形态:首簇=完整数字(纯整数或带完整小数,不得以'.'收尾)+ 第二簇——
     # 数字值(9 3421.59 / 0.00 0.00 双小数,e62e178c 三列并一)或非数字标签(2男,
     # rec常不给空格)。"88. 81"小数空格型首簇后紧跟'.',所有分支都不中
-    two_num = re.compile(r"[\d,]{1,7}(\.\d+)?(\s+[\d,]+(\.\d+)?|\s*[^\s\d.,]\S*)$")
+    if meta.get("col_framed"):
+        # 有框列=框线,列界本就精确,不存在漏检线(旧列校准同款铁律)。有框的
+        # 千分位表(8534a3c6)逗号缝会让每列都成假候选,连API条带证人都会被噪声
+        # 骗(实测140候选/6误采/1误否),门口直接拦
+        return cb
     inserts = []
     for j in range(len(cb) - 1):
         x0, x1 = cb[j] + 2, cb[j + 1] - 2
         if x1 - x0 < 30:
             continue
-        rows_ = [i for i in range(len(rb) - 1)
-                 if dark[rb[i] + 2:rb[i + 1] - 2, x0:x1].any()]
-        if len(rows_) < 4:
-            continue
-        gaps = []
-        for i in rows_:
+        # 逐行墨段(间隙≥8px 分段)→ 全行样本空间做区间并 → zones
+        row_runs = {}
+        for i in range(len(rb) - 1):
             proj = dark[rb[i] + 2:rb[i + 1] - 2, x0:x1].any(0)
             xs = np.where(proj)[0]
-            if len(xs) < 2:
+            if len(xs) == 0:
                 continue
-            inner = np.where(~proj[xs[0]:xs[-1] + 1])[0]
-            if len(inner) == 0:
-                continue
-            runs = np.split(inner, np.where(np.diff(inner) > 1)[0] + 1)
-            best = max(runs, key=len)
-            lo, hi = xs[0] + best[0], xs[0] + best[-1]
-            if (hi - lo + 1 >= 8 and lo - xs[0] >= 10 and xs[-1] - hi >= 10):
-                gaps.append((lo, hi))
-        if len(gaps) < 0.7 * len(rows_):
+            brk = np.where(np.diff(xs) >= 8)[0]
+            segs = np.split(xs, brk + 1)
+            row_runs[i] = [(int(s[0]), int(s[-1])) for s in segs]
+        if len(row_runs) < 4:
             continue
-        cx = int(np.median([(lo + hi) // 2 for lo, hi in gaps]))
-        cover = sum(1 for lo, hi in gaps if lo <= cx - 2 and cx + 2 <= hi)
-        if cover < 0.8 * len(gaps):
+        zones = []                                 # [lo, hi, 墨量] 互不重叠区带
+        for runs in row_runs.values():
+            for lo, hi in runs:
+                for z in zones:
+                    if lo <= z[1] + 7 and hi >= z[0] - 7:
+                        z[0], z[1] = min(z[0], lo), max(z[1], hi)
+                        z[2] += hi - lo + 1
+                        break
+                else:
+                    zones.append([lo, hi, hi - lo + 1])
+        # 区带可能合并后重叠,再归并一轮
+        zones.sort()
+        merged = []
+        for z in zones:
+            if merged and z[0] <= merged[-1][1] + 7:
+                merged[-1][1] = max(merged[-1][1], z[1])
+                merged[-1][2] += z[2]
+            else:
+                merged.append(z)
+        zones = merged
+        if len(zones) < 2:
             continue
-        samp = rows_[:: max(1, len(rows_) // 6)][:6]     # 内容复核抽样
-        vals = read_cells(im, rb, cb, [(i, j) for i in samp])
-        hits = sum(1 for t in vals.values() if two_num.fullmatch(t.strip()))
-        if hits * 3 >= len(vals) * 2:                    # ≥2/3 双数格
-            inserts.append(x0 + cx)
+        n_co = sum(1 for runs in row_runs.values() if len(runs) >= 2)
+        support = [sum(1 for runs in row_runs.values()
+                       if any(z[0] <= lo and hi <= z[1] for lo, hi in runs))
+                   for z in zones]
+        cuts = [x0 + (a[1] + b[0]) // 2 for a, b in zip(zones, zones[1:])]
+        if n_co * 10 <= len(row_runs) and min(support) >= 2:
+            # 互斥占位:各行只落一个区带(阶梯稀疏 e62e178c)——单个数字不可能
+            # 逐行在互不重叠的x区带间跳跃,免内容复核直接按区带间隙插线
+            inserts.extend(cuts)
             meta.setdefault("adopt", []).append(
-                f"骨架col{j} 缝隙对齐插线@x{x0 + cx}"
-                f"({cover}/{len(rows_)}行,复核{hits}/{len(vals)})")
-        else:
-            meta.setdefault("audit", []).append(
-                f"骨架col{j} 对齐缝复核未过({hits}/{len(vals)}双数格),不插线")
+                f"骨架col{j} 互斥区带插线x{[int(c) for c in cuts]}"
+                f"(区带{len(zones)},支持{support})")
+        elif n_co >= 0.7 * len(row_runs):
+            # 同行共存:一个被劈的数字('88. 81'/'1,946.57')或真两列('9 3421.59')。
+            # 裁决只信 API(rec 3x 对千分位格噪声多形态:'254 78'/'1583-00'/
+            # '3.841 70',文本规则不可救;API 实测缝合版式缝、拆开真列都稳定):
+            # 裁该列条带问一次 API,它也看到 ≥区带数 列 → 采纳
+            # (用户判据:local 区带切分 == API 切分 ⟺ 缺列)
+            rs = sorted(row_runs)
+            r1_ = min(len(rb) - 1, rs[0] + 8)
+            strip = im.crop((int(cb[j]), int(rb[rs[0]]),
+                             int(cb[j + 1]), int(rb[r1_])))
+            raw = api.call_safe(upscale(pad_white(strip), 2), timeout=90)
+            grows = parse_tile(raw) if raw else []
+            wid = Counter(sum(1 for s in x if s.strip())
+                          for x in grows if any(s.strip() for s in x))
+            api_cols = wid.most_common(1)[0][0] if wid else 1
+            if api_cols >= 2:
+                # 插 api_cols-1 条:切点按"两侧较弱区带的墨量"排序取最强——切线的
+                # 价值取决于它分开的两个族都实在(最宽间隙会选到贴着杂迹小区带的
+                # 假缝,34821e6c '2男' 真界x406被x485挤掉的教训)
+                gw = sorted(((min(a[2], b[2]), (a[1] + b[0]) // 2)
+                             for a, b in zip(zones, zones[1:])), reverse=True)
+                cuts = [x0 + c for _, c in gw[:api_cols - 1]]
+                inserts.extend(cuts)
+                meta.setdefault("adopt", []).append(
+                    f"骨架col{j} 共存区带插线x{sorted(int(c) for c in cuts)}"
+                    f"(API见{api_cols}列)")
+            else:
+                meta.setdefault("audit", []).append(
+                    f"骨架col{j} 区带候选被API否决(API见{api_cols}列/区带{len(zones)})")
     if inserts:
-        return np.asarray(sorted(set(list(cb) + inserts)))
+        return np.asarray(sorted(set(int(c) for c in list(cb) + inserts)))
     return cb
 
 
@@ -382,7 +427,13 @@ def _norm_numeric(grid, marks):
                 m = pat.fullmatch(s.strip())
                 if m:
                     allv.append(("," in s, len(m.group(1) or "")))
-    tbl_tpl = Counter(allv).most_common(1)[0][0] if len(allv) >= 10 else None
+    # 回退模板仅限带小数位的(整数模板会把'3421.59'digits化成'342159'——
+    # 行号/年龄整数格多数的表投出(False,0)的教训)
+    tbl_tpl = None
+    if len(allv) >= 10:
+        cand = Counter(allv).most_common(1)[0][0]
+        if cand[1] > 0:
+            tbl_tpl = cand
     for j in range(ncols):
         votes = []
         for i, row in enumerate(grid):
@@ -406,6 +457,8 @@ def _norm_numeric(grid, marks):
             if (not v or not any(ch.isdigit() for ch in v)
                     or not re.fullmatch(r"\d[\d.,\s\-–—]*", v)):
                 continue
+            if ndec == 0 and "." in v:
+                continue                # 整数模板不改带小数点的格(保住真小数)
             digits = re.sub(r"\D", "", v)
             if ndec:
                 if len(digits) <= ndec:
@@ -495,16 +548,8 @@ def _assemble(im, parsed, meta, band_nc, cell_ink, cell_gray):
                     row = [vals.get((i, j), "") for j in range(ci, cj)]
                     for (j0, j1) in strips.get(i, []):
                         row[j0 - ci] = read_strip(im, rb, cb, i, j0, j1)
-                    if i in strips:
-                        # 条带行 colspan 化(用户口径:行首空档并入首簇,格间/尾部
-                        # 空档并入左簇——GT 表头 colspan 直贯,d9a99684 colspan=46):
-                        # 内容格为界分段,段内其余格位放哨兵,渲染时折叠为 colspan td
-                        starts = [j for j, s in enumerate(row) if s.strip()]
-                        if starts:
-                            texts = [row[s] for s in starts]
-                            row = [COLSPAN] * len(row)
-                            for b, t in zip([0] + starts[1:], texts):
-                                row[b] = t
+                    # 结构整形(colspan/rowspan/标题化)统一由 _rebuild_header 做,
+                    # 此处只放内容不放哨兵——预先 colspan 化会让重建器早退(2f5教训)
                     nzrows.append(row)
                     if i not in strips:
                         local_k.add(k)
@@ -573,6 +618,183 @@ def _find_splits(grid, cap_rows_global):
     return sorted(set(splits))
 
 
+def _colnum_row(row):
+    """列号行判定:非空格≥5、≥80% 纯整数、存在长度≥5 的连续递增段(1,2,3.. / 0,1,..)。
+    返回递增段起始列;非列号行返回 None。数据行(现价小数/非连续年龄)天然不中。"""
+    ne = [(j, s.strip()) for j, s in enumerate(row) if s.strip()]
+    if len(ne) < 5:
+        return None
+    ints = [(j, int(s)) for j, s in ne if s.isdigit()]
+    if len(ints) * 5 < len(ne) * 4:
+        return None
+    best_len = run_len = 1
+    for (_ja, va), (_jb, vb) in zip(ints, ints[1:]):
+        run_len = run_len + 1 if vb == va + 1 else 1
+        best_len = max(best_len, run_len)
+    if best_len < 5:
+        return None
+    return ints[0][0]        # 分界=列号行第一个整数格(最长段起点会把列号1~9划给左侧)
+
+
+def _title_row(row, w):
+    """整行标题化:全部文本按序拼接进单格,colspan 贯穿(GT 标题口径 34e53b1c)。"""
+    text = " ".join(s.strip() for s in row if s.strip())
+    return [text] + [COLSPAN] * (w - 1)
+
+
+def _rebuild_header(grid, cap_rows_global, meta):
+    """表头结构重建(锚定列号行,用户方案):
+    · 锚 h = 前3行内的列号行(连续整数 1,2,3..);h 不存在 → 仅首行分段colspan;
+    · h-1 行(紧邻列号行):
+        单短簇(≤8字)且 h 行有角格文本 → 折角"角\\标签"删行(斜线口径 96/115);
+        全短簇(均≤10字)→ 双行表头:左[0,k0)上下合并去重 rowspan=2,右标签簇
+          colspan(cc1ea3a3 GT);右侧无标签时最后一个左标签划归右侧(dd955f1c);
+        含长簇=对不上 → pop 当标题(整行拼接单格 colspan,2f5ce7c4 说明行);
+    · h-1 之上的行:一律标题化;
+    · 数据行守卫:数字为主的行不动(GT 数据首行保留空td,7例实证)。
+    返回(折角删行后偏移的)cap_rows_global。"""
+    if not grid or len(grid[0]) <= 1:
+        return cap_rows_global
+    h = None
+    for i in range(min(3, len(grid))):
+        if COLSPAN in grid[i] or ROWSPAN in grid[i]:
+            return cap_rows_global
+        if _colnum_row(grid[i]) is not None:
+            h = i
+            break
+
+    def _is_data(row):
+        ne = [j for j, s in enumerate(row) if s.strip()]
+        num = sum(1 for j in ne
+                  if re.fullmatch(r"[\d.,%\-\s]+", row[j].strip()))
+        return ne and num * 2 > len(ne)
+
+    if h is None or h == 0:
+        row0 = grid[0]
+        ne0 = [j for j, s in enumerate(row0) if s.strip()]
+        if h is None and ne0 and not _is_data(row0) and len(ne0) < len(row0):
+            texts = [row0[j] for j in ne0]         # 无列号行:分段colspan兜底
+            grid[0] = [COLSPAN] * len(row0)
+            for b, t in zip([0] + ne0[1:], texts):
+                grid[0][b] = t
+            meta.setdefault("adopt", []).append(
+                f"首行分段colspan({len(ne0)}段/{len(row0)}格)")
+        return cap_rows_global                     # h==0:列号行即首行(斜线角格),不动
+
+    for i in range(h - 1):                         # h-1 之上的行:标题化
+        if any(s.strip() for s in grid[i]) and not _is_data(grid[i]):
+            grid[i] = _title_row(grid[i], len(grid[i]))
+            meta.setdefault("adopt", []).append(f"行{i} 标题化(colspan整行)")
+
+    r0, r1 = grid[h - 1], grid[h]
+    ne0 = [j for j, s in enumerate(r0) if s.strip()]
+    if not ne0 or _is_data(r0):
+        return cap_rows_global
+    if len(ne0) == 1 and len(r0[ne0[0]]) <= 8 and r1[0].strip():
+        t = r0[ne0[0]]                             # 折角(斜线口径)
+        r1[0] += "\\" + t
+        grid.pop(h - 1)
+        meta["local_cells"] = [(i - 1 if i >= h else i, j) for (i, j)
+                               in meta.get("local_cells", []) if i != h - 1]
+        meta.setdefault("adopt", []).append(f"悬浮轴标签'{t}'折入角格(斜线口径)")
+        return [(max(0, lo - 1), hi - 1) for lo, hi in cap_rows_global]
+    if any(len(r0[j].strip()) > 10 for j in ne0):  # 含长簇=对不上 → 标题
+        grid[h - 1] = _title_row(r0, len(r0))
+        meta.setdefault("adopt", []).append(f"行{h - 1} 对不上表头结构,标题化")
+        return cap_rows_global
+    # 双行表头:左rowspan右colspan
+    k0 = min(_colnum_row(r1), len(r0), len(r1))
+    starts = [j for j in range(k0, len(r0)) if r0[j].strip()]
+    if not starts and ne0 and max(ne0) < k0:       # 右侧无标签:末位左标签划归右侧
+        k0 = max(ne0)
+        starts = [k0]
+    for j in range(k0):                            # 左侧:上下合并去重 → rowspan=2
+        a, b = r0[j].strip(), r1[j].strip()
+        merged = a if (a == b or not b) else (b if not a else a + b)
+        if merged:
+            r0[j] = merged
+            r1[j] = ROWSPAN
+    # 右侧:列号上方只有一个 colspan(用户口径,GT cc1ea3a3 单标签跨56列)。
+    # 多簇=同一物理文字被tile列带切碎('保单'+'年度'),拼接;完全相同的簇去重
+    labels = [r0[j].strip() for j in starts]
+    text = labels[0] if labels and all(x == labels[0] for x in labels) \
+        else "".join(labels)
+    for j in range(k0, len(r0)):
+        r0[j] = COLSPAN
+    if text:
+        r0[k0] = text
+    meta.setdefault("adopt", []).append(
+        f"双行表头重建 左{k0}列rowspan 右单标签'{text[:12]}'colspan")
+    return cap_rows_global
+
+
+def _fill_seq(grid, meta):
+    """序列补齐(用户终稿,范围收紧):横向限前3行(列号行)、纵向限前4列(行号列,
+    左侧 rowspan 标签会把行号列推到 col1~3);**只补 0~9**——丢的都是细笔画单字符
+    ('1'被 cell_ink 的 cnt>=3 阈值漏检、单字rec失败),多位数不丢也不冒补。
+    段内空档步长一致→线性补;连续段(长≥3)首尾外推;digits==期望但格式错的
+    非空格归一('1.0'→'10',数字位不变,不限0~9)。"""
+    if not grid:
+        return
+
+    def _put(i, j, exp, t):
+        if not t:
+            if 0 <= exp <= 9:                      # 只补单字符值
+                grid[i][j] = str(exp)
+                return "fill"
+        elif not t.isdigit() and re.sub(r"\D", "", t) == str(exp):
+            grid[i][j] = str(exp)                  # '1.0'→'10':digits相等仅格式错
+            return "fix"
+        return None
+
+    def _one_axis(cells, tag):
+        # 局部连续段补齐(非全局仿射——双panel列号行 1..30,1..30 两段截距不同,
+        # 全局众数判据必挂,dd955f1c 教训):
+        # · 两已知整数 a@pa,b@pb 间距==值差(步长1一致)→ 空档线性补;
+        # · 连续段(长≥3)首尾各外推1格;digits==期望但格式错 → 归一
+        posmap = {p: (i, j, t) for p, i, j, t in cells}
+        known = sorted(p for p, v in posmap.items() if v[2].isdigit())
+        if len(known) < 5:
+            return
+        filled = fixed = 0
+        for pa, pb in zip(known, known[1:]):
+            va, vb = int(posmap[pa][2]), int(posmap[pb][2])
+            if pb - pa >= 2 and vb - va == pb - pa:
+                for p in range(pa + 1, pb):
+                    if p in posmap:
+                        r = _put(*posmap[p][:2], va + (p - pa), posmap[p][2])
+                        filled += r == "fill"
+                        fixed += r == "fix"
+        runs = []                                  # 连续段(位置连续且值步长1)
+        s = 0
+        for k in range(1, len(known) + 1):
+            if (k == len(known) or known[k] != known[k - 1] + 1
+                    or int(posmap[known[k]][2]) != int(posmap[known[k - 1]][2]) + 1):
+                runs.append((known[s], known[k - 1]))
+                s = k
+        for lo, hi in runs:
+            if hi - lo + 1 < 3:
+                continue
+            for p, exp in ((lo - 1, int(posmap[lo][2]) - 1),
+                           (hi + 1, int(posmap[hi][2]) + 1)):
+                if p in posmap and exp >= 0:
+                    r = _put(*posmap[p][:2], exp, posmap[p][2])
+                    filled += r == "fill"
+                    fixed += r == "fix"
+        if filled or fixed:
+            meta.setdefault("adopt", []).append(
+                f"序列{tag} 补{filled}格/正{fixed}格(局部连续段)")
+
+    for j in range(min(4, max(len(r) for r in grid))):   # 纵向:限前4列(行号列)
+        _one_axis([(i, i, j, row[j].strip()) for i, row in enumerate(grid)
+                   if j < len(row) and row[j] not in (COLSPAN, ROWSPAN)], f"col{j}")
+    for i, row in enumerate(grid):                 # 横向:所有通过列号行判定的行
+        if _colnum_row(row) is None:               # (堆叠子表的中部列号行也在,
+            continue                               #  00c6e7df 第二子表 0/1 缺失教训;
+        _one_axis([(j, i, j, row[j].strip()) for j in range(len(row))   # 判定本身
+                   if row[j] not in (COLSPAN, ROWSPAN)], f"row{i}")     # 挡住数据行)
+
+
 # ═════════════════════════ 编排 ═════════════════════════
 
 def ocr_seg(im, timeout=240):
@@ -593,42 +815,17 @@ def ocr_seg(im, timeout=240):
     parsed = _read_tiles(tiles, meta, timeout)
     band_nc = _calibrate_cols(parsed, meta)
     grid, cap_rows_global = _assemble(im, parsed, meta, band_nc, cell_ink, cell_gray)
-    # 首行整形(GT 口径,table集实证;仅动 grid 首行):
-    # · 单内容且短(≤8字)=悬浮轴标签(保单年度/投保年龄...)→ 折入下一行角格
-    #   "角\标签"并删行(96/115 斜线角格主流);
-    # · 其余带空档的首行 → 分段 colspan:每个文字格吞并右侧空档至下一文字格,
-    #   行首空档并入首格(dd955f1c 尾空98格归最右'保单年度末';d84b025f
-    #   '保单年度'|'年龄(周岁)'各跨半行;标题行=单内容长文本整行贯穿)。
-    if grid and len(grid[0]) > 1 and COLSPAN not in grid[0]:
-        row = grid[0]
-        ne = [j for j, s in enumerate(row) if s.strip()]
-        # 数据行守卫(GT实证):首行带尾空td的7例全是数字为主的数据行(三角表裁页
-        # 首行/90c8cdb9属性行),GT保留空td;只有文本表头行才colspan/折角
-        numlike = sum(1 for j in ne
-                      if re.fullmatch(r"[\d.,%\-\s]+", row[j].strip()))
-        is_data = ne and numlike * 2 > len(ne)
-        nxt_hdr = (len(grid) > 1 and grid[1] and grid[1][0].strip()
-                   and sum(1 for s in grid[1] if s.strip()) >= 3)
-        if is_data:
-            pass
-        elif len(ne) == 1 and nxt_hdr and len(row[ne[0]]) <= 8:
-            grid[1][0] = grid[1][0] + "\\" + row[ne[0]]
-            grid.pop(0)
-            cap_rows_global = [(max(0, lo - 1), hi - 1)
-                               for lo, hi in cap_rows_global]
-            meta["local_cells"] = [(i - 1, j) for (i, j)
-                                   in meta.get("local_cells", []) if i > 0]
-            meta.setdefault("adopt", []).append(
-                f"悬浮轴标签'{row[ne[0]]}'折入角格(斜线口径)")
-        elif ne and len(ne) < len(row):
-            texts = [row[j] for j in ne]
-            new = [COLSPAN] * len(row)
-            for b, t in zip([0] + ne[1:], texts):
-                new[b] = t
-            grid[0] = new
-            meta.setdefault("adopt", []).append(
-                f"首行分段colspan({len(ne)}段/{len(row)}格)")
+    _norm_numeric(grid, meta.get("local_cells", []))   # 归一在前,补齐能修它的误伤
+    _fill_seq(grid, meta)                              # ('10'被列模板改'1.0'→修回)
+    cap_rows_global = _rebuild_header(grid, cap_rows_global, meta)
+    while (not meta.get("col_framed") and grid and len(grid[0]) > 1
+           and grid[0][0].strip() and all(c == COLSPAN for c in grid[0][1:])):
+        # 无框表顶部的单格标题行弹出为表前文本(GT caption 口径,用户拍板)
+        meta.setdefault("pre_text", []).append(grid[0][0])
+        grid.pop(0)
+        meta["local_cells"] = [(i - 1, j) for (i, j)
+                               in meta.get("local_cells", []) if i > 0]
+        cap_rows_global = [(max(0, lo - 1), hi - 1) for lo, hi in cap_rows_global]
     meta["splits"] = _find_splits(grid, cap_rows_global)
-    _norm_numeric(grid, meta.get("local_cells", []))
     ncalls = sum(1 for row in tiles for t in row if t is not None)
     return grid, ncalls, meta
