@@ -23,6 +23,12 @@ A_LONG_DIR = os.path.join(
 A_TABLE_DIR = os.path.join(
     DATA_DIR, "AFAC A榜评测数据集(2)_extracted", "finix_huge_table_rest_A")
 
+# ---- B 榜测试集（仅 images/，无 GT）----
+B_LONG_DIR = os.path.join(
+    DATA_DIR, "AFACB榜评测数据集", "finix_huge_long_rest_B")
+B_TABLE_DIR = os.path.join(
+    DATA_DIR, "AFACB榜评测数据集", "finix_huge_table_rest_B")
+
 # ---- 批处理目标：(图片目录, kind)，kind ∈ {"long", "table"}。----
 # main.py 默认跑此列表，不再靠长宽比自动分类。按需自行填/改要处理的目录。
 RUN_TARGETS = [

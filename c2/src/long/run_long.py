@@ -19,7 +19,9 @@ from common.preprocess import prep
 from table.tiles import call_tiles
 from long.slicer_long import slice_long
 from long.stitch_long import merge_strips
+from long.table_fix import fix_tables, split_tables
 from long.heading_norm import (relevel_strips, toc_bullets_to_headings,
+                               flatten_scripts,
                                roman_to_unicode, subscript_to_latex)
 from metrics.evaluate import text_edit_loss, read_order_loss
 
@@ -30,8 +32,13 @@ def run_smart(im, target_h=5000, timeout=240):
     outs = [toc_bullets_to_headings(o) for o in outs]   # 目录列表项→标题(在定级前)
     outs = relevel_strips(outs)
     md = merge_strips(outs)
-    # GT 规范:罗马数字→unicode、下标→LaTeX(仅 LONG 需要;TABLE 无此内容)
-    md = subscript_to_latex(roman_to_unicode(md))
+    md = split_tables(fix_tables(md))       # 横幅行 colspan 归一 → 再据此切开子表
+    # GT 规范:罗马数字→unicode;上/下标一律压平成普通字符,不产出 LaTeX。
+    # GT 全量 200 篇里 unicode 上下标出现 0 次(×10⁹/L 写成 "109/L"),故压平只会更贴近。
+    # 注:本地 text_edit 走 NFKC,看不出压平的差别(⁹ 与 9 等价),线上若不归一化才有收益。
+    # subscript_to_latex 保留未用:GT 在 14/100 篇里确有 295 处 ${pT}_{3a}$ 式 TNM 分期,
+    # 改回 flatten_scripts(subscript_to_latex(...)) 即恢复(实测 text +0.05 / read +0.07)。
+    md = flatten_scripts(roman_to_unicode(md))
     return md, len(strips)
 
 

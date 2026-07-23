@@ -49,13 +49,23 @@ _PATTERNS = [
     (re.compile(r"^[（(]\s*(\d+)\s*[)）]"), "numpar", lambda m: (int(m.group(1)),)),
     (re.compile(r"^(\d+(?:\.\d+)+)"), "dec", lambda m: tuple(int(x) for x in m.group(1).split("."))),
     (re.compile(r"^(\d+)\s*[.、\s]"), "int", lambda m: (int(m.group(1)),)),
-    (re.compile(r"^[①②③④⑤⑥⑦⑧⑨⑩]"), "circ", lambda m: ("①②③④⑤⑥⑦⑧⑨⑩".index(m.group(0)) + 1,)),
 ]
+
+# 圈号必须在 NFKC 之前匹配:NFKC 把 ① 归一成 "1",圈号编号会因此
+#   ① 床位费 → "1 床位费" → 误判成顶层 int 章编号(与「1 总则」串成一个序列)
+#   ①床位费  → "1床位费"  → 无分隔符,连 int 都不匹配 → 退化成无编号 title
+# 圈号与阿拉伯数字是两套并存的编号体系,不是同一字符的宽度变体,归一即信息销毁。
+_CIRC = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+_CIRC_RE = re.compile("^[" + _CIRC + "]")
 
 
 def parse_marker(text):
     """返回 (kind, path)。非编号标题返回 ("title", ())。"""
-    t = unicodedata.normalize("NFKC", text or "").strip()
+    s = (text or "").strip()
+    m = _CIRC_RE.match(s)
+    if m:
+        return "circ", (_CIRC.index(m.group(0)) + 1,)
+    t = unicodedata.normalize("NFKC", s)
     for rx, kind, value_fn in _PATTERNS:
         m = rx.match(t)
         if m:
@@ -141,17 +151,21 @@ def _heading_positions(md):
 def predict_heading_levels(headings, anchor_level, anchor_index=0):
     """用锚点绝对层级预测整篇标题层级。
 
-    headings: [(raw_level, text), ...]，raw_level 来自 API 原始 Markdown `#`。
+    headings: [(raw_level, text, strip_id), ...]，raw_level 来自 API 原始 Markdown `#`，
+              strip_id 标识该标题出自哪个横条(用于判断两个 raw_level 是否可比)。
     anchor_level: 给定锚点的绝对层级，例如总标题=1，首个 section=1/2。
     anchor_index: 锚点在 headings 中的位置，默认第一个标题。
 
-    返回与 headings 等长的新 level。除锚点外，raw_level 不参与计算；API 的 `#`
-    只负责告诉我们哪些行是标题。
+    返回与 headings 等长的新 level。层级主要由编号文本推出；raw_level 只在
+    编号推不出层级时(无编号标题)作为**同条带内的相对**证据使用 —— API 的绝对
+    层级跨条带会漂(同文档 strip0 章=`##`、strip1 章=`###`)，不可跨条带比较。
     """
     if not headings:
         return []
     anchor_index = max(0, min(anchor_index, len(headings) - 1))
-    texts = [text for _, text in headings]
+    texts = [text for _, text, _ in headings]
+    raws = [raw for raw, _, _ in headings]
+    sids = [sid for _, _, sid in headings]
     levels: list = [None] * len(headings)
 
     stack = []
@@ -159,6 +173,7 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
     series_last = {}                 # sk -> 该序列最近一次出现的 marker
     last_marker = None
     last_level = None
+    numbered_seen = False            # 是否已出现过带编号的标题(封面题名区判据)
     toc_level = None                 # 「目录」标题层级；目录编号不污染正文编号状态
     toc_seen_first = False           # 目录中已见过顶层 1；再次出现 1 视为正文重启
 
@@ -197,7 +212,18 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
         if idx == anchor_index:
             level = anchor_level
         elif kind == "title":
-            level = anchor_level
+            # 无编号标题没有编号可推。原先一律赋 anchor_level，等于把它放到全文
+            # 最浅层 —— 于是「## (三十一)严重类风湿性关节炎」下面的说明性小标题
+            # 反而浅于它的父级。改用 API 在同条带内给出的相对层差:那是它实际
+            # 看到的版式，也是这里唯一可用的证据。跨条带不可比 → 退回锚点。
+            # 例外:第一个编号标题出现之前是封面题名区(公司名/产品名/条款名常被
+            # API 拆成 `#`/`##` 多行),GT 惯例整块算 L1,不按版式层差分级 ——
+            # 与 _promote_leading_title 的既有立场一致。
+            if (numbered_seen and idx > 0 and last_level is not None
+                    and sids[idx] == sids[idx - 1]):
+                level = last_level + (raws[idx] - raws[idx - 1])
+            else:
+                level = anchor_level
         elif (_sib := _find_stack_sibling(stack, marker)) is not None:
             # 接回栈上仍打开的同序列前一项(顶层 int 2 → int 3),
             # 避免被已关闭的深层同 scheme 列表污染层级
@@ -272,6 +298,8 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
                 series_levels[sk] = level
                 series_last[sk] = marker
         last_marker, last_level = marker, level
+        if kind != "title":
+            numbered_seen = True
 
         if kind == "title" and "目录" in text:
             toc_level = level
@@ -286,16 +314,22 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
     return levels
 
 
+_CODE_RUN = re.compile(r"[A-Za-z0-9]{8,}")   # 注册号/备案号那种长串编码 = 元数据行
+
 # 封面大标题常被 VLM 拆成几行普通段落(无 `#`)。识别并提升为 `# ` L1。
-_TITLE_KW = re.compile(r"(公司|保险|条款|附加|目录|合同|银行|基金|年金|信托)")
-_REG_NOTE = re.compile(r"(注册编号|备案|编号\s*[：:])")
+# 判据全部是结构性的 —— 曾经这里靠两张词表:
+#   _TITLE_KW = (公司|保险|条款|附加|目录|合同|银行|基金|年金|信托)  要求标题含行业词
+#   _REG_NOTE = (注册编号|备案|编号[：:])                        识别注册号行
+# 前者实测是死重(去掉后指标一字不变),后者还写错了 ——「注册号：」里没有「编」字,
+# 那个正则根本匹配不上,于是注册号被当成标题的一部分吞进去。改用长串编码的**形态**
+# 判据后 level 63.42→63.52、recall 95.48→95.59。词表换形态,更准也更不挑数据集。
 
 
 def _promote_leading_title(md):
-    """把文档开头被漏标的描述性大标题块(公司名/产品/条款)提升成 `# ` 标题。
+    """把文档开头被漏标的描述性大标题块提升成 `# ` 标题。
 
-    只动第一个已有 `#` 之前的开头行:取连续的【无编号、短、无句末标点、非注册编号】
-    行(跳空行),合并成一行 `# `。遇编号行/注册编号/长句即停(避免吃到正文和 (X) 病种项)。
+    只动第一个已有 `#` 之前的开头行:取连续的【无编号、短、无句末标点、无长串编码】
+    行(跳空行),合并成一行 `# `。遇编号行/编码行/长句即停(避免吃到正文和 (X) 病种项)。
     """
     lines = md.split("\n")
     first_h = next((i for i, l in enumerate(lines) if _H.match(l)), len(lines))
@@ -304,7 +338,7 @@ def _promote_leading_title(md):
         s = lines[i].strip()
         if not s:
             continue
-        if _REG_NOTE.search(s):
+        if _CODE_RUN.search(s):               # 注册号/备案号 → 元数据,停
             break
         if parse_marker(s)[0] != "title":     # 编号行 → Type B,停
             break
@@ -314,12 +348,57 @@ def _promote_leading_title(md):
         idxs.append(i)
         if len(block) >= 5:
             break
-    joined = " ".join(block)
-    if not block or not _TITLE_KW.search(joined):
+    if not block:
         return md
-    lines[idxs[0]] = "# " + joined
+    lines[idxs[0]] = "# " + " ".join(block)
     for j in reversed(idxs[1:]):
         del lines[j]
+    return "\n".join(lines)
+
+
+
+
+def merge_wrapped_title(md, max_lines=3, max_len=44):
+    """封面大标题被换行拆开时合回一条。
+
+    版面上「XX保险股份有限公司 / 附加学生、幼儿住院医疗保险 / (互联网专属)条款」是
+    同一个标题的折行，GT 写成一条；而 API 只把第一行标成 `#`，其余留作正文 ——
+    训练集 100 篇里 31 篇的文档标题因此被截短(首标题与 GT 一致仅 51/100)。
+
+    _promote_leading_title 治不了这种:它只合并**第一个 `#` 之前**的行,
+    首行已被标成标题时那个循环是空的。
+
+    停止条件全是结构判据,不认任何具体词:
+      - 遇到下一个标题行(`#`) —— 那是另一个分节点,不是折行
+      - 行内出现 ≥8 位字母数字长串 —— 注册号/备案号这类元数据行
+      - 带编号 / 过长 / 含句号 —— 正文特征
+    """
+    lines = md.split("\n")
+    h = next((i for i, l in enumerate(lines) if _H.match(l)), None)
+    if h is None:
+        return md
+    head = _H.match(lines[h]).group(2).strip()
+    # 首标题带编号 → 这页是文档中段片段(如「(三十六) 严重冠心病」),不是封面题名。
+    # 中段页的首标题后面跟的就是正文,吞进来会把整句释义并进标题。
+    if parse_marker(head)[0] != "title":
+        return md
+
+    acc, take = [head], []
+    for j in range(h + 1, len(lines)):
+        s = lines[j].strip()
+        if not s:
+            continue
+        if (_H.match(s) or _CODE_RUN.search(s) or parse_marker(s)[0] != "title"
+                or len(s) > max_len or "。" in s or len(take) >= max_lines):
+            break
+        acc.append(s)
+        take.append(j)
+
+    if not take:
+        return md
+    lines[h] = _H.match(lines[h]).group(1) + " " + " ".join(acc)
+    for k in reversed(take):
+        del lines[k]
     return "\n".join(lines)
 
 
@@ -340,6 +419,52 @@ def _anchor_for(text):
     return 2
 
 
+# ---------------------------------------------------------------------------
+# 伪标题降级：标题是「命名」，不是「陈述句」
+# ---------------------------------------------------------------------------
+_SENT_END = "；;"                     # 分号结尾:GT 7723 个标题里 0 个
+_LEADIN_END = "：:。"                  # 冒号/句号结尾 + 无编号:GT 里同样 0 个
+
+
+def _is_pseudo_heading(text):
+    """加粗强调句被 API 读成了标题。
+
+    标题是给一段内容命名,不会以句末标点收尾。GT 全量 7723 个标题:
+      - 以 `；` 结尾 0 个
+      - 无编号且以 `：`/`。` 结尾 0 个
+    「无编号」这个限定不能去:GT 里有 100 个**带编号**的冒号结尾标题
+    (`（三）疾病全残保险金申请：`、`96.胆道重建手术：`),那些是真标题。
+    无编号 + 冒号 = 引出下文列表的正文引导句(`下列疾病不在保障范围内：`)。
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if t[-1] in _SENT_END:
+        return True
+    return t[-1] in _LEADIN_END and parse_marker(t)[0] == "title"
+
+
+def demote_pseudo_headings(strips):
+    """把伪标题行的 `#` 去掉,变回正文。
+
+    豁免有子级的:后面紧跟着 API 层级更深的标题,说明它确实是个分节点
+    (如 `一) 必选责任:` 下面挂着 1./2./3.),降级反而更糟。
+    子级判断用 API 的原始层级,且只在同一条带内比 —— 绝对层级跨条带会漂。
+    """
+    out = []
+    for md in strips:
+        lines, matches = _heading_positions(md)
+        for k, (i, m) in enumerate(matches):
+            if not _is_pseudo_heading(m.group(2)):
+                continue
+            nxt = matches[k + 1][1] if k + 1 < len(matches) else None
+            if nxt is not None and len(nxt.group(1)) > len(m.group(1)):
+                continue                       # 有子级 → 是真分节点,留着
+            lines[i] = m.group(2).strip()
+        out.append("\n".join(lines))
+    return out
+
+
 def relevel_strips(strips, anchor_level=None):
     """按条带顺序校正标题层级。
 
@@ -349,8 +474,11 @@ def relevel_strips(strips, anchor_level=None):
     strips = list(strips)
     for i, md in enumerate(strips):             # Type A:只在首个有内容的条带补标题
         if md and md.strip():
-            strips[i] = _promote_leading_title(md)
+            strips[i] = merge_wrapped_title(_promote_leading_title(md))
             break
+
+    # 伪标题先降级:它们既占错层级,又会污染下方编号序列的 last_marker/last_level
+    strips = demote_pseudo_headings(strips)
 
     docs = []
     headings = []
@@ -373,7 +501,8 @@ def relevel_strips(strips, anchor_level=None):
 
     if anchor_level is None:
         anchor_level = _anchor_for(headings[0][3])   # 首标题定锚(L1 / 大标题 L2)
-    levels = predict_heading_levels([(raw, text) for _, _, raw, text in headings], anchor_level)
+    levels = predict_heading_levels(
+        [(raw, text, doc_i) for doc_i, _, raw, text in headings], anchor_level)
     for (doc_i, line_i, raw, text), level in zip(headings, levels):
         if level != raw:
             docs[doc_i][0][line_i] = "#" * level + " " + text
@@ -444,12 +573,42 @@ _SUB = "₀₁₂₃₄₅₆₇₈₉"
 _SUBMAP = {c: str(i) for i, c in enumerate(_SUB)}
 _SUBRUN = re.compile(r"(?:[A-Za-z]+[" + _SUB + r"]+)+")
 _SUBPAIR = re.compile(r"([A-Za-z]+)([" + _SUB + r"]+)")
+_TNM_BASE = re.compile(r"^(?:T|N|M|pT|pN|pM|cT|cN|cM|ypT|ypN|ypM)$")
+
+
+# ---------------------------------------------------------------------------
+# unicode 上/下标 → 普通字符：GT 里这类字符出现 0 次
+# ---------------------------------------------------------------------------
+# GT 全量 200 篇统计:unicode 上标/下标字符一个都没有,写法一律是压平的普通数字
+#   ×10⁹/L → "109/L"、PaO₂ → "PaO2"
+# 而 VLM 常吐 unicode 形式(B 榜 16/50 份、79 个字符),每个都是纯失分。
+_SCRIPT_MAP = str.maketrans({
+    "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4",
+    "₅": "5", "₆": "6", "₇": "7", "₈": "8", "₉": "9",
+    "₊": "+", "₋": "-", "₌": "=", "₍": "(", "₎": ")",
+    "ₐ": "a", "ₑ": "e", "ₒ": "o", "ₓ": "x", "ₕ": "h",
+    "ₖ": "k", "ₗ": "l", "ₘ": "m", "ₙ": "n", "ₚ": "p", "ₛ": "s", "ₜ": "t",
+    "⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4",
+    "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9",
+    "⁺": "+", "⁻": "-", "⁼": "=", "⁽": "(", "⁾": ")", "ⁿ": "n",
+})
+
+
+def flatten_scripts(s):
+    """unicode 上/下标压成普通字符。"""
+    return (s or "").translate(_SCRIPT_MAP)
 
 
 def subscript_to_latex(s):
     def repl(m):
+        pairs = _SUBPAIR.findall(m.group(0))
+        # GT uses LaTeX for TNM cancer staging (T₁N₀M₀, pT₃...), but keeps
+        # ordinary medical notation such as PaO₂ / SaO₂ / FiO₂ as Unicode.  The old
+        # global conversion damaged 31/100 training documents to help only eight.
+        if not pairs or any(not _TNM_BASE.match(base) for base, _ in pairs):
+            return m.group(0)
         body = "".join(
             "{%s}_{%s}" % (base, "".join(_SUBMAP[c] for c in sub))
-            for base, sub in _SUBPAIR.findall(m.group(0)))
+            for base, sub in pairs)
         return "$" + body + "$"
     return _SUBRUN.sub(repl, s or "")

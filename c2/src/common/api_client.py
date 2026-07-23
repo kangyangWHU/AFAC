@@ -16,6 +16,7 @@ import time
 import json
 import random
 import hashlib
+import re
 
 import requests
 from PIL import Image
@@ -135,6 +136,43 @@ def is_truncated(md):
     return "<table" in low and "</table>" not in low
 
 
+def is_degenerate(md, min_lines=40, dup_ratio=0.5):
+    """VLM 退化成复读:同几行被反复吐出直到长度上限。
+
+    截断检测抓不到它(标签是闭合的、也不是错误信封),但它比截断更毒 —— 内容看着
+    正常,却把一行灌进去上百次,TextEdit 直接崩。判据是版面事实:一个正常的文档
+    横条不会有一半以上的**有字**行是重复行。
+
+    只数含文字的行:稀疏表里 `<tr><td></td><td></td></tr>` 连出几百行是真实版面,
+    不是退化。行数少的短条带不判(目录/清单本就多重复行)。
+    """
+    lines = []
+    for line in (md or "").splitlines():
+        text = re.sub(r"<[^>]+>", "", line).strip()
+        if text:
+            lines.append(text)
+    if len(lines) < min_lines:
+        return False
+    return (len(lines) - len(set(lines))) / len(lines) > dup_ratio
+
+
+def collapse_repeats(md):
+    """把复读退化的返回压回近似正确的内容:同一行只保留首次出现,顺序不变。
+
+    退化响应里真实内容是在的,只是被反复灌了几十上百遍。整行完全相同在正文里
+    本就罕见,而这里的替代方案是整条带作废(内容全丢),压重复严格更优。
+    """
+    seen, out = set(), []
+    for line in (md or "").splitlines():
+        key = line.strip()
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        out.append(line)
+    return "\n".join(out)
+
+
 def write_cache(image, md, *, fmt="PNG", cache_dir=None):
     """把上层修复后的**完整** tile 结果回写缓存，覆盖此前因截断而未落盘的 key。
     使下次（含 CACHE_ONLY 离线评测）直接命中完整结果、无需再拆分重读。"""
@@ -201,13 +239,15 @@ def call(image, *, fmt="PNG", timeout=API_TIMEOUT, retries=API_RETRIES, use_cach
         with open(cpath, encoding="utf-8") as f:
             cached = f.read()
         # 错误信封 / 旧的截断半截结果 → 视为未命中，重调（截断会触发拆分修复）
-        if not _looks_like_error(cached) and not is_truncated(cached):
+        if (not _looks_like_error(cached) and not is_truncated(cached)
+                and not is_degenerate(cached)):
             return cached
 
     if CACHE_ONLY:                               # 离线评测：未命中缓存直接置空，不调 API
         return ""
 
     last_err = None
+    last_degen = None                            # 重试全退化时的兜底素材
     for attempt in range(retries):
         uid = user_id or _next_user()
         try:
@@ -222,6 +262,11 @@ def call(image, *, fmt="PNG", timeout=API_TIMEOUT, retries=API_RETRIES, use_cach
                 time.sleep(min(2 ** attempt, API_BACKOFF_CAP) + random.uniform(0, 2))
                 continue
             md = _parse_response(resp)
+            if is_degenerate(md):                # 复读退化 → 当失败，重试(**不写缓存**)
+                last_degen = md
+                last_err = "degenerate(重复行占比过高) len=%d" % len(md)
+                time.sleep(min(2 ** attempt, API_BACKOFF_CAP) + random.uniform(0, 2))
+                continue
             if _looks_like_error(md):            # 服务端错误信封 → 当失败，重试
                 last_err = md.strip()[:160]
                 if "Error code: 400" in md or "aspect ratio" in md:
@@ -238,6 +283,14 @@ def call(image, *, fmt="PNG", timeout=API_TIMEOUT, retries=API_RETRIES, use_cach
         except requests.RequestException as e:
             last_err = str(e)
             time.sleep(min(2 ** attempt, API_BACKOFF_CAP) + random.uniform(0, 2))
+    if last_degen is not None:
+        # 重试次次退化 = 该条带就是会让模型复读,再打也一样。压掉重复取回内容,
+        # 并落缓存:否则每次运行都要在这里空烧一轮退避。
+        fixed = collapse_repeats(last_degen)
+        if use_cache:
+            with open(cpath, "w", encoding="utf-8") as f:
+                f.write(fixed)
+        return fixed
     raise RuntimeError("FinixDoc-VL 调用失败（重试 %d 次）：%s" % (retries, last_err))
 
 
