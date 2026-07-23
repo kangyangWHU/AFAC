@@ -218,13 +218,30 @@ def _is_caption_like(text):
     return cjk >= 4 and cjk > dig
 
 
+# colspan 哨兵:表首条带行被并入左侧格的格位(grid_ocr 写入,仅表首带压线行)。
+# 渲染时"文本格+连续哨兵"折叠为 <td colspan=N>(GT 表头口径,d9a99684 colspan=46)
+COLSPAN = "\x00cs"
+
+
 def _one_table(rows):
     # 不修剪尾空列:有框表的尾空列由框线定义、GT保留为空td(90c8cdb9尾部10列全空,
     # 修剪致td-690);自由读时代的补齐残留不值得为它杀真列
     out = [_GT_TABLE_OPEN]
     for row in rows:
-        tds = "".join("<td>%s</td>" % (c if c is not None else "") for c in row)
-        out.append("      <tr>%s</tr>" % tds)
+        tds = []
+        j = 0
+        while j < len(row):
+            c = row[j] if row[j] is not None else ""
+            span = 1
+            while j + span < len(row) and row[j + span] == COLSPAN:
+                span += 1
+            if span > 1:
+                tds.append('<td colspan="%d">%s</td>'
+                           % (span, "" if c == COLSPAN else c))
+            else:
+                tds.append("<td>%s</td>" % ("" if c == COLSPAN else c))
+            j += span
+        out.append("      <tr>%s</tr>" % "".join(tds))
     out.append("</table>")
     return "\n".join(out)
 

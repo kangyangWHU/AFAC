@@ -26,6 +26,17 @@ def _engine():
     return _ENG
 
 
+def read_strip(sub, rb, cb, i, j0, j1, scale=3):
+    """整簇条带识别(压线行专用):骨架行 i 的连续列 [j0, j1] 裁成一条,一次 rec。
+    跨列文字(说明行/斜线表头/合并格)整条进模型不切碎——单行长文本是 rec 的本行。"""
+    eng = _engine()
+    c = sub.crop((cb[j0], rb[i], cb[j1 + 1], rb[i + 1]))
+    c = c.resize((c.width * scale, c.height * scale))
+    r = eng(np.asarray(c.convert("RGB")),
+            use_det=False, use_cls=False, use_rec=True)
+    return r.txts[0].strip() if r and getattr(r, "txts", None) else ""
+
+
 def read_cells(sub, rb, cb, cells, scale=3):
     """骨架格逐格识别。sub=seg图, rb/cb=骨架边界, cells=[(i,j)骨架行列]。
     3x 放大(小字提精度,与 ocr_text 同原则)。返回 {(i,j): text}。"""
