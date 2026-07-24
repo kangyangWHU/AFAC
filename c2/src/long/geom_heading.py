@@ -164,7 +164,7 @@ def correct(md, im, ocr, cache_key=None):
     lines = md.split("\n")
 
     # 封面标题被 API 拆成多行:开头连续的无编号 heading 合成一个 H1。
-    # 遇编号标题 / 正文实体(注册号等)/ 目录 即停;空行占位保行号不变。
+    # 遇编号标题 / 正文实体 / 目录 即停;空行占位保行号不变。
     from long.heading_norm import parse_marker as _pm0
     _tidx = []
     for _i, _l in enumerate(lines):
@@ -180,32 +180,6 @@ def correct(md, im, ocr, cache_key=None):
         lines[_tidx[0]] = "# " + _merged
         for _i in _tidx[1:]:
             lines[_i] = ""
-
-    # 目录后正文前的封面题名:保险条款里标题总在「注册号」前。注册号行上方连续的
-    # 无编号、非句末标点结尾行 = 标题 → 合成一个 H1(API 常把它读成正文没标级)。
-    for _ri, _rl in enumerate(lines):
-        if not re.match(r"^\s*注册号\s*[:：]", _rl):
-            continue
-        _blk, _j = [], _ri - 1
-        while _j >= 0:
-            _s = lines[_j].strip()
-            if not _s:
-                if _blk:
-                    break                       # 标题与注册号间允许一个空行
-                _j -= 1; continue
-            _mm = _H.match(lines[_j])
-            _tt = _mm.group(2) if (_mm and _mm.group(2)) else _s
-            if _pm0(_tt)[0] != "title" or _tt.rstrip()[-1:] in "。，；、,;":
-                break                           # 编号行 / 句末标点(正文句)→ 停
-            _blk.append(_j); _j -= 1
-        if _blk:
-            _blk.reverse()
-            _tm = " ".join((_H.match(lines[b]).group(2) if _H.match(lines[b]) else lines[b].strip())
-                            for b in _blk)
-            lines[_blk[0]] = "# " + _tm
-            for b in _blk[1:]:
-                lines[b] = ""
-        break                                   # 只处理第一个注册号(封面)
 
     heads = [(i, len(m.group(1)), m.group(2)) for i, l in enumerate(lines)
              for m in [_H.match(l)] if m and m.group(2)]
@@ -224,6 +198,7 @@ def correct(md, im, ocr, cache_key=None):
     pair = _align(hnorm, geo)
     matched_geo = set(pair.values())
     core_of = {hi: geo[pair[hi]][1] for hi in pair}
+    line_core = {heads[hi][0]: c for hi, c in core_of.items()}   # 行号 → 字号(core height)
     changes = []
 
     # 目录护栏(用户裁决:目录不修改):目录 heading 起到章编号第二次从 1 重启为止的行号区间
@@ -288,15 +263,15 @@ def correct(md, im, ocr, cache_key=None):
                 best, bs = li, sc
         if best is None or bs < 75:
             continue
-        rule_lines.add(best)
         m = _H.match(lines[best])
         body_txt = m.group(2) if m else lines[best].strip()
-        # 横线上方偶尔是**上一节的末行**(长列举/提示段/表格),不是章标题。
-        # 用既有闸门挡:≤MAX_HEAD_LEN、非 HTML 行、非伪标题(职业列表：这类
-        # 无编号冒号结尾) —— 与全管线同一套判据,不为此加新规则。
-        from long.heading_norm import _is_pseudo_heading
-        if body_txt.lstrip().startswith("<") or _is_pseudo_heading(body_txt):
+        # 横线上方偶尔是**上一节的末行**(长列举/提示段/表格)/伪标题/HTML,不是章标题。
+        # 格式优先:dec(x.y)点数已定死其深度,横线不覆盖(2.1 永远是子节,不是章)。
+        from long.heading_norm import _is_pseudo_heading, parse_marker as _pmk
+        if (body_txt.lstrip().startswith("<") or _is_pseudo_heading(body_txt)
+                or _pmk(body_txt)[0] == "dec"):
             continue
+        rule_lines.add(best)
         if not m or len(m.group(1)) != 1:
             lines[best] = "# " + body_txt
             changes.append({"op": "rule_h1", "text": body_txt[:60],
@@ -382,11 +357,14 @@ def correct(md, im, ocr, cache_key=None):
         txt = m.group(2); f = _fmt(txt); v = _val(txt)
         if li in rule_lines:                      # 横线锚点 → H1 章,后续内容纳入其下
             lines[li] = "# " + txt; stack = [["__chap__", 1, None]]; continue
-        if f is None:                             # 无编号
-            if li < first_numbered or re.search(r"目\s*录", txt):
-                lines[li] = "# " + txt; stack = []          # 封面标题:清栈,内容从 H1 起
+        if f is None:                             # 无编号 → 只可能是题名(H1)或 API 误报
+            # 判据 = 字号:大字号(≥正文 1.25×)是真标题(封面/rider 篇名),保留 H1 并清栈;
+            # 正常字号的无编号标题 = API 把强调句读成标题 → 删。中段题名只可能是 H1。
+            big = line_core.get(li, 0) >= body * 1.25
+            if li < first_numbered or re.search(r"目\s*录", txt) or big:
+                lines[li] = "# " + txt; stack = []          # 题名:H1,内容从 H1 起
             else:
-                lines[li] = txt                             # 区域中段无编号 → API 误报,删
+                lines[li] = txt                             # 正常字号无编号 → API 误报,删
                 changes.append({"op": "drop_unnum", "text": txt[:60]})
             continue
         if f.startswith("dec"):
