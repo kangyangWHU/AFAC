@@ -38,6 +38,15 @@ def _find_gap(ink, center, search):
 
 RULE_THRESH = 245        # 框线阈值:表格框线常是浅灰(#ddd 级),200 的正文阈值检不到
 _BAND_WIN = 600          # 竖线检测窗口高;表格只占文档一小段时,全图尺度会被稀释
+MIN_RULES = 3            # 最少竖线条数:左边框+列线+右边框。2 条会把两栏排版误判成表格
+
+
+def _n_rules(xs):
+    """把相邻像素列合并成"条":一条线通常占 2 个像素列,按列数会高估一倍。"""
+    if not xs:
+        return 0
+    xs = sorted(xs)
+    return 1 + sum(1 for a, b in zip(xs, xs[1:]) if b - a > 2)
 
 
 def table_bands(im, rule_thresh=RULE_THRESH, win=_BAND_WIN, min_run=400):
@@ -48,6 +57,10 @@ def table_bands(im, rule_thresh=RULE_THRESH, win=_BAND_WIN, min_run=400):
          不用来定 y 边界:表格若跨在窗口边界上,占比会被稀释到阈值以下,
          用窗口定 y 会漏掉表格上沿,而切点恰恰常落在上沿附近。
       2. 用这些列**自身的纵向连续墨段**定 y 边界 —— 竖线画到哪,表格就到哪。
+
+    竖线按**线**而不是按像素列计数(一条线通常占 2 个相邻像素列),且**逐带**核验:
+    整篇取并集会被"目录用一根分栏线 + 别处有真表格"蒙混过去 —— 实测两栏目录整块
+    被判成表格。表格至少有左边框+列线+右边框三条,故每个带独立要求 ≥MIN_RULES 条。
     """
     g = np.asarray(im.convert("L")) < rule_thresh
     h = g.shape[0]
@@ -58,10 +71,10 @@ def table_bands(im, rule_thresh=RULE_THRESH, win=_BAND_WIN, min_run=400):
         if sub.shape[0] < win // 2:
             continue
         xs.update(np.where(sub.mean(0) > 0.9)[0].tolist())
-    if len(xs) < 2:
+    if _n_rules(xs) < MIN_RULES:
         return []
 
-    runs = []
+    runs = []                                     # (y0, y1, x) —— 带上 x 才能逐带数线
     for x in sorted(xs):
         col = g[:, x]
         idx = np.where(col)[0]
@@ -71,16 +84,17 @@ def table_bands(im, rule_thresh=RULE_THRESH, win=_BAND_WIN, min_run=400):
         for a, b in zip(np.r_[0, brk + 1], np.r_[brk, len(idx) - 1]):
             y0, y1 = int(idx[a]), int(idx[b])
             if y1 - y0 >= min_run:                # 短墨段是文字笔画,不是框线
-                runs.append([y0, y1])
+                runs.append((y0, y1, x))
 
     runs.sort()
-    bands = []
-    for r in runs:
-        if bands and r[0] <= bands[-1][1]:
-            bands[-1][1] = max(bands[-1][1], r[1])
+    bands = []                                    # [y0, y1, {x,...}]
+    for y0, y1, x in runs:
+        if bands and y0 <= bands[-1][1]:
+            bands[-1][1] = max(bands[-1][1], y1)
+            bands[-1][2].add(x)
         else:
-            bands.append(r)
-    return [(a, b) for a, b in bands]
+            bands.append([y0, y1, {x}])
+    return [(a, b) for a, b, xs_ in bands if _n_rules(xs_) >= MIN_RULES]
 
 
 def _avoid_bands(c, bands, ink, prev_cut, search, min_h, target_h):

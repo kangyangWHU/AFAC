@@ -21,10 +21,13 @@
 """
 import argparse
 import csv
+import sys
 import json
 import os
 from pathlib import Path
 from urllib.parse import quote
+
+csv.field_size_limit(sys.maxsize)      # 表格单元格可达数十万字符,默认 128K 会炸
 
 PAGE = """<!doctype html>
 <meta charset="utf-8">

@@ -18,9 +18,13 @@ import re
 from rapidfuzz.distance import Levenshtein
 
 _TABLE_CLOSE = re.compile(r"</table>\s*$", re.I)
+_TABLE_CLOSE_BODY = re.compile(r"</tbody>\s*</table>\s*$", re.I)
 _TABLE_OPEN_FULL = re.compile(r"^\s*<table[^>]*>\s*$", re.I)
 _TABLE_OPEN_LEAD = re.compile(r"^\s*<table[^>]*>", re.I)
+_TBODY_OPEN_LEAD = re.compile(r"^\s*<tbody[^>]*>", re.I)
 _STRUCT_LINE = re.compile(r"^\s*</?(table|tr|thead|tbody)\b", re.I)
+_CELL_OPEN = re.compile(r"<t[dh]\b[^>]*>", re.I)
+_FIRST_ROW = re.compile(r"<tr\b[^>]*>.*?</tr>", re.I | re.S)
 
 # 续行判据:下段首行是不是"新块"(标题/列表/编号/表格/引用)
 _BLOCK_START = re.compile(
@@ -133,12 +137,92 @@ def _splice_table_loose(acc, lines, idx, max_overlap, sim_thresh):
     return a + orphan_rows + b[k:]
 
 
+def _trailing_orphan_table_seam(acc, lines, max_orphan=2):
+    """识别「上条已闭表 + 少量被读到表外的单元格前缀 + 下条续表」。
+
+    典型情形：切点穿过计划十三的长单元格，上条在 </table> 后多读出
+    「基本部分、可选部分的疾病关爱保险金、」，下条则从同一行的后半格开始。
+    只在两侧列数相同、孤儿文本很短且以连接标点结尾时命中，避免误合
+    「上表 + 标题 + 下表」。返回 (上表结束行下标, 孤儿行列表)。
+    """
+    if not acc or not lines or not _TABLE_OPEN_LEAD.match(lines[0]):
+        return None
+
+    orphan = []
+    i = len(acc) - 1
+    while i >= 0 and len(orphan) < max_orphan and not _TABLE_CLOSE.search(acc[i]):
+        s = acc[i].strip()
+        if not s:
+            i -= 1
+            continue
+        if (_STRUCT_LINE.match(s) or s.startswith(("#", "＃")) or len(s) > 100):
+            return None
+        orphan.insert(0, s)
+        i -= 1
+    if i < 0 or not orphan or not _TABLE_CLOSE.search(acc[i]):
+        return None
+    joined = "".join(orphan)
+    if not joined.endswith(("、", "，", ",", "：", ":", "；", ";")):
+        return None
+
+    prev_rows = list(_FIRST_ROW.finditer(acc[i]))
+    prev_row = prev_rows[-1] if prev_rows else None
+    next_row = _FIRST_ROW.search(lines[0])
+    if not prev_row or not next_row:
+        return None
+    prev_cols = len(_CELL_OPEN.findall(prev_row.group(0)))
+    next_cols = len(_CELL_OPEN.findall(next_row.group(0)))
+    if prev_cols < 2 or prev_cols != next_cols:
+        return None
+    return i, orphan
+
+
+def _prepend_to_last_cell_of_first_row(s, prefix):
+    """把被读到表外的前缀塞回续表首行的最后一个单元格。"""
+    row = _FIRST_ROW.search(s)
+    if not row:
+        return s
+    opens = list(_CELL_OPEN.finditer(row.group(0)))
+    if not opens:
+        return s
+    pos = row.start() + opens[-1].end()
+    return s[:pos] + prefix + s[pos:]
+
+
+def _splice_trailing_orphan_table(acc, lines, seam):
+    """合并尾部孤儿续表，并恢复被切断的首行末单元格。"""
+    close_i, orphan = seam
+    a = acc[:close_i + 1]
+    b = lines[:]
+
+    # 去掉两段内侧的 table 边界。若上段使用 tbody，把续表的 tr 也放进
+    # 同一 tbody，避免依赖 HTML 容错规则归并节点。
+    had_tbody = bool(_TABLE_CLOSE_BODY.search(a[-1]))
+    if had_tbody:
+        a[-1] = _TABLE_CLOSE_BODY.sub("", a[-1]).rstrip()
+    else:
+        a[-1] = _TABLE_CLOSE.sub("", a[-1]).rstrip()
+    b[0] = _TABLE_OPEN_LEAD.sub("", b[0], count=1)
+    if had_tbody:
+        b[0] = _TBODY_OPEN_LEAD.sub("", b[0], count=1)
+        for i, line in enumerate(b):
+            if "</table>" in line.lower():
+                if "</tbody>" not in line.lower():
+                    b[i] = re.sub(r"</table>", "</tbody></table>", line,
+                                  count=1, flags=re.I)
+                break
+    b[0] = _prepend_to_last_cell_of_first_row(b[0], "".join(orphan))
+    return a + b
+
+
 def _guarded_overlap(acc, lines, max_k, sim_thresh):
-    """非表格接缝的模糊去重，但绝不删除结构标签行(<table>/<tr>…)。"""
-    k = _seam_overlap(acc, lines, max_k, sim_thresh)
-    while k > 0 and _STRUCT_LINE.match(lines[k - 1]):
-        k -= 1
-    return k
+    """非表格条带不重叠，禁止模糊去重误删相似正文。
+
+    slicer_long 以相邻、不重叠的坐标裁条；正文接缝只需续行，不应删除内容。
+    旧的多行平均相似度会被空行和保险条款套话抬高，曾一次删掉完整的“脑恶性
+    肿瘤”段。表内 OCR 自带的重叠仍由 _splice_table_loose 单独处理。
+    """
+    return 0
 
 
 def merge_strips(outputs, max_overlap_lines=8, sim_thresh=0.85):
@@ -151,7 +235,10 @@ def merge_strips(outputs, max_overlap_lines=8, sim_thresh=0.85):
         if not acc:
             acc = lines
             continue
-        if _is_split_table_seam(acc, lines):
+        trailing_seam = _trailing_orphan_table_seam(acc, lines)
+        if trailing_seam is not None:
+            acc = _splice_trailing_orphan_table(acc, lines, trailing_seam)
+        elif _is_split_table_seam(acc, lines):
             acc = _splice_table_loose(acc, lines, 0, max_overlap_lines, sim_thresh)
         elif (idx := _split_table_seam_loose(acc, lines)) > 0:
             acc = _splice_table_loose(acc, lines, idx, max_overlap_lines, sim_thresh)
