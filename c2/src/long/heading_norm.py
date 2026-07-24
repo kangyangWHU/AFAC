@@ -46,6 +46,9 @@ _PATTERNS = [
     (re.compile(r"^第\s*([" + _CN + r"]+)\s*条"), "art", lambda m: (_cn2int(m.group(1)),)),
     (re.compile(r"^([" + _CN + r"]+)\s*[、.]"), "cndun", lambda m: (_cn2int(m.group(1)),)),
     (re.compile(r"^[（(]\s*([" + _CN + r"]+)\s*[)）]"), "cnpar", lambda m: (_cn2int(m.group(1)),)),
+    # 单边括号 一)/（一 :OCR 常丢半个括号,丢了就解析成无编号→被当误报删
+    # (22958251 的「一) 必选责任:」因此消失,它本该 cnpar 进栈占 H3)
+    (re.compile(r"^([" + _CN + r"]+)\s*[)）]"), "cnpar", lambda m: (_cn2int(m.group(1)),)),
     (re.compile(r"^[（(]\s*(\d+)\s*[)）]"), "numpar", lambda m: (int(m.group(1)),)),
     (re.compile(r"^(\d+(?:\.\d+)+)"), "dec", lambda m: tuple(int(x) for x in m.group(1).split("."))),
     (re.compile(r"^(\d+)\s*[.、\s]"), "int", lambda m: (int(m.group(1)),)),
@@ -57,6 +60,8 @@ _PATTERNS = [
 # 圈号与阿拉伯数字是两套并存的编号体系,不是同一字符的宽度变体,归一即信息销毁。
 _CIRC = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
 _CIRC_RE = re.compile("^[" + _CIRC + "]")
+# 章节重启标记:章号 1(1空格 / 1. / 1、),排除 1.1 这类 dec(1 后跟"可选.、+数字")—— 目录护栏用
+_CHAP1 = re.compile(r"^#*\s*1(?![.、]?\d)[.、\s]")
 
 
 def parse_marker(text):
@@ -121,6 +126,18 @@ def _find_stack_level(stack, marker):
     for old_marker, old_level in reversed(stack):
         if old_marker == marker:
             return old_level
+    return None
+
+
+def _find_chapter_level(stack):
+    """栈上最深的「章」(顶层 int 编号)的层级;没有则 None。
+
+    栈只含祖先,所以命中即意味着"当前标题在这一章之内"。
+    只认单层 int(1/2/3…),不认 dec(1.1) —— 后者是小节不是章。
+    """
+    for m, lvl in reversed(stack):
+        if m[0] == "int" and len(m[1]) == 1:
+            return lvl
     return None
 
 
@@ -259,7 +276,15 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
                 level = seen if seen is not None else anchor_level
         elif kind == "art":
             seen = series_levels.get(sk)
-            if seen is not None:
+            # 章在栈上(是当前条的祖先)→ 条 = 章+1,**优先于序列历史**。
+            # GT:章后出现的条 762 处里 89.4% 正好深一级、8.7% 同级。
+            # 而序列历史会把条永久钉死在它第一次出现时的层级:文档开头若缺章
+            # (e33f4bfb 的章 1、2 被 API 漏标),第一条就落在 L1,此后即使真章出现,
+            # `seen` 仍先命中 → 章和条一路同级。
+            chap = _find_chapter_level(stack)
+            if chap is not None and (seen is None or seen <= chap):
+                level = chap + 1
+            elif seen is not None:
                 level = seen
             elif last_marker and last_level is not None and last_marker[0] in ("int", "dec"):
                 level = last_level + 1
@@ -286,6 +311,16 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
                 level = seen if seen is not None else ((last_level + 1) if last_level is not None else anchor_level)
         else:
             level = last_level if last_level is not None else anchor_level
+
+        # 后置约束:条(第X条)不得与它所在的章(顶层 int 编号)同级或更浅。
+        # GT 实测「章之后出现的条」762 处:89.4% 正好深一级、8.7% 同级、0 处更浅。
+        # 必须后置 —— 「回到已确立编号序列」的分支排在前面,会把条钉死在它首次出现
+        # 时的层级:e33f4bfb 开头的章 1、2 被 API 漏标,第一条落到 L1,此后即使真章
+        # 出现,第八条仍沿用 L1、与章同级。
+        if kind == "art":
+            chap = _find_chapter_level(stack)
+            if chap is not None and level <= chap:
+                level = chap + 1
 
         level = _clamp_level(level)
         levels[idx] = level
@@ -424,6 +459,7 @@ def _anchor_for(text):
 # ---------------------------------------------------------------------------
 _SENT_END = "；;"                     # 分号结尾:GT 7723 个标题里 0 个
 _LEADIN_END = "：:。"                  # 冒号/句号结尾 + 无编号:GT 里同样 0 个
+MAX_HEAD_LEN = 40                     # 标题长度上限,见 _is_pseudo_heading
 
 
 def _is_pseudo_heading(text):
@@ -599,6 +635,26 @@ def flatten_scripts(s):
     return (s or "").translate(_SCRIPT_MAP)
 
 
+# API 对公式排版区会吐 $$ \text{未满期保险费} = \text{保费} \times (…) $$。
+# GT 全量 200 篇:公式一律纯文本(87 处「未满期保险费=保险费×[1-…]」),$$ 出现 0 次。
+_TEXT_CMD = re.compile(r"\\text\s*{([^{}]*)}")
+_FRAC_CMD = re.compile(r"\\[df]?frac\s*{([^{}]*)}\s*{([^{}]*)}")
+
+
+def flatten_math(md):
+    """$$…$$ / $…$ 压成 GT 风格的纯文本公式。"""
+    def conv(m):
+        e = m.group(1)
+        e = _TEXT_CMD.sub(r"\1", e)
+        e = _FRAC_CMD.sub(r"\1/\2", e)
+        e = (e.replace(r"\times", "×").replace(r"\div", "÷")
+               .replace(r"\cdot", "·").replace(r"\%", "%"))
+        return re.sub(r"\s+", "", e)
+    md = re.sub(r"\$\$(.+?)\$\$", conv, md or "", flags=re.S)
+    md = re.sub(r"\$([^$\n]+)\$", conv, md)
+    return md
+
+
 def subscript_to_latex(s):
     def repl(m):
         pairs = _SUBPAIR.findall(m.group(0))
@@ -612,3 +668,233 @@ def subscript_to_latex(s):
             for base, sub in pairs)
         return "$" + body + "$"
     return _SUBRUN.sub(repl, s or "")
+
+
+# ---------------------------------------------------------------------------
+# 编号序列补标题:两个同级同体系标题之间的编号空洞,由夹在中间的正文行补上
+# ---------------------------------------------------------------------------
+def infer_missing_headings(md):
+    """(三)…(七) 两个 H3 之间缺 (四)(五)(六),而它们正以正文形式躺在两者之间
+    → 升为同级标题。API 漏标标题是随机的,但编号序列是连续的 —— 用序列约束反推。
+
+    三重门槛,全部满足才补(B 榜实测 90 处命中、零可见误报;此前不带位置约束的
+    全文搜索版本只敢补 1 处):
+      - 位置:候选行严格位于左右两个锚点标题之间
+      - 取值:恰好是缺失的编号,同体系(cnpar/cndun/numpar/int),每个缺号唯一
+      - 顺序:候选行的出现顺序与编号顺序一致
+    run-in 长行(标题+释义连排)照常升级 —— 同序列的兄弟标题本就是这种排版,
+    文档内格式一致优先。
+    """
+    lines = md.split("\n")
+    # 目录区护栏(用户裁决:目录不修改):目录 heading 起,到章编号第二次从 1 重启为止
+    toc_end = -1
+    ti = next((i for i, l in enumerate(lines) if _H.match(l) and re.search(r"目\s*录", l)), None)
+    if ti is not None:
+        seen = False
+        for i in range(ti + 1, len(lines)):
+            mm = _CHAP1.match(lines[i])
+            if mm:
+                if seen:
+                    toc_end = i
+                    break
+                seen = True
+        else:
+            toc_end = len(lines)
+    heads = []
+    for i, l in enumerate(lines):
+        if i <= toc_end:
+            continue
+        m = _H.match(l)
+        if m and m.group(2):
+            k, p = parse_marker(m.group(2))
+            if k != "title" and p and len(p) == 1:
+                heads.append((i, len(m.group(1)), k, p[0]))
+    changed = False
+    for (i1, lv1, k1, v1), (i2, lv2, k2, v2) in zip(heads, heads[1:]):
+        if lv1 != lv2 or k1 != k2 or v2 <= v1 + 1:
+            continue
+        missing = list(range(v1 + 1, v2))
+        cand = {}
+        for j in range(i1 + 1, i2):
+            s = lines[j].strip()
+            if not s or _H.match(lines[j]):
+                continue
+            kk, pp = parse_marker(s)
+            if kk == k1 and pp and len(pp) == 1 and pp[0] in missing:
+                cand.setdefault(pp[0], []).append(j)
+        if missing and all(len(cand.get(v, [])) == 1 for v in missing):
+            idxs = [cand[v][0] for v in missing]
+            if idxs == sorted(idxs):
+                for j in idxs:
+                    lines[j] = "#" * lv1 + " " + lines[j].strip()
+                changed = True
+    return "\n".join(lines) if changed else md
+
+
+def demote_stray_enum(md):
+    """孤立编号标题、其序列兄弟全是正文 → 它也是正文(序列推断的镜像)。
+
+    案例:责任免除列举 1、…5、全为正文,唯独 6、脊椎间盘疾病。被 API 标了 #,
+    编号豁免让它躲过句号降级,孤例让它躲过几何整组规则。
+    判据(全部满足才降,GT 200 篇误杀 0):
+      - 紧邻前两个非空行是同 kind、值 v-1/v-2 的**正文**行(它长在正文序列的尾巴上)
+      - 全文档不存在 (kind, v-1) 或 (kind, v+1) 的**标题**(序列内没有标题邻居;
+        疾病清单 (4) 前面恰有 (3) 子项正文的碰撞由此护栏挡住 —— 那里 (3)(5) 都是标题)
+    """
+    lines = md.split("\n")
+    nb = [(i, l) for i, l in enumerate(lines) if l.strip()]
+    head_vals = set()
+    for _, l in nb:
+        m = _H.match(l)
+        if m and m.group(2):
+            k, p = parse_marker(m.group(2))
+            if k != "title" and p and len(p) == 1:
+                head_vals.add((k, p[0]))
+    changed = False
+    for j, (i, l) in enumerate(nb):
+        m = _H.match(l)
+        if not m or not m.group(2) or j < 2:
+            continue
+        k, p = parse_marker(m.group(2))
+        if k == "title" or not p or len(p) != 1 or p[0] < 3:
+            continue
+        v = p[0]
+        if (k, v - 1) in head_vals or (k, v + 1) in head_vals:
+            continue
+        a, b = nb[j - 1][1], nb[j - 2][1]
+        if _H.match(a) or _H.match(b):
+            continue
+        ka, pa = parse_marker(a.strip())
+        kb, pb = parse_marker(b.strip())
+        if (ka == k and kb == k and pa and pb
+                and pa[0] == v - 1 and pb[0] == v - 2):
+            lines[i] = m.group(2)
+            changed = True
+    return "\n".join(lines) if changed else md
+
+
+def enforce_enum_consistency(md, gate_len=False):
+    """编号兄弟序列内多数派表决:全标题或全正文,不能混(用户原则:一致性优先)。
+
+    同 kind 且值递增的成员链(标题行与正文行都算成员,值回落即断链、目录区跳过),
+    ≥3 成员且状态混杂时,少数派服从多数派:
+      多数为标题 → 正文成员升为标题层级众数(gate_len 时 run-in >MAX_HEAD_LEN 不升)
+      多数为正文 → 标题成员降为正文
+    GT 依据:序列内部 GT 几乎全一致(释义 183:0、疾病清单 528:1、正文列举 0:N)。
+    我们混排时输的是少数派那半;向多数派对齐是期望收益最大的选择。
+    取代原 demote_stray_enum 的孤例特判(它只覆盖"紧邻前两行"一种形态)。
+    """
+    lines = md.split("\n")
+    # 目录区
+    toc_end = -1
+    ti = next((i for i, l in enumerate(lines)
+               if _H.match(l) and re.search(r"目\s*录", l)), None)
+    if ti is not None:
+        seen = False
+        for i in range(ti + 1, len(lines)):
+            mm = _CHAP1.match(lines[i])
+            if mm:
+                if seen:
+                    toc_end = i
+                    break
+                seen = True
+        else:
+            toc_end = len(lines)
+
+    items = []                                  # (line_idx, kind, v, level|0)
+    for i, l in enumerate(lines):
+        if i <= toc_end or not l.strip():
+            continue
+        m = _H.match(l)
+        txt = m.group(2) if (m and m.group(2)) else l.strip()
+        k, p = parse_marker(txt)
+        if k != "title" and p and len(p) == 1:
+            items.append((i, k, p[0], len(m.group(1)) if m else 0))
+
+    chains = collections_defaultdict_list = {}
+    order = []                                   # active chain per kind
+    per_kind = {}
+    out_chains = []
+    for it in items:
+        i, k, v, lv = it
+        cur = per_kind.get(k)
+        if cur and v > cur[-1][2] and v - cur[-1][2] <= 5:
+            cur.append(it)
+        else:
+            if cur and len(cur) >= 3:
+                out_chains.append(cur)
+            per_kind[k] = [it]
+    for cur in per_kind.values():
+        if len(cur) >= 3:
+            out_chains.append(cur)
+
+    changed = False
+    for chain in out_chains:
+        hs = [it for it in chain if it[3] > 0]
+        bs = [it for it in chain if it[3] == 0]
+        if not hs or not bs:
+            continue
+        if len(hs) >= len(bs):
+            lvl = collections.Counter(x[3] for x in hs).most_common(1)[0][0]
+            for i, k, v, _ in bs:
+                if gate_len and len(lines[i].strip()) > MAX_HEAD_LEN:
+                    continue
+                lines[i] = "#" * lvl + " " + lines[i].strip()
+                changed = True
+        else:
+            for i, k, v, lv in hs:
+                m = _H.match(lines[i])
+                lines[i] = m.group(2)
+                changed = True
+    return "\n".join(lines) if changed else md
+
+
+import collections
+
+
+def resolve_format_clash(md):
+    """同级不能并存两种编号格式(用户原则):dec(x.y) 与单值枚举((N)/N、)撞级时,
+    dec 保持其格式自带的结构深度(9.8 就是二级),枚举项沉一级。
+
+    典型:中段碎片页 (七十三)…(一百) 与 9.8…9.34 全被拍平在 H2 —— 疾病清单的
+    真父级(9.x 重大疾病)在上一页不可见,定级只能拍到锚点层;dec 的深度却是
+    格式自带的硬信息。只在同一文档区域(无编号 H1 合同名重置)内且两组均 ≥3 时触发。
+    """
+    lines = md.split("\n")
+    heads = []
+    for i, l in enumerate(lines):
+        m = _H.match(l)
+        if m and m.group(2):
+            heads.append((i, len(m.group(1)), m.group(2)))
+    # 区域划分:无编号 H1(合同名/封面)开新区域
+    regions, cur = [], []
+    for h in heads:
+        if h[1] == 1 and parse_marker(h[2])[0] == "title":
+            if cur:
+                regions.append(cur)
+            cur = []
+        cur.append(h)
+    if cur:
+        regions.append(cur)
+
+    changed = False
+    for reg in regions:
+        by_lv = {}
+        for i, lv, txt in reg:
+            k, p = parse_marker(txt)
+            if k == "dec":
+                by_lv.setdefault(lv, {}).setdefault("dec", []).append((i, txt))
+            elif k != "title" and p and len(p) == 1:
+                by_lv.setdefault(lv, {}).setdefault("enum", []).append((i, txt))
+        min_lv = min(h[1] for h in reg)
+        for lv, g in by_lv.items():
+            # 触发条件收窄:仅当区域内**没有比撞级更浅的标题**(整片拍平的中段碎片页,
+            # 连章级都不可见)。有正常 H1/上级结构的文档,GT 允许 dec 与枚举同级
+            # (一刀切版本训练集 64.77→64.00 回退,已否决)。
+            if lv > min_lv:
+                continue
+            if len(g.get("dec", [])) >= 3 and len(g.get("enum", [])) >= 3 and lv < 6:
+                for i, txt in g["enum"]:
+                    lines[i] = "#" * (lv + 1) + " " + txt
+                changed = True
+    return "\n".join(lines) if changed else md
