@@ -8,6 +8,11 @@ beautifulsoup4>=4.12    # HTML 辅助解析
 # 图像处理（切块 / 预处理）
 Pillow>=10.0
 opencv-python-headless>=4.8   # 去噪/二值化/去倾斜（无 GUI 依赖，便于服务器复现）
+# 格级本地 OCR（table/cell_ocr.py：残差 tile 逐格重读，PP-OCRv6 small rec / CPU）
+# 之前一直漏声明：cell_ocr 是惰性导入，平时不报错，走到残差修复分支才 ImportError
+rapidocr>=3.0
+onnxruntime>=1.16
+
 # 数据与流程
 pandas>=2.0
 tqdm>=4.65

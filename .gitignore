@@ -29,8 +29,16 @@ c4/submissions/
 c3/
 
 c2/cache/
+c2/cache_geo/
 c2/cache_up/
 c2/out/
+# 格级 rec 结果缓存(sqlite + -wal/-shm),运行期产物
+c2/rec_cache.sqlite*
+# ============ 编辑器 / IDE ============
+.vscode/
+.idea/
+# ============ Claude Code 运行期 ============
+.claude/scheduled_tasks.lock
 # ============ 临时/系统 ============
 *.tmp
 *.log.*
