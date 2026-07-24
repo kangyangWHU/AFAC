@@ -22,7 +22,7 @@ import requests
 from PIL import Image
 
 from common.config import (API_URL, API_KEY, API_USER_IDS, CACHE_DIR,
-                    API_TIMEOUT, API_RETRIES, API_BACKOFF_CAP)
+                    API_TIMEOUT, API_RETRIES, API_BACKOFF_CAP, DEGEN_RETRIES)
 
 Image.MAX_IMAGE_PIXELS = None        # 解除 PIL 超大图保护（赛题图可达 3.8 亿像素）
 CACHE_UP_DIR = os.path.join(os.path.dirname(CACHE_DIR), "cache_up")  # 上采样 tile 缓存(分离)
@@ -248,6 +248,7 @@ def call(image, *, fmt="PNG", timeout=API_TIMEOUT, retries=API_RETRIES, use_cach
 
     last_err = None
     last_degen = None                            # 重试全退化时的兜底素材
+    degen_hits = 0
     for attempt in range(retries):
         uid = user_id or _next_user()
         try:
@@ -264,7 +265,10 @@ def call(image, *, fmt="PNG", timeout=API_TIMEOUT, retries=API_RETRIES, use_cach
             md = _parse_response(resp)
             if is_degenerate(md):                # 复读退化 → 当失败，重试(**不写缓存**)
                 last_degen = md
+                degen_hits += 1
                 last_err = "degenerate(重复行占比过高) len=%d" % len(md)
+                if degen_hits > DEGEN_RETRIES:   # 确定性失败,再打也一样 → 直接兜底
+                    break
                 time.sleep(min(2 ** attempt, API_BACKOFF_CAP) + random.uniform(0, 2))
                 continue
             if _looks_like_error(md):            # 服务端错误信封 → 当失败，重试
