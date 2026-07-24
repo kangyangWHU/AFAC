@@ -1,18 +1,16 @@
 # -*- coding: utf-8 -*-
-"""几何标题修正:用图像字号补 API 漏标的大标题 / 降 API 误升的伪大标题。
+"""几何标题层级修正:在 API/pipeline 的 Markdown 上重定级标题 H1–H6。
 
-只做**大字号**能可靠支撑的两件事,不碰细结构(细结构由字号无法区分,见 geom_vs_api):
-  被标成 H1/H2、但字号明显小于**同级标题组**(差 ≥GAP_PX 且约等正文)的行 →
-  **整个去掉标题标记**(变回正文,用户拍板:删而不是降级)。
-    - 无编号标题:字号是唯一信号,逐个处理
-    - 有编号标题:**整段兄弟序列一起**,绝不拆开 —— 6px 的测量抖动不能推翻
-      1.4 与 1.1~1.3 的编号兄弟关系(用户原则:同组标题格式必须一致)
-    - 不做任何关键词豁免(公司名/产品名照规则走)
-  只在"本文档确实用字号区分标题"(存在 ≥1.25× 的标题组)时才动,否则整篇不碰。
-  (漏标章的插回交给 heading_norm.infer_missing_headings 的编号序列推断,纯文本更稳。)
+主逻辑靠**编号格式关系**(不靠字号):
+  - 栈跟踪祖先深度:新格式=父级+1、同格式=兄弟同级、dec(x.y)按点数绝对深度
+  - 缺父级 orphan 才用中文编号约定 rank 兜底(章<条<一、<（一）<1.…)
+图像证据:
+  - 淡横线上方=H1 章(救回 API 漏标的章);dec 不被横线覆盖(格式优先)
+  - 无编号中段标题按字号判:≥正文中位 1.25× = 真篇名保 H1,否则 API 误报删
+其它:目录区两层分级、伪定义项(冒号引出+正文兄弟)降级、连续枚举兄弟一致性。
 
-字号 = 行内 core 高度(墨量≥中位×0.6 的行数),鲁棒于符号/西文撑高。每文档独立建模。
-需 rapidocr(格级 rec,仅识别不检测,~9ms/行)。表格/目录区排除。
+字号 = 行内 core 高度(墨量≥中位×0.6 的行数),相对本文正文中位、每文档独立。
+需 rapidocr(格级 rec ~9ms/行,结果按图像 hash 存盘)。表格/目录区按规则排除。
 """
 import re
 import os
@@ -21,17 +19,11 @@ import hashlib
 import unicodedata
 import collections
 import numpy as np
-from PIL import Image
 from rapidfuzz import fuzz
 from long.slicer_long import table_bands
 from long.heading_norm import _CHAP1
 
 _H = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
-BIG_RATIO = 1.35        # 漏标章:字号 ≥ 此倍正文 才算"明显大"
-_ENUM_SUB = {"cnpar", "cndun", "numpar", "circ"}   # 枚举子项格式(dec-floor 只作用于此)
-DOC_USES_SIZE = 1.25    # 有 ≥ 此倍正文的标题组 → 本文档用字号区分标题
-GAP_PX = 6              # 降级:字号比同级标题组小 ≥ 此值(px) 才算不属于该组
-CHAP = re.compile(r"^\s*(?:\d{1,2}|[一二三四五六七八九十百]+)\s*[、.]?\s*[一-鿿]")
 
 
 def _norm(s):
