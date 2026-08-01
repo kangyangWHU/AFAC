@@ -2,7 +2,7 @@
 """端到端入口：图片目录 → submission.csv（一键复现提交结果）。
 
 流程：每张图按所在目录定 kind(long/table) → 路由到对应流水线 → 生成 Markdown。
-LONG 走 空白带切+接缝去重+标题定级；TABLE 走 网格切+空白跳过+2D重组+残差重读。
+LONG 走 空白带切+接缝去重+标题定级+几何定级；TABLE 走 网格切+空白跳过+2D重组+残差重读。
 Pool 图级并行,每张图内部再按 MAX_CONCURRENCY 并发调 API;单图异常不影响整批。
 
 一次调用即产出**完整**提交(long 半边 + table 半边合并、按 file_name 全局排序),
@@ -27,13 +27,30 @@ import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
+import numpy as np
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
 from common.config import OUT_DIR, POOL_PROCS
 from common.preprocess import prep
 from long.run_long import run_smart
+from long.geom_heading import correct as geom_correct   # 几何标题定级(long 路最后一步)
 from table.run_table import parse_table as run_table_one   # 三段式:crop → ocr → merge
+
+
+def _local_ocr():
+    """本地逐行识别函数 ocr(pil)->str,供几何定级取标题字号用。
+
+    惰性初始化:rapidocr 引擎在每个工作进程里各建一份(fork 后不共享)。
+    """
+    from table.cell_ocr import _engine
+    eng = _engine()
+
+    def ocr(pil):
+        r = eng(np.asarray(pil.convert("RGB")),
+                use_det=False, use_cls=False, use_rec=True)
+        return r.txts[0] if r and getattr(r, "txts", None) else ""
+    return ocr
 
 
 def process_image(path, kind, target_h=5000, timeout=240):
@@ -41,6 +58,10 @@ def process_image(path, kind, target_h=5000, timeout=240):
     im = prep(Image.open(path))
     if kind == "long":
         md, ncalls = run_smart(im, target_h=target_h, timeout=timeout)
+        # 几何标题定级:回到原图量标题字号与淡横线,重定 # 层级。
+        # 必须在 run_smart 之后 —— 前者按条带出文本,层级仍是局部判断;
+        # 这一步用整图几何做全局裁决,是 long 路的最后一步。
+        md, _ = geom_correct(md, im, _local_ocr(), cache_key=os.path.basename(path))
     else:
         md, ncalls, _ = run_table_one(im, timeout=timeout)
     return md, kind, ncalls
