@@ -8,7 +8,8 @@ import os
 # ---- 目录锚点 ----
 SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # c2/src（本文件在 src/common/）
 C2_DIR = os.path.dirname(SRC_DIR)                              # c2
-DATA_DIR = os.path.join(C2_DIR, "data")
+# 数据根目录:默认 c2/data,可用环境变量 AFAC_C2_DATA 指到别处(复现环境数据集不一定同盘)
+DATA_DIR = os.environ.get("AFAC_C2_DATA") or os.path.join(C2_DIR, "data")
 
 # ---- 训练集（带 GT，用于本地评测与调参）----
 # 目录内含 images/（*.jpg）与 mds/（同名 *.md，即 Ground Truth）
@@ -29,12 +30,8 @@ B_LONG_DIR = os.path.join(
 B_TABLE_DIR = os.path.join(
     DATA_DIR, "AFACB榜评测数据集", "finix_huge_table_rest_B")
 
-# ---- 批处理目标：(图片目录, kind)，kind ∈ {"long", "table"}。----
-# main.py 默认跑此列表，不再靠长宽比自动分类。按需自行填/改要处理的目录。
-RUN_TARGETS = [
-    # (os.path.join(A_LONG_DIR, "images"), "long"),
-    # (os.path.join(A_TABLE_DIR, "images"), "table"),
-]
+# 注:kind(long/table) 由 main.py 按输入目录给定,不靠长宽比自动分类 —— 官方数据集
+# 本就按 long/table 分目录发布,猜类别只会平白引入一类错误。
 
 # ---- 输出目录 ----
 OUT_DIR = os.path.join(C2_DIR, "out")
@@ -58,6 +55,7 @@ BIN_LINE = 170       # 并排/横线检测(_panel_seams / _panel_seam_xs)
 # ---- 并发：官方上限 16，试探 32 看吞吐 ----
 # 即便撞限流，返回 HTTP 错误/错误信封 → 重试退避、**不写缓存**（不污染），最坏只是变慢。
 MAX_CONCURRENCY = 32   # 用户实测提速;若API限流(429)自动退避
+POOL_PROCS = 6         # 图级并行进程数(main.py Pool):每进程内再开 MAX_CONCURRENCY 线程
 
 # ---- 重试策略(可配置):过载时服务器"收下不回"→每次干等满timeout,8×大timeout=十几分钟白烧。
 # 快速放弃+靠缓存重跑补失败(成功tile已缓存,重跑只补失败=天然末尾补扫),比死磕聪明。

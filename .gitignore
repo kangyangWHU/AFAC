@@ -1,3 +1,10 @@
+# 提交分支 submission/c2：本分支只保留赛题二(c2)的工程代码与文档。
+# c1 / c3 / c4 是其它赛题，已从本分支移出（源码仍在 main 分支）；
+# 下面的忽略项让本地遗留的它们的产物不干扰 git status。
+/c1/
+/c3/
+/c4/
+
 # ============ Python ============
 __pycache__/
 *.py[cod]
@@ -10,40 +17,29 @@ __pycache__/
 venv/
 env/
 
-# ============ 大型原始数据集（比赛提供，可重新下载）============
+# ============ 原始数据集（主办方发布，不随代码提交）============
 **/data/
 *.jpg
 *.jpeg
 *.png
 
-# ============ c4：大型派生产物（可由代码重建）============
-c4/index/
-c4/processed_vl/
-c4/out/
-c4/chunks/
-c4/labeling/
-c4/relabel/
-c4/relabel_opus/
-c4/submissions/
-# ============ c3：大型派生产物 ============
-c3/
-
+# ============ c2 运行期产物（可由代码重建，不随代码提交）============
+# FinixDoc-VL 返回结果缓存(按图像内容哈希)
 c2/cache/
-c2/cache_geo/
+# 上采样 tile 的结果缓存
 c2/cache_up/
-c2/out/
-# 格级 rec 结果缓存(sqlite + -wal/-shm),运行期产物
+# 纯几何计算缓存
+c2/cache_geo/
+# 格级本地 OCR 结果缓存(sqlite + -wal/-shm)
 c2/rec_cache.sqlite*
+# 提交 CSV、运行日志、本地评测结果、审计页
+c2/out/
+
 # ============ 编辑器 / IDE ============
 .vscode/
 .idea/
-# ============ Claude Code 运行期 ============
-.claude/scheduled_tasks.lock
+
 # ============ 临时/系统 ============
 *.tmp
 *.log.*
 .DS_Store
-
-# 说明：
-#  - 保留 c2/out/（评测结果、提交文件 submission_A.csv 等可追溯产物）
-#  - 保留全部 src 代码、plan.md、doc、requirements
