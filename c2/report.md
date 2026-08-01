@@ -316,6 +316,6 @@ LONG 路的基础流水线（行间空白切分 + 接缝拼接）在早期就达
 
 - **大模型使用**：全工程唯一的视觉语言模型接口是主办方提供的 FinixDoc-VL API，调用点集中于 `src/common/api_client.py`（两处 `requests.post`），无任何其它第三方模型 API、SDK 或网络地址。
 - **提示词**：该 API 请求体仅含 `userId / apiKey / fileName + 图片文件`，不接受文本提示词参数，因此本方案不存在提示词配置文件。
-- **本地小模型**：`PP-OCRv6_rec_small.onnx`，**5.27M 参数**（低于 10M 上限），CPU + onnxruntime 推理。同一引擎初始化时载入的检测与方向分类模型在调用时均置 `use_det=False / use_cls=False`，不参与推理；三者参数量合计亦仅 7.72M。模型文件随 `rapidocr` 安装包一并提供，运行期不联网下载。
+- **本地小模型**：`PP-OCRv6_rec_small.onnx`，**5.27M 参数**（低于 10M 上限），CPU + onnxruntime 推理。同一引擎初始化时载入的检测与方向分类模型在调用时均置 `use_det=False / use_cls=False`，不参与推理；三者参数量合计亦仅 7.72M。模型文件由 `rapidocr` 提供，安装阶段联网下载，不需要手动准备权重。
 - **无结果硬编码**：代码中不含针对特定测试图像的固定输出、白名单或标识符分支。
 - **一键复现**：`bash run.sh` 单条命令产出完整的 `submission.csv`。

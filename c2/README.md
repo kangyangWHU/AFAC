@@ -26,7 +26,7 @@ bash run.sh <数据集根目录>  # 数据集在别处
 
 - **大模型**：全工程唯一的 VLM 接口是主办方提供的 FinixDoc-VL API，调用点集中在 `src/common/api_client.py`（`requests.post` 两处），无任何其它第三方模型 API、SDK 或网络地址。
 - **Prompt**：该 API 的请求体只有 `userId / apiKey / fileName + 图片文件`，不接受文本 prompt 参数，因此本方案没有 prompt 配置文件——引导模型的工作全在图像侧（切在哪、放大多少、空白块跳过不送）。
-- **本地小模型**：`PP-OCRv6_rec_small.onnx`，**5.27M 参数**（< 10M 上限），CPU + onnxruntime，用于 TABLE 残差格级重读与 LONG 几何标题校准。同引擎载入的 det/cls 模型调用时均置 `use_det=False / use_cls=False` 不参与推理，三者合计也仅 7.72M。模型随 `rapidocr` wheel 安装，运行期不联网。
+- **本地小模型**：`PP-OCRv6_rec_small.onnx`，**5.27M 参数**（< 10M 上限），CPU + onnxruntime，用于 TABLE 残差格级重读与 LONG 几何标题校准。同引擎载入的 det/cls 模型调用时均置 `use_det=False / use_cls=False` 不参与推理，三者合计也仅 7.72M。模型由 `rapidocr` 在安装阶段联网下载，无需手动准备权重。
 - **无硬编码**：不含针对特定测试图片的固定输出、白名单或 uuid 分支；所有阈值都是几何/统计维度的通用判据，集中在 `common/config.py` 与 `table/tiles.py`。
 
 ## 四、目录结构
