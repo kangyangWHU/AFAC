@@ -320,7 +320,9 @@ def _ink_evidence(im, rb, cb, R, C):
     """格级墨证据:cell_ink[i][j] = 骨架格(i,j)内部(收缩2px避开框线)文字墨≥3px。
     行对齐(哪些行有内容)和列摆放(哪些格有内容)共用——空白判定要求极低墨。
     cell_gray = 淡灰内容(灰度129~180):整张数字印成浅灰时,128全隐形→cell_ink
-    判空→E欠数→裁多丢真值。180看得见,配API门控救回(仅当API确认时启用,_align_tile)。"""
+    判空→E欠数→裁多丢真值。180看得见,只对 cell_ink 判空的格补判(省算)。
+    两档不嵌套:180 下淡灰框线也显影,去线门相应提到 0.7(严档 0.5),故某些格
+    可能 ink 真而 gray 假。_assemble 无条件取 cell_ink|cell_gray 作唯一尺。"""
     _gray = np.asarray(im.convert("L"))
     dark = _gray < BIN_INK
     dark180 = _gray < BIN_FAINT
