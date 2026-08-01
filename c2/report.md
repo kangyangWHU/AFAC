@@ -64,18 +64,14 @@ TABLE 的 GT 字符量分布极度右偏：最小 5k、中位 74k、均值 134k�
 
 ## 3. 系统总览
 
+输入按 `long/` 与 `table/` 两个目录分流到两条流水线，各自产出的 Markdown 合并后按 `file_name` 排序写出 `submission.csv`。
+
 ```
-输入目录 ──┬── long/  ──► LONG 流水线 ──┐
-           └── table/ ──► TABLE 流水线 ─┤
-                                        └──► 按 file_name 排序 ──► submission.csv
+LONG    空白带切条 --> API 并发识别 --> 接缝拼接 --> 文本层级校正 --> 几何层级定级
+        slicer_long   api_client      stitch_long  heading_norm     geom_heading
 
-LONG 流水线：
-  空白带切条 ──► API 并发识别 ──► 接缝拼接 ──► 文本层级校正 ──► 几何层级定级
-  slicer_long      api_client      stitch_long   heading_norm     geom_heading
-
-TABLE 流水线：
-  几何裁剪 ──► 网格切分 ──► API 并发识别 ──► 一致性判定 ──► 确定性重读 ──► 二维重组
-    crop      slicer_table    api_client        grid_ocr        cell_ocr     stitch_single
+TABLE   几何裁剪 --> 网格切分 --> API 并发识别 --> 一致性判定 --> 确定性重读 --> 二维重组
+        crop        slicer_table  api_client      grid_ocr       cell_ocr      stitch_single
 ```
 
 图级并行由进程池承担（绕开 GIL，几何计算是 CPU 密集型），图内的 API 调用由线程池并发。单图异常不影响整批。
