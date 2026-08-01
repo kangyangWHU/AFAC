@@ -4,7 +4,7 @@
 改动 heading_norm / slicer_long / 表格装配前后各跑一次，比对 out/long_baseline*.json，
 用来判断一次改动是真收益还是过拟合。缓存 100% 命中时不打 API。
 
-标题层级指标是本地补的:官方"标题对齐"看绝对层级(见 doc/答疑)，而 metrics/evaluate.py
+标题层级指标是本地补的:官方"标题对齐"看绝对层级(见官方答疑)，而 metrics/evaluate.py
 只实现了 text/teds/read 三项。这里按归一化标题文本做序列对齐，再比层级:
   level_acc = 文本对上且层级也对的标题数 / max(pred 标题数, gt 标题数)
 分母取 max 是为了同时惩罚漏标题和多标题(只除以 gt 数的话,乱加标题不扣分)。

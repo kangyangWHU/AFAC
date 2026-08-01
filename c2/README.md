@@ -60,35 +60,10 @@ python main.py --long_dir <LONG>/images --out ../out/long_only.csv --limit 3   #
 
 ## 三、合规声明
 
-### 大模型使用
-
-**全工程唯一的大模型/VLM 接口是主办方提供的 FinixDoc-VL API**，调用点集中在 `src/common/api_client.py` 一个文件（`requests.post` 两处），全仓库不存在任何其它第三方模型 API 的调用、SDK 依赖或网络地址。
-
-### Prompt 提示词
-
-FinixDoc-VL API 的请求体只有 `userId / apiKey / fileName + 图片文件`（见 `api_client.py:255`），**接口不接受任何文本 prompt 参数**。因此本方案没有、也无法有 prompt 工程配置文件——所有"引导模型"的工作都由图像侧完成：切在哪、切多大、切之前放大多少倍、空白块直接跳过不送模型（避免幻觉）、送回来的结果如何按几何证据校验与修复。这部分逻辑在 `table/tiles.py`（尺寸/上采样策略常数集中定义）与 `table/slicer_table.py`、`long/slicer_long.py`。
-
-### 本地轻量模型
-
-工程使用 **PP-OCRv6 small 识别模型**（`rapidocr` + `onnxruntime`，纯 CPU），有两处：TABLE 路的残差格级重读（`table/cell_ocr.py`），以及 LONG 路几何标题定级时的逐行识别（`long/geom_heading.py`）。两处共用同一个引擎。
-
-| 模型 | 参数量 | 是否参与推理 |
-|---|---|---|
-| `PP-OCRv6_rec_small.onnx` | **5.27M** | ✅ 识别（`use_rec=True`） |
-| `PP-OCRv6_det_small.onnx` | 2.45M | ❌ 引擎初始化时载入，调用时 `use_det=False`，不参与 |
-| `ch_ppocr_mobile_v2.0_cls_mobile.onnx` | < 0.01M | ❌ 同上，`use_cls=False`，不参与 |
-
-实际参与推理的只有 5.27M 参数的识别模型；**即便把 wheel 内附带的三个模型全部计入也只有 7.72M，仍 < 10M 上限**。不依赖 GPU，可完全本地离线运行。参数量可复核：
-
-```bash
-python -c "import onnx, numpy as np, rapidocr, os; p=os.path.join(os.path.dirname(rapidocr.__file__),'models','PP-OCRv6_rec_small.onnx'); m=onnx.load(p); print(sum(int(np.prod(t.dims)) for t in m.graph.initializer)/1e6, 'M')"
-```
-
-**离线可用**：模型文件随 `rapidocr` wheel 一并安装（见其 `dist-info/RECORD`），落在 `site-packages/rapidocr/models/`，运行期不联网下载，无需额外准备。
-
-### 无结果硬编码
-
-代码中不含针对特定测试图片的固定输出、白名单或 uuid 分支。所有阈值都是几何/统计维度上的通用判据（墨量、行高、列间距、框线密度等），定义集中在 `common/config.py` 与 `table/tiles.py`。
+- **大模型**：全工程唯一的 VLM 接口是主办方提供的 FinixDoc-VL API，调用点集中在 `src/common/api_client.py`（`requests.post` 两处），无任何其它第三方模型 API、SDK 或网络地址。
+- **Prompt**：该 API 的请求体只有 `userId / apiKey / fileName + 图片文件`，不接受文本 prompt 参数，因此本方案没有 prompt 配置文件——引导模型的工作全在图像侧（切在哪、放大多少、空白块跳过不送）。
+- **本地小模型**：`PP-OCRv6_rec_small.onnx`，**5.27M 参数**（< 10M 上限），CPU + onnxruntime，用于 TABLE 残差格级重读与 LONG 几何标题定级。同引擎载入的 det/cls 模型调用时均置 `use_det=False / use_cls=False` 不参与推理，三者合计也仅 7.72M。模型随 `rapidocr` wheel 安装，运行期不联网。
+- **无硬编码**：不含针对特定测试图片的固定输出、白名单或 uuid 分支；所有阈值都是几何/统计维度的通用判据，集中在 `common/config.py` 与 `table/tiles.py`。
 
 ---
 
@@ -128,7 +103,6 @@ c2/
 │   │   ├── evaluate.py         Overall = [(1−TextEdit)×100 + TableTEDS + (1−ReadOrder)×100]/3
 │   │   └── teds.py             TEDS 树编辑距离相似度
 │   └── tools/                开发期审计/评测工具,**不在推理主链路上**(见 tools/README.md)
-├── doc/                      赛题说明与 API 文档
 ├── plan.md                   方案演进记录
 └── out/                      运行产出(提交 CSV、日志、评测结果) —— 未纳入版本管理
 ```
@@ -184,17 +158,3 @@ FinixDoc-VL 是生成式模型，同一张图两次调用的输出未必逐字�
 | **合计** | **100 / 100** |
 
 即 `bash run.sh` 在相同 API 返回下**完全复现**提交结果。流水线本身是确定性的：同一输入连续多次运行输出完全一致，几何决策与本地识别均不含随机性。
-
----
-
-## 七、本地评测
-
-有 GT 的数据集（训练集）上复现官方三指标：
-
-```bash
-cd src
-python -m tools.eval_train_full        # LONG + TABLE 各 100 张,出 Text / TEDS / ReadOrder / Overall
-python -m tools.eval_long_baseline     # LONG 回归基线,逐文档记分,改动前后对比 out/long_baseline*.json
-```
-
-`src/tools/` 下其余脚本为开发期审计工具（生成本地对照 HTML、导出问题 tile、几何回归诊断等），**均不参与推理**，详见 `src/tools/README.md`。

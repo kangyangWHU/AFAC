@@ -39,7 +39,7 @@ CACHE_DIR = os.path.join(C2_DIR, "cache")          # API 结果缓存，避免�
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-# ---- FinixDoc-VL API 凭据（见 doc/API.txt）----
+# ---- FinixDoc-VL API 凭据（主办方统一下发）----
 API_URL = "https://finixdocapi.alipay.com/api/finix_doc/call_with_file"
 API_KEY = "F935A5503983FB19F26FA3F00A94EBF9"           # 比赛统一固定 apiKey
 API_USER_IDS = [                                       # 5 个白名单 userId，可轮询负载均衡
