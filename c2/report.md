@@ -1,6 +1,6 @@
 ---
 title: "基于几何锚定的视觉大模型与轻量模型协同的复杂金融文档还原方案"
-subtitle: "AFAC2026 挑战组赛题二 · 方法描述（GeoAnchor）"
+subtitle: "AFAC2026 挑战组赛题二 · 方法描述"
 author: "队伍 noone · 杨康、赖坤豪"
 date: "2026-08"
 documentclass: article
