@@ -8,7 +8,7 @@
 
 **不做子表检测**：多子表在几何层(crop 三段式)已切好，落到这里的单元(全宽模式 /
 列错位回退)都是单张表(训练集 gt_tables=1 实证)。旧 stitch_multi 的 caption/表头行
-边界检测在单表上只会误拆(8a4 被拆 4 张→11.3)，已随多子表前置切分退役。
+边界检测在单表上只会误拆(单表被误拆成多张)，已随多子表前置切分退役。
 """
 import re
 from collections import Counter
@@ -89,11 +89,11 @@ def _mode(vals):
 # ---------------------------------------------------------------------------
 def _width_segments(parsed, n_col):
     """检测「不同宽度子表上下堆叠」：某 tile-column 的众数列宽在某 band 突变
-    （如 945104ed 的 t2：上半子表=9 列、下半子表=27 列），说明两个不同宽度的子表叠在
+    （如某 tile-column 上下两半列数不同），说明两个不同宽度的子表叠在
     一起。返回按该突变 band 切的 band 分段 [(b0,b1),...]。
 
     必须分段重组的原因：W_c 取全 band 众数时，会被占多数 band 的子表主导
-    （t2 众数=9 → 下半子表的 t2 从 27 被压到 9 → 列数 77→61，TEDS 0.758 而非 0.865）。
+    （众数取窄的一半 → 宽子表被压窄 → 列数与 TEDS 双降）。
     分段后每段各取自己的 W_c。单一宽度（绝大多数表）→ 返回单段，行为完全不变、零回归。
     """
     n_band = len(parsed)
@@ -103,8 +103,8 @@ def _width_segments(parsed, n_col):
     for c in range(n_col):
         # 排除 ≤2 列的 band：纯文本兜底(只读出年度号单列)、近空 tile 会产生"1列"，
         # 那是 OCR 没读出数据的**假**宽度突变，不是真的窄子表。若不排除，连续多个兜底
-        # band 会被误判成"不同宽度子表"、分段后独立重组成 1 列、不补齐(090853cd 行切小后
-        # 底部稀疏区 47 行只剩 1 列、TEDS 0.997→0.69)。真子表最少也 2-3 列,排除 ≤2 安全。
+        # band 会被误判成"不同宽度子表"、分段后独立重组成 1 列、不补齐(底部稀疏区
+        # 多行只剩 1 列、TEDS 大跌)。真子表最少也 2-3 列,排除 ≤2 安全。
         seq = [(r, bw[r][c]) for r in range(n_band) if bw[r][c] > 2]
         if len(seq) < 6:                            # 太短不足以判双峰
             continue
@@ -170,8 +170,8 @@ def _reconstruct_grid(parsed, col_cells, col_cuts=None, framed=False):
             w = max(1, _mode(col_widths[c]))
             if framed and c < len(col_cells) and w < 0.7 * col_cells[c]:
                 # 有框且 OCR 读出明显少于框线列数(漏列):把漏读的空列补到框线列数
-                # (00332 表1 读33/框线67=49%、19a15357 读9/框线69 —— GT 把空列都标了 td)。
-                # 阈值 0.7:OCR 读出接近框线时不补,免过补(3fa0851c 读6/框线7=86% 不补)。
+                # (OCR 读出列数远少于框线列数 —— GT 把空列都标了 td)。
+                # 阈值 0.7:OCR 读出接近框线时不补,免过补(读出≈框线时不补)。
                 w = col_cells[c]
             W.append(w)
         else:
@@ -220,14 +220,14 @@ def _is_caption_like(text):
 
 # 结构哨兵(grid_ocr 表头重建写入,渲染层折叠):
 # COLSPAN=被左侧格横向吞并的格位 → 左格发 colspan=N
-# ROWSPAN=被上方格纵向吞并的格位 → 上格发 rowspan=N,本格不发 td(cc1ea3a3 GT口径)
+# ROWSPAN=被上方格纵向吞并的格位 → 上格发 rowspan=N,本格不发 td(GT口径)
 COLSPAN = "\x00cs"
 ROWSPAN = "\x00rs"
 
 
 def _one_table(rows):
-    # 不修剪尾空列:有框表的尾空列由框线定义、GT保留为空td(90c8cdb9尾部10列全空,
-    # 修剪致td-690);自由读时代的补齐残留不值得为它杀真列
+    # 不修剪尾空列:有框表的尾空列由框线定义、GT保留为空td(尾部空列全空,
+    # 修剪致td丢失);自由读时代的补齐残留不值得为它杀真列
     out = [_GT_TABLE_OPEN]
     for ri, row in enumerate(rows):
         tds = []
@@ -261,7 +261,7 @@ def rows_to_html(rows, panel_n=1):
     <table> 1:1 对齐）；否则原样输出单表。
 
     panel_n 来自 slicer 的「横线断裂」几何信号（_panel_seams），取代旧的列类型周期
-    (_panel_period)：后者会把无横线的单表(3fa0851c 6列)按列类型周期误拆成 N 表(0.416)，
+    (_panel_period)：后者会把无横线的单表按列类型周期误拆成 N 表(TEDS 大跌)，
     而横线断裂只在真并排(横线在中缝断开)时触发 → 不误拆。"""
     if panel_n and panel_n >= 2 and rows:
         W = Counter(len(r) for r in rows).most_common(1)[0][0]
@@ -294,12 +294,12 @@ def _peel_ragged_top(bands, framed=False):
     """band0 的最左 tile 若比其它 tile 多出【顶部短行】(标签只出现在最左 tile)→ 弹出作
     caption、从 grid 去掉。修「标签揉进表头致对角错位」:子表标签"男性 3年交"是只占左 2-3
     格的半行,只在最左列 tile,stitch 按 nrows=max 逐行对齐时它和其它 tile 的表头对齐 →
-    整表每行=上行左半+下行右半、对角劈裂(a4924b6d 12子表 TEDS 48)。弹掉后行对齐、标签成
+    整表每行=上行左半+下行右半、对角劈裂(多子表 TEDS 崩)。弹掉后行对齐、标签成
     caption(对 ro)。判据:最左 tile 行数 > 其它 tile,且多出的顶行格数 ≤3。
 
     **向下合并**:遇到单格文字行(如 API 把表头角"年度/年龄"单独成行)、且其下一行恰比
     数据满宽少一列(== 满宽-1)→ 不剥进 caption,而把这格 prepend 回下一行补回首列、停。
-    修 API 把表头角单独成行致年龄整体左移一列(a4924b6d 男性10年交)。仅此一格、条件严格
+    修 API 把表头角单独成行致数据整体左移一列。仅此一格、条件严格
     (下行须正好缺一列),有框正常表(下行=满宽,不缺列)不触发。"""
     if not bands or not bands[0]:
         return ""
@@ -315,7 +315,7 @@ def _peel_ragged_top(bands, framed=False):
         # 结构判据①:下一行首格(角格)为空 → 候选本身就是被 API 劈开的【角格】(投保年龄\
         # 保单年度 之类)→ 填回角格、不剥。区分"子表标签 vs 角格轴表头":标签下方是合规表头
         # (年度/年龄|18…,角格非空)→剥;角格下方是裸数据行(|1|2…,角格空)→塞回。纯结构、
-        # 不靠词表。修无框多子表把角格剥成 caption 的泄漏(1de69d49/225fb899/583ac07b/06364357)。
+        # 不靠词表。修无框多子表把角格剥成 caption 的泄漏。
         if not framed and len(left) >= 2 and left[1] and not (left[1][0] or "").strip():
             left[1][0] = " ".join(cell)
             left.pop(0)
@@ -341,7 +341,7 @@ def stitch_single_table(tile_outputs, meta):
     col_cuts = meta.get("col_cuts")
     row_cuts = meta.get("row_cuts")
     panel_n = meta.get("panel_n", 1)
-    # 有框补空列只对单表:panel(左右并排)的列含中间缝、补空列会破坏 panel_n 拆分(8c8c784c 1.0→0.23)
+    # 有框补空列只对单表:panel(左右并排)的列含中间缝、补空列会破坏 panel_n 拆分(TEDS 崩)
     framed = meta.get("col_framed", False) and panel_n < 2
     blank = meta.get("blank", [[False] * n_col for _ in range(n_band)])
 

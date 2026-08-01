@@ -43,21 +43,21 @@ def _split_merged_cols(im, dark, rb, cb, meta):
     """漏检列线的骨架级修复(几何候选 + 本地模型内容复核,取代列校准投票采纳):
 
     几何候选:骨架列内墨呈双簇、簇间空隙**跨行对齐**(≥80%有缝格包含中位缝心±2px)
-    = 疑似两个真实列被并读(a4e24107 行号列+值列,缝[48,60]逐行对齐,'93421.59'
+    = 疑似两个真实列被并读(行号列+值列逐行对齐、
     连体格的根因)。护栏:缝宽≥8px、两侧墨簇各≥10px、有缝格占有墨格≥70%
-    (口吃表 6ec325a0 无对齐缝,天然不触发)。
+    (口吃表无对齐缝,天然不触发)。
 
-    内容复核(几何的盲区):"88. 81" 式**小数点后空格**排版(186ee68f 全表逐列
+    内容复核(几何的盲区):"88. 81" 式**小数点后空格**排版(全表逐列
     对齐缝)与真漏检几何同构,只能靠内容分辨——抽样 6 格本地 rec,
     『整数 + 完整小数』(9 3421.59)≥2/3 → 真漏检,采纳插线;其余(88. 81 /
     文本/单数)→ 拒绝。命中的边界插入缝心。"""
     # 真合并格形态:首簇=完整数字(纯整数或带完整小数,不得以'.'收尾)+ 第二簇——
-    # 数字值(9 3421.59 / 0.00 0.00 双小数,e62e178c 三列并一)或非数字标签(2男,
+    # 数字值(9 3421.59 / 0.00 0.00 双小数,三列并一)或非数字标签(如中文标签,
     # rec常不给空格)。"88. 81"小数空格型首簇后紧跟'.',所有分支都不中
     if meta.get("col_framed"):
         # 有框列=框线,列界本就精确,不存在漏检线(旧列校准同款铁律)。有框的
-        # 千分位表(8534a3c6)逗号缝会让每列都成假候选,连API条带证人都会被噪声
-        # 骗(实测140候选/6误采/1误否),门口直接拦
+        # 千分位表逗号缝会让每列都成假候选,连API条带证人都会被噪声
+        # 骗(候选爆炸、易误采),门口直接拦
         return cb
     inserts = []
     for j in range(len(cb) - 1):
@@ -104,7 +104,7 @@ def _split_merged_cols(im, dark, rb, cb, meta):
                    for z in zones]
         cuts = [x0 + (a[1] + b[0]) // 2 for a, b in zip(zones, zones[1:])]
         if n_co * 10 <= len(row_runs) and min(support) >= 2:
-            # 互斥占位:各行只落一个区带(阶梯稀疏 e62e178c)——单个数字不可能
+            # 互斥占位:各行只落一个区带(阶梯稀疏)——单个数字不可能
             # 逐行在互不重叠的x区带间跳跃,免内容复核直接按区带间隙插线
             inserts.extend(cuts)
             meta.setdefault("adopt", []).append(
@@ -128,7 +128,7 @@ def _split_merged_cols(im, dark, rb, cb, meta):
             if api_cols >= 2:
                 # 插 api_cols-1 条:切点按"两侧较弱区带的墨量"排序取最强——切线的
                 # 价值取决于它分开的两个族都实在(最宽间隙会选到贴着杂迹小区带的
-                # 假缝,34821e6c '2男' 真界x406被x485挤掉的教训)
+                # 假缝,弱区带真界被强区带挤掉的教训)
                 gw = sorted(((min(a[2], b[2]), (a[1] + b[0]) // 2)
                              for a, b in zip(zones, zones[1:])), reverse=True)
                 cuts = [x0 + c for _, c in gw[:api_cols - 1]]
@@ -146,7 +146,7 @@ def _split_merged_cols(im, dark, rb, cb, meta):
 
 def _isolated_ink(dark, x0, x1, pad=40):
     """列条 [x0,x1) 内(独立墨像素数, 总墨数)。独立 = 连通域完全落在条内±2px,
-    不与邻列连通——幻影窄列的墨几乎全是邻列文字漏入(7cd180ab col2 实测 89.5%)。"""
+    不与邻列连通——幻影窄列的墨几乎全是邻列文字漏入(实测占比极高)。"""
     from collections import deque
     lo, hi = max(0, x0 - pad), min(dark.shape[1], x1 + pad)
     ctx = dark[:, lo:hi]
@@ -228,8 +228,8 @@ def slice_grid(im):
     if R < 1 or C < 1 or (R >= 2 and float(np.median(np.diff(rb))) >= 12
                           and rows_misaligned(dark, dark180)):
         # 错位检测仅在行距≥12px时有效:微距表(行缝2~3px)窄列条里数不出行,
-        # "列带行数<<全表"是检测器自身失明,非真错位(A榜e082df7b 354x110
-        # 对齐巨表被误标→整段自由读灾难)。真错位表b326/b5cad行距27px不受影响
+        # "列带行数<<全表"是检测器自身失明,非真错位(对齐巨表被误标
+        # →整段自由读灾难)。真错位表行距较大不受影响
         meta["misaligned"] = True
         return [], meta
     # 密集判据(与 slicer 共用 upsample_for):每 cell 平均边长小 → 上采样
@@ -240,8 +240,8 @@ def slice_grid(im):
     row_bands = _chunk(rb, MAX_TILE_ROWS)
     col_bands = _chunk(cb, MAX_TILE_COLS)
     # 一律 tile+拼接,不整读(小段快路已退役:整读的"单tile无冗余+极端宽比"一次失败全丢)。
-    # 像素长宽比约束:API 拒收 >200:1(400)。矮表单tile可到 241:1(1de69d49 尾表 2行
-    # 7000×29px)——列带宽 > 180×最矮行带高 时对半加密列带(切在列边界上,骨架拼接原生
+    # 像素长宽比约束:API 拒收 >200:1(400)。矮表单tile可超 200:1(如 2 行的
+    # 极扁尾表)——列带宽 > 180×最矮行带高 时对半加密列带(切在列边界上,骨架拼接原生
     # 支持多tile;不垫白,内容无损)
     min_bh = min(rb[j] - rb[i] for i, j in row_bands)
     while col_bands:
@@ -282,10 +282,10 @@ def _parse_cap(raw):
 def span_cross(seg_gray, rb, cb, ri, rj, ci, cj):
     """跨列笔画检测(纯几何):返回 {骨架行 i: [被横穿的边界 j, ...]}。
     横穿 = 同一像素行的连通笔画过边界中心且两侧各有墨(≥2 像素行);贴线不算
-    (密排数字蹭线左右不同时过中心,bc9e6b5d 假阳性教训);竖框线剔除
+    (密排数字蹭线左右不同时过中心,假阳性教训);竖框线剔除
     (中心条整行高占比>0.8 的像素列=线)。
     用途:压线行的条带合并**只跨被横穿的边界**——没被横穿的格间照旧逐格,
-    数据行即使被幻影窄列牵连标为压线,其数据格也不会被误并(7cd180ab 教训)。"""
+    数据行即使被幻影窄列牵连标为压线,其数据格也不会被误并。"""
     dark = seg_gray < BIN_INK
     out = {}
     for i in range(ri, rj):
@@ -300,7 +300,7 @@ def span_cross(seg_gray, rb, cb, ri, rj, ci, cj):
             hline = win.mean(1) > 0.9          # 横线像素行(近全黑)整行剔除,
             left = dark[y0:y1, max(0, x - 6):max(0, x - 2)]   # 否则表头下沿横线
             cent = dark[y0:y1, max(0, x - 1):x + 2]           # 让每条边界都像被
-            right = dark[y0:y1, x + 3:x + 7]                  # 横穿(7cd180ab r2)
+            right = dark[y0:y1, x + 3:x + 7]                  # 横穿
             if min(left.size, cent.size, right.size) == 0:
                 continue
             frac = cent.mean(axis=0)
@@ -322,7 +322,7 @@ def span_rows(seg_gray, rb, cb, ri, rj, ci, cj):
 def _ink_evidence(im, rb, cb, R, C):
     """格级墨证据:cell_ink[i][j] = 骨架格(i,j)内部(收缩2px避开框线)文字墨≥3px。
     行对齐(哪些行有内容)和列摆放(哪些格有内容)共用——空白判定要求极低墨。
-    cell_gray = 淡灰内容(灰度129~180):d1752e16整张数字印成浅灰,128全隐形→cell_ink
+    cell_gray = 淡灰内容(灰度129~180):整张数字印成浅灰时,128全隐形→cell_ink
     判空→E欠数→裁多丢真值。180看得见,配API门控救回(仅当API确认时启用,_align_tile)。"""
     _gray = np.asarray(im.convert("L"))
     dark = _gray < BIN_INK
@@ -344,7 +344,7 @@ def _ink_evidence(im, rb, cb, R, C):
             lm = line.copy()                       # ±2px 膨胀:线的反锯齿灰边(frac
             for s in (1, 2):                       #  0.2~0.5,几十px)也一并排除,否则
                 lm[:-s] |= line[s:]                #  保单年度底线的灰边使 row0 被误判
-                lm[s:] |= line[:-s]                #  有字,数据行错进表头(1674392a)
+                lm[s:] |= line[:-s]                #  有字,数据行错进表头
             cell_ink[i, j] = bool(((cnt >= 3) & ~lm).any())
             if not cell_ink[i, j]:                 # 128判空的格才查灰(省算):180去线cnt≥3
                 sg = dark180[y0:y1, x0:x1]
@@ -375,8 +375,8 @@ def _read_tiles(tiles, meta, timeout):
 def _calibrate_cols(parsed, meta):
     """**列校准**(骨架级修复,一致性仲裁。行列职责不对称:行估计=真值,列在稀疏区/标签区
     可能少):非空 tile 的行格数众数若一致 = 骨架列数+k(k>0),且 ≥2 个行带的 tile 同票
-    (或该列带只有 1 个非空 tile) → 采纳 nc+k(5fdf46b0 三标签列被并 1 列,429 行每行
-    一致多读 2 格=最强信号;稀疏空 tile 不投票)。返回各列带的期望列数 band_nc。"""
+    (或该列带只有 1 个非空 tile) → 采纳 nc+k(多个标签列被并成 1 列,每行
+    一致多读=最强信号;稀疏空 tile 不投票)。返回各列带的期望列数 band_nc。"""
     row_bands, col_bands = meta["row_bands"], meta["col_bands"]
     band_nc = []
     for c, (ci, cj) in enumerate(col_bands):
@@ -385,7 +385,7 @@ def _calibrate_cols(parsed, meta):
         if not meta.get("col_framed"):             # **只校准无框表**:有框列=框线,本就精确;
             for r in range(len(row_bands)):        # 且有框 tile 切点在框线上,±3px pad 带进
                 _, rws = parsed[(r, c)]            # 框线+邻列残影,VLM 每行一致幻觉出一个
-                if not rws:                        # 边缘格(9c7857f3 五个带全被投成+1,
+                if not rws:                        # 边缘格(各带全被一致投成+1,
                     continue                       # 数据中间散布假空格)——一致性骗过佐证
                 cnts = [len(x) for x in rws if any(s.strip() for s in x)]
                 if cnts:
@@ -394,8 +394,8 @@ def _calibrate_cols(parsed, meta):
             top, n = Counter(votes).most_common(1)[0]
             if nc < top <= nc + 3 and n >= 2:
                 # v6 审计模式:不采纳,只上报。均匀口吃(+1整带一致)能骗过票数判据
-                # (6ec325a0 三票"13→14"实为每行复读一格,采纳后=空列+幻读列);
-                # 真漏检列线(5fdf 型 +2,新增列内容互不重复)再现时凭本 audit 名单
+                # (三票一致实为每行复读一格,采纳后=空列+幻读列);
+                # 真漏检列线(+2 型,新增列内容互不重复)再现时凭本 audit 名单
                 # 加内容判据后再启用采纳。
                 meta.setdefault("audit", []).append(
                     f"列带{c} 疑漏检列线 骨架{cj - ci}→{top}({n}票) 未采纳(审计模式)")
@@ -468,7 +468,7 @@ def _norm_numeric(grid, marks):
 def _assemble(im, parsed, meta, band_nc, cell_ink, cell_gray):
     """装配 = 零容差判定 + 本地重读 + 骨架摆放(v6,唯一修复动作在此):
     · 判定(行级,禁众数禁容差):非空行数==|E| 且 每行有效宽∈[inkw_k, nc];
-      E/inkw 用 ink∪gray 双档墨(浅灰整表 d1752e16 不再依赖 API 作证)。
+      E/inkw 用 ink∪gray 双档墨(浅灰整表不再依赖 API 作证)。
     · 不合格 → 格级本地重读整 tile 替换(行=E、列=骨架);colspan 行(span_rows)
       保留 API 原读——逐格裁剪会切碎跨列文字,缺失只 audit 不猜。
     · 摆放只信骨架:按 E 位置放行、溢出弃空格、按位补空;真损失 audit 上报不静默。
@@ -493,9 +493,9 @@ def _assemble(im, parsed, meta, band_nc, cell_ink, cell_gray):
 
             def _occ_ok(row, hasrow):
                 # 占位恒等:每格 非空⟺有墨,逐格判。宽度恒等是它的一维投影——
-                # 只查最后非空位置会漏"前/中段占位缺失"(b681f78d 13x7 方洞:
-                # API 行前7格空、右侧有值,宽==墨迹宽照样通过)。口吃复制值
-                # (6ec325a0)、幻觉填充也全被占位差抓住。
+                # 只查最后非空位置会漏"前/中段占位缺失"(方洞型:
+                # API 行前段空、右侧有值,宽==墨迹宽照样通过)。口吃复制值、
+                # 幻觉填充也全被占位差抓住。
                 for j in range(len(hasrow)):
                     if bool(j < len(row) and row[j].strip()) != bool(hasrow[j]):
                         return False
@@ -506,7 +506,7 @@ def _assemble(im, parsed, meta, band_nc, cell_ink, cell_gray):
             local_k = set()
             if not ok and E:
                 # 整 tile 本地重读,无例外(曾有"colspan行保留API原读"豁免,按行序
-                # 取行依赖行流与E对齐——不合格tile恰恰对不齐,7cd180ab错位复制教训)。
+                # 取行依赖行流与E对齐——不合格tile恰恰对不齐,错位复制教训)。
                 # 条带合并只跨**被横穿的边界**:相邻格仅当其间边界确有笔画横穿才并入
                 # 同一条带整条识别(跨列文字不切碎、行首空档保真);未被横穿的格间
                 # 照旧逐格。**范围限定表首带**(用户拍板):跨列表头/说明行只住在表顶,
@@ -587,7 +587,7 @@ def _assemble(im, parsed, meta, band_nc, cell_ink, cell_gray):
 
 def _find_splits(grid, cap_rows_global):
     """表边界(用户双条件): ①非首带tile出现caption ②该带行流含轴行(连续整数序列>10)
-    → 在轴行处拆表(deb8de95 '二年交'新块自带[0..14]轴行;1674392a 轴行在首带且
+    → 在轴行处拆表(新子表块自带轴行;或轴行在首带且
       caption带无轴行,双条件互锁不误拆)"""
     def _axis_at(i):
         vals = [c.strip() for c in grid[i] if c.strip()]
@@ -630,7 +630,7 @@ def _colnum_row(row):
 
 
 def _title_row(row, w):
-    """整行标题化:全部文本按序拼接进单格,colspan 贯穿(GT 标题口径 34e53b1c)。"""
+    """整行标题化:全部文本按序拼接进单格,colspan 贯穿(GT 标题口径)。"""
     text = " ".join(s.strip() for s in row if s.strip())
     return [text] + [COLSPAN] * (w - 1)
 
@@ -641,8 +641,8 @@ def _rebuild_header(grid, cap_rows_global, meta):
     · h-1 行(紧邻列号行):
         单短簇(≤8字)且 h 行有角格文本 → 折角"角\\标签"删行(斜线口径 96/115);
         全短簇(均≤10字)→ 双行表头:左[0,k0)上下合并去重 rowspan=2,右标签簇
-          colspan(cc1ea3a3 GT);右侧无标签时最后一个左标签划归右侧(dd955f1c);
-        含长簇=对不上 → pop 当标题(整行拼接单格 colspan,2f5ce7c4 说明行);
+          colspan(GT 口径);右侧无标签时最后一个左标签划归右侧;
+        含长簇=对不上 → pop 当标题(整行拼接单格 colspan,如说明行);
     · h-1 之上的行:一律标题化;
     · 数据行守卫:数字为主的行不动(GT 数据首行保留空td,7例实证)。
     返回(折角删行后偏移的)cap_rows_global。"""
@@ -707,7 +707,7 @@ def _rebuild_header(grid, cap_rows_global, meta):
         if merged:
             r0[j] = merged
             r1[j] = ROWSPAN
-    # 右侧:列号上方只有一个 colspan(用户口径,GT cc1ea3a3 单标签跨56列)。
+    # 右侧:列号上方只有一个 colspan(用户口径,GT 单标签可跨多列)。
     # 多簇=同一物理文字被tile列带切碎('保单'+'年度'),拼接;完全相同的簇去重
     labels = [r0[j].strip() for j in starts]
     text = labels[0] if labels and all(x == labels[0] for x in labels) \
@@ -742,7 +742,7 @@ def _fill_seq(grid, meta):
 
     def _one_axis(cells, tag):
         # 局部连续段补齐(非全局仿射——双panel列号行 1..30,1..30 两段截距不同,
-        # 全局众数判据必挂,dd955f1c 教训):
+        # 全局众数判据必挂):
         # · 两已知整数 a@pa,b@pb 间距==值差(步长1一致)→ 空档线性补;
         # · 连续段(长≥3)首尾各外推1格;digits==期望但格式错 → 归一
         posmap = {p: (i, j, t) for p, i, j, t in cells}
@@ -783,7 +783,7 @@ def _fill_seq(grid, meta):
                    if j < len(row) and row[j] not in (COLSPAN, ROWSPAN)], f"col{j}")
     for i, row in enumerate(grid):                 # 横向:所有通过列号行判定的行
         if _colnum_row(row) is None:               # (堆叠子表的中部列号行也在,
-            continue                               #  00c6e7df 第二子表 0/1 缺失教训;
+            continue                               #  第二子表首格缺失教训;
         _one_axis([(j, i, j, row[j].strip()) for j in range(len(row))   # 判定本身
                    if row[j] not in (COLSPAN, ROWSPAN)], f"row{i}")     # 挡住数据行)
 

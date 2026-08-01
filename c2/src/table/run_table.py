@@ -165,7 +165,7 @@ def _call_grid(tiles, timeout=240, upsample=1, cache_dir=None):
 def _strip_html(s):
     """表外文字块按纯文本拼回：剥 HTML 标签，**保留逻辑行**(表行 </tr> / <br> / 空行 →
     段落断),仅段内折叠空白。GT 把多行标题(主标题/副标题/单位)拆成独立逻辑块按阅读流计分,
-    若把多行折成一行→pred 1 块 vs GT N 块、RO 腰斩(e3e19b92/051fa323 等 TEDS≈100 却 RO50)。"""
+    若把多行折成一行→pred 1 块 vs GT N 块、RO 腰斩(TEDS≈100 却 RO 崩)。"""
     s = re.sub(r"<\s*br\s*/?>", "\n\n", s or "", flags=re.I)
     s = re.sub(r"</\s*tr\s*>", "\n\n", s, flags=re.I)        # 表行边界 → 段落断
     s = re.sub(r"<[^>]+>", " ", s)
@@ -195,8 +195,8 @@ def _merge_text_blocks(md):
 
 def _ocr_strip(img, timeout):
     """细长条(>180:1)分段 OCR:API 拒收 >200:1(400)。子表间被 peel 剥出的表头小条
-    (a1aaef73 4300×17≈250:1)是**真内容**,读不到 → tfrag 判不成 → 子表首行丢失
-    (tr56/60)。不垫白:在中部±20%找最白列切开,递归读两半,文本拼接——切在真实白缝,
+    (细长条可超 200:1)是**真内容**,读不到 → tfrag 判不成 → 子表首行丢失。
+    不垫白:在中部±20%找最白列切开,递归读两半,文本拼接——切在真实白缝,
     内容无损。"""
     import numpy as np
     w, h = img.size
@@ -215,8 +215,8 @@ def ocr_text(im, bbox, timeout):
     """Stage II — 裁一个文字块 → 单独 API 识别 → 剥成纯文本。表外 furniture 与子表上方
     的标题段共用这一套(裁剪→识别→拼接),不让小文字被 stitch 包成空 <table>。"""
     x0, y0, x1, y1 = bbox
-    crop = pad_white(im.crop((x0, y0, x1, y1)))      # 白pad与tile同原则(34e53b1c
-    crop = upscale(crop, 2)                                # 表1末行半截字被读成'000'垃圾)
+    crop = pad_white(im.crop((x0, y0, x1, y1)))      # 白pad与tile同原则(避免
+    crop = upscale(crop, 2)                                # 末行半截字被读成垃圾)
     #                                                    2x 上采样:标题/页脚小字提精度
     return _strip_html(_ocr_strip(crop, timeout))
 
@@ -252,8 +252,8 @@ def ocr(im, blocks, timeout=240):
       item = ["table", grid, html|None]  |  ["text", str, None]
 
     'text' 块 → ocr_text 纯文本。'title' 块(peel 的 mark) → OCR 判真身:读出表格行
-    (td≥阈值) = peel 误剥的数据/表头行 → 拼回紧随其后的 seg 表格(32799493 分节线上方
-    两行数据被剥,靠此救回);否则按纯文本。'seg' 块 → **骨架 OCR(grid_ocr.ocr_seg)**:
+    (td≥阈值) = peel 误剥的数据/表头行 → 拼回紧随其后的 seg 表格(分节线上方
+    数据行被剥,靠此救回);否则按纯文本。'seg' 块 → **骨架 OCR(grid_ocr.ocr_seg)**:
     行列以几何估计为准切 tile、结果强制对齐骨架、稀疏区按骨架补空 cell;列错位表
     (骨架不可信)回退 ocr_table 自由读。"""
     items, ncalls = [], 0
@@ -338,7 +338,7 @@ _MDOT = re.compile(r"^\d{1,3}(?:\.\d{3})+\.\d{2}$")
 
 def _fix_mdot(s):
     """多点数字规范化: '2.357.38'→'2,357.38'。欧式点千分位在本域不存在(用户判定),
-    pred侧是OCR把千分位逗号误读成点(f501eee1/f5009a2d),GT侧同款样式者视为GT标注
+    pred侧是OCR把千分位逗号误读成点,GT侧同款样式者视为GT标注
     误差,统一赌逗号。严格整形匹配:粘连残渣('107.8.11',第二段非3位)不动。"""
     if s and _MDOT.match(s):
         head, dec = s.rsplit(".", 1)
@@ -361,8 +361,8 @@ def _grid_html(grid):
         return rows_to_html(grid)
     C = max(len(r) for r in grid)
     grid = [list(r) + [""] * (C - len(r)) for r in grid]
-    # 不剔全空列:有框表的空列由框线定义、真实存在(90c8cdb9 尾部10列全空,GT保留为
-    # 空td,剔除致td-690);无框赝品列(1674392a"）"列)代价仅一个空格,两害相权留着
+    # 不剔全空列:有框表的空列由框线定义、真实存在(尾部空列全空,GT保留为
+    # 空td,剔除致td丢失);无框赝品列代价仅一个空格,两害相权留着
     row0 = grid[0]
     n = len(row0)
     if len(grid) < 2 or not any(not c.strip() for c in row0) \
@@ -422,9 +422,9 @@ def merge(items):
     """Stage III — 表头小条合并 + 按阅读顺序拼接成 md。返回 (md, nsubtables)。
 
     表头小条合并(单向,只上面小条并入下面表身):相邻两表,若上表是小条(cells<下表/8
-    **且** 列数差≤6)→ 行拼接归一表。两条 AND 缺一不可:只看列数会误并真子表(97c4c182
-    列72≈67);只看 cells 小会误并真小子表(19a15357 顶 td80 但列10≠68)。修竖线断裂把
-    表头行从表身剥下来的碎裂(945e8fe9/88c6dbb4/1f4293f3 89→3.5),顺手并一段多吐的碎块。"""
+    **且** 列数差≤6)→ 行拼接归一表。两条 AND 缺一不可:只看列数会误并真子表(列数相近
+    但 cells 不小);只看 cells 小会误并真小子表(cells 小但列数差很大)。修竖线断裂把
+    表头行从表身剥下来的碎裂(TEDS 崩),顺手并一段多吐的碎块。"""
     # tfrag(title mark 判为表格行) → 拼回紧随其后的 table 表顶;无后表则自成一表
     fused = []
     i = 0
@@ -438,8 +438,8 @@ def merge(items):
                 items[i + 1] = ["table", rows + g, None]
             else:
                 # 拼不进任何相邻表 → **降级为文本**:从子表拆出的块只能是表外标题,
-                # 绝不允许以独立表格落地(34e53b1c 残影+标题条自立成第3张表,表数3v2
-                # 配对全崩 0.49)。"拆出块必为标题"是不变量
+                # 绝不允许以独立表格落地(残影+标题条自立成多余表、表数错致配对全崩)。
+                # "拆出块必为标题"是不变量
                 txt = " ".join(c for r in it[1] for c in r if c.strip())
                 if txt.strip():
                     fused.append(["text", txt, None])
@@ -452,7 +452,7 @@ def merge(items):
     for it in items:
         # [表A, 短文本, 表B] 且 A 是 B 的表头小条 → 文本当成一行(colspan行)三合一:
         # peel 从表身剥出的组表头行 OCR 成文本后会挡在 A/B 之间,使"相邻两表"合并失效
-        # (88c6dbb4 subs=2,TEDS 0.027);GT 恰好把该行算表内 colspan 行(4+1+107=112=GT)
+        # (否则误分成两表、TEDS 崩);GT 恰好把该行算表内 colspan 行(该行属表内)
         if (it[0] == "table" and len(merged) >= 2
                 and merged[-1][0] == "text" and "\n" not in merged[-1][1]
                 and len(merged[-1][1]) <= 80

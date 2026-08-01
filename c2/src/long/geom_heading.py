@@ -195,7 +195,7 @@ def correct(md, im, ocr, cache_key=None):
             toc_end_line = len(lines)
 
     # 目录分级(用户裁决:目录需分级,简单两层):bare-int 空格章 = H1,其余编号条目 = H2。
-    # 跟踪章序号:值 = 上一章+1 的 bare-int(即便 API 漏标成正文)也补成 H1(如 9→10 附表)。
+    # 跟踪章序号:值 = 上一章+1 的 bare-int(即便 API 漏标成正文)也补成 H1。
     # 目录整段仍被后续 pass 跳过,只在这里就地定级,不改内容/顺序。
     if ti is not None:
         last_chap = 0
@@ -209,7 +209,7 @@ def correct(md, im, ocr, cache_key=None):
                 lines[i] = "# " + t; continue             # 目录标题
             k, p = _pm(t)
             if k == "int" and p:                          # 单整数(1/1./1、)= 章 → H1
-                if is_head or p[0] == last_chap + 1:       #   已标 或 延续序列的漏标章(9→10 附表)
+                if is_head or p[0] == last_chap + 1:       #   已标 或 延续序列的漏标章
                     lines[i] = "# " + t; last_chap = p[0]
             elif k == "dec" and is_head:                  # x.y → 点数=深度(1.1→H2,1.1.1→H3)
                 lines[i] = "#" * min(6, len(p)) + " " + t
@@ -218,7 +218,7 @@ def correct(md, im, ocr, cache_key=None):
             # 无编号标题(封面题名)保持原级,不降 —— 目录区里夹的题名是 H1
 
     # pass 0(用户裁决:淡横线上方 = H1):横线上方最近文本行匹配到预测行,强制为 H1
-    # —— 正文行加 `# `、已是标题的改成一个 `#`。顺带救回 API 整章漏标(如 e33f4bfb)。
+    # —— 正文行加 `# `、已是标题的改成一个 `#`。顺带救回 API 整章漏标。
     line_bottoms = [(l[1], k) for k, l in enumerate(L)]
     rule_lines = set()                      # 被淡横线锚定的预测行号(确认或提升为 H1)
     for r0, r1 in rule_yranges:
@@ -241,7 +241,7 @@ def correct(md, im, ocr, cache_key=None):
         m = _H.match(lines[best])
         body_txt = m.group(2) if m else lines[best].strip()
         # 横线上方偶尔是上一节末行/伪标题/HTML,不是章标题;且格式优先:dec(x.y)
-        # 点数已定死深度,横线不覆盖(2.1 永远是子节)。
+        # 点数已定死深度,横线不覆盖(x.y 永远是子节)。
         if (body_txt.lstrip().startswith("<") or _is_pseudo_heading(body_txt)
                 or _pm(body_txt)[0] == "dec"):
             continue
@@ -279,13 +279,12 @@ def correct(md, im, ocr, cache_key=None):
     dec_floor = min(dec_comps) if dec_comps else 0
     first_numbered = next((li for li, lv, t in heads if _pm(t)[0] != "title"), len(lines))
     # 文档出现的非 dec 格式的 rank 集合:无父级 orphan 定级的地板 —— 最浅格式=H1,
-    # 更深格式按"比它浅的 rank 种类数"下沉。仅在缺父级关系时用 rank 兜底(如 c463 四/100)。
+    # 更深格式按"比它浅的 rank 种类数"下沉。仅在缺父级关系时用 rank 兜底。
     present_ranks = {_RANK.get(_fmt(t), 5) for li, lv, t in heads
                      if li > toc_end_line and _fmt(t) and not _fmt(t).startswith("dec")}
 
     # ── 伪定义项降级(一致性):带编号标题以「：」引出定义,而其同格式 ±1 兄弟是**正文**
-    #   → 它也是正文。如 `## 2. 医学必需:指…条件:` 与正文 `1. 符合通常惯例:指…。` 并列。
-    #   GT 里 `96.胆道重建手术:` 这类真标题成串出现(邻项亦标题、无正文兄弟),不受影响。
+    #   → 它也是正文。带编号的冒号结尾**真**标题会成串出现(邻项亦标题、无正文兄弟),不受影响。
     _LI = _LEADIN_END + _SENT_END                     # 冒号/句号/分号结尾 = 定义引出或句末 → 正文信号
     meta = []                                         # (li, fmt, val, is_heading)
     for i, ln in enumerate(lines):
@@ -359,8 +358,8 @@ def correct(md, im, ocr, cache_key=None):
         lines[li] = "#" * min(6, level) + " " + txt
 
     # ── 兄弟一致性(跨区):同格式连续编号的长枚举 → 少数派拉齐到多数派层级 ──────
-    #   如 36、~66、共 31 个 int、疾病,若首项被误检横线顶成 H1,其余 30 个 H2,
-    #   本 pass 把 36、拉回 H2(同格式同级)。仅作用于 ≥3 项的连续段,不碰短组。
+    #   一长串同格式枚举里,若首项被误检横线顶成 H1、其余为 H2,本 pass 把它拉回
+    #   多数派层级(同格式同级)。仅作用于 ≥3 项的连续段,不碰短组。
     hd = []                                            # (li, fmt, val, level)
     for li, ln in enumerate(lines):
         m = _H.match(ln)
@@ -386,60 +385,3 @@ def correct(md, im, ocr, cache_key=None):
         i = j
 
     return "\n".join(lines), changes
-
-
-# 独立驱动:只在已有 pipeline 文本产出上单独施加几何定级(不重跑 API)。主链路
-# 已把 correct() 内置于 main.py 的 long 分支,此 CLI 仅供单独调定级时用。
-
-_IMAGES = None          # 子进程经 fork 继承;由 _cli 设定
-_PREDS = None
-
-
-def _apply_one(name):
-    from PIL import Image
-    from common.preprocess import prep
-    from main import _local_ocr
-    im = prep(Image.open(os.path.join(_IMAGES, name)))
-    new, ch = correct(_PREDS[name], im, _local_ocr(), cache_key=name)
-    return name, new, ch
-
-
-def _cli():
-    import sys
-    import csv
-    import argparse
-    from multiprocessing import Pool
-    from PIL import Image
-
-    Image.MAX_IMAGE_PIXELS = None
-    csv.field_size_limit(sys.maxsize)
-
-    ap = argparse.ArgumentParser(description="在 *_txt.csv 上施加几何标题定级")
-    ap.add_argument("--txt", required=True, help="pipeline 文本产出 *_txt.csv")
-    ap.add_argument("--images", required=True, help="对应原图目录")
-    ap.add_argument("--out", required=True, help="输出 *_raw.csv")
-    ap.add_argument("--workers", type=int, default=16)
-    a = ap.parse_args()
-
-    global _IMAGES, _PREDS
-    _IMAGES = a.images
-    with open(a.txt, encoding="utf-8") as f:
-        _PREDS = {r["file_name"]: r["ground_truth"] for r in csv.DictReader(f)}
-
-    names = [n for n in sorted(os.listdir(_IMAGES)) if n in _PREDS]
-    with Pool(a.workers) as p:
-        res = p.map(_apply_one, names)
-
-    out = {n: new for n, new, _ in res}
-    nch = sum(1 for _, _, ch in res if ch)
-    ndrop = sum(len(ch) for _, _, ch in res)
-    with open(a.out, "w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f, quoting=csv.QUOTE_ALL)
-        w.writerow(["file_name", "ground_truth"])
-        for n in sorted(_PREDS):
-            w.writerow([n, out.get(n, _PREDS[n])])
-    print(f"geom 施加 {len(names)} 篇;{ndrop} 处标题改动 across {nch} 篇 → {a.out}")
-
-
-if __name__ == "__main__":
-    _cli()

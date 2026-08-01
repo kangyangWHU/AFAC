@@ -10,7 +10,7 @@
 
 tile 规模由 ≤MAX_TILE_ROWS 行 × ≤MAX_TILE_COLS 列 + 像素 ≤TILE_MAX 直接限定。
 现仅服务列错位表的自由读回退(run_table.ocr_table)；主路是 grid_ocr.slice_grid。
-overlap 已退役(实测净负:密集表列乱/行翻倍,945104ed 0.230→0.758)。
+overlap 已退役(实测净负:密集表列乱/行翻倍)。
 """
 import numpy as np
 from PIL import Image
@@ -109,7 +109,7 @@ def slice_table(im):
     # 行：与列对称用墨柱（横向最长墨段）。关键纠正——文字行**不会连成一条线**：
     # 一行 `8504 8504 …` 的字/格之间有缝，最长横墨段只有一个数字宽(中位~2px)，而横框线
     # 全宽贯穿(几千px)，120px 阈值有 ~60× 余量，不会把文字行误判成线。横墨柱比密度法更准
-    # （行估对 59→71/100），且连 15px 挤死的行都能救（015bd47c 101%）。无框→回退低墨缝。
+    # （行估更准），且连 15px 挤死的行都能救。无框→回退低墨缝。
     runl_rows = _runlen_lines(dark180.T, min_run=120)
     gap_rows = _gap_lines(dark.mean(axis=1))
     if len(runl_rows) > 1 and len(runl_rows) >= 0.5 * len(gap_rows):
@@ -124,7 +124,7 @@ def slice_table(im):
     # tile 直接限行列：每 tile ≤MAX_TILE_ROWS 行 × ≤MAX_TILE_COLS 列。
     # 全宽模式自动门控:表宽刚过 limit(1~1.4×)——拆列会把表切成不均衡的小块,8a4 那种"重复
     # 标签列被孤立成小tile"会触发 API 复读幻觉/丢列。改成不拆列、全宽短行(8行),下游走
-    # stitch 单表组装(列重建/稀疏补位照常)。稀疏表(94352240)全宽也无害,只需宽度门控。
+    # stitch 单表组装(列重建/稀疏补位照常)。稀疏表全宽也无害,只需宽度门控。
     ctm, mr = TILE_MAX, MAX_TILE_ROWS
     if TILE_MAX < W <= 1.4 * TILE_MAX:   # 全宽模式
         ctm, mr = W, 8
@@ -162,7 +162,7 @@ def slice_table(im):
 
     # 密集判据：每 cell 平均像素的边长 = √(去margin面积 / (行数×列数))。
     # 边长小 = 小字密集 → API 在原分辨率会读崩(行幻觉/列漂移)。用二维(行×列)而非
-    # 一维列间距：能抓"列稀但行密"(945104ed)。<UP_EDGE 则上采样到目标 UP_TARGET。
+    # 一维列间距：能抓"列稀但行密"。<UP_EDGE 则上采样到目标 UP_TARGET。
     # slicer 行列估计实测误差仅 2~4%(密集表亦然)，故此判据可信。
     nrow = sum(row_cells); ncol = sum(col_cells)
     edge = (H * W / max(1, nrow * ncol)) ** 0.5

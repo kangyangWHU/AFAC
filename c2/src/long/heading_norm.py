@@ -47,8 +47,8 @@ _PATTERNS = [
     (re.compile(r"^第\s*([" + _CN + r"]+)\s*条"), "art", lambda m: (_cn2int(m.group(1)),)),
     (re.compile(r"^([" + _CN + r"]+)\s*[、.]"), "cndun", lambda m: (_cn2int(m.group(1)),)),
     (re.compile(r"^[（(]\s*([" + _CN + r"]+)\s*[)）]"), "cnpar", lambda m: (_cn2int(m.group(1)),)),
-    # 单边括号 一)/（一 :OCR 常丢半个括号,丢了就解析成无编号→被当误报删
-    # (22958251 的「一) 必选责任:」因此消失,它本该 cnpar 进栈占 H3)
+    # 单边括号 一)/（一 :OCR 常丢半个括号,丢了就解析成无编号→被当误报删,
+    # 本该按 cnpar 定级。
     (re.compile(r"^([" + _CN + r"]+)\s*[)）]"), "cnpar", lambda m: (_cn2int(m.group(1)),)),
     (re.compile(r"^[（(]\s*(\d+)\s*[)）]"), "numpar", lambda m: (int(m.group(1)),)),
     (re.compile(r"^(\d+(?:\.\d+)+)"), "dec", lambda m: tuple(int(x) for x in m.group(1).split("."))),
@@ -231,7 +231,7 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
             level = anchor_level
         elif kind == "title":
             # 无编号标题没有编号可推。原先一律赋 anchor_level，等于把它放到全文
-            # 最浅层 —— 于是「## (三十一)严重类风湿性关节炎」下面的说明性小标题
+            # 最浅层 —— 于是某个带编号标题下面的说明性小标题
             # 反而浅于它的父级。改用 API 在同条带内给出的相对层差:那是它实际
             # 看到的版式，也是这里唯一可用的证据。跨条带不可比 → 退回锚点。
             # 例外:第一个编号标题出现之前是封面题名区(公司名/产品名/条款名常被
@@ -280,7 +280,7 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
             # 章在栈上(是当前条的祖先)→ 条 = 章+1,**优先于序列历史**。
             # GT:章后出现的条 762 处里 89.4% 正好深一级、8.7% 同级。
             # 而序列历史会把条永久钉死在它第一次出现时的层级:文档开头若缺章
-            # (e33f4bfb 的章 1、2 被 API 漏标),第一条就落在 L1,此后即使真章出现,
+            # (文档开头的章被 API 漏标),第一条就落在 L1,此后即使真章出现,
             # `seen` 仍先命中 → 章和条一路同级。
             chap = _find_chapter_level(stack)
             if chap is not None and (seen is None or seen <= chap):
@@ -316,7 +316,7 @@ def predict_heading_levels(headings, anchor_level, anchor_index=0):
         # 后置约束:条(第X条)不得与它所在的章(顶层 int 编号)同级或更浅。
         # GT 实测「章之后出现的条」762 处:89.4% 正好深一级、8.7% 同级、0 处更浅。
         # 必须后置 —— 「回到已确立编号序列」的分支排在前面,会把条钉死在它首次出现
-        # 时的层级:e33f4bfb 开头的章 1、2 被 API 漏标,第一条落到 L1,此后即使真章
+        # 时的层级:开头的章被 API 漏标时,第一条落到 L1,此后即使真章
         # 出现,第八条仍沿用 L1、与章同级。
         if kind == "art":
             chap = _find_chapter_level(stack)
@@ -414,7 +414,7 @@ def merge_wrapped_title(md, max_lines=3, max_len=44):
     if h is None:
         return md
     head = _H.match(lines[h]).group(2).strip()
-    # 首标题带编号 → 这页是文档中段片段(如「(三十六) 严重冠心病」),不是封面题名。
+    # 首标题带编号 → 这页是文档中段片段(如某疾病清单项),不是封面题名。
     # 中段页的首标题后面跟的就是正文,吞进来会把整句释义并进标题。
     if parse_marker(head)[0] != "title":
         return md

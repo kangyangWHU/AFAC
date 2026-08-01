@@ -6,10 +6,10 @@ from PIL import Image
 
 import common.api_client as api
 
-MAX_TILE_COLS = 15   # 单 tile 最大列数。OCR 在"宽 tile × 长数字"上会漏列(b326 26列/tile
-# 读不全),限 15 列后 015bd47c +16、b326dfb6 +15、密集表零退化。
+MAX_TILE_COLS = 15   # 单 tile 最大列数。OCR 在"宽 tile × 长数字"上会漏列(宽 tile 列
+# 读不全),限 15 列后密集表零退化。
 MAX_TILE_ROWS = 25   # 单 tile 最大行数。行25 优于行20:行20 切得太碎、表头行易被 OCR 漏读
-# →子表切分错(1674392a +52、583ac07b +41),而行20 不救任何表。隔离实验定论:行25。
+# →子表切分错,而行20 不救任何表。隔离实验定论:行25。
 
 EDGE_PAD = 3         # tile 四周留白px(边界在缝中心,±3 不吃邻格墨)
 ASPECT_SAFE = 180    # API 拒收 >200:1(实测),安全边 180
@@ -17,7 +17,7 @@ ASPECT_SAFE = 180    # API 拒收 >200:1(实测),安全边 180
 UP_EDGE = 40         # cell 边长(√像素/cell) < 此值 = 密集小字 → 上采样重读
 UP_TARGET = 55       # 目标格边长(实证:edge27 在 2× 已 99.5~99.8%,55/27≈2.0 正中甜点)
 UP_CAP = 3.0         # 上采样上限:3× 只留给最小格(19px→2.9×);再高的放大把 tile 撑得
-#                      过宽反而让 OCR 漏列(015bd47c 实测)
+#                      过宽反而让 OCR 漏列
 
 
 def upsample_for(edge):
@@ -35,7 +35,7 @@ def upscale(t, factor):
 
 def pad_white(core, pad=EDGE_PAD):
     """贴到四周留白 pad px 的白画布上。**白pad而非实pad**:实pad会把相邻块的半截字/
-    底边残影带进来,VLM 对残影输出幻觉空行/垃圾格(9c7857f3/34e53b1c 病根)。"""
+    底边残影带进来,VLM 对残影输出幻觉空行/垃圾格。"""
     core = core.convert("RGB")
     t = Image.new("RGB", (core.width + 2 * pad, core.height + 2 * pad), (255, 255, 255))
     t.paste(core, (pad, pad))
