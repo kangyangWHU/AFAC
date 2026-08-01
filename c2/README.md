@@ -36,7 +36,7 @@ c2/
 ├── run.sh                    一键端到端脚本(唯一推荐入口)
 ├── init_env.sh               conda 环境初始化
 ├── requirements.txt          依赖清单
-├── report.md / report.pdf    方法说明文档
+├── report.md                 方法说明文档
 ├── src/
 │   ├── main.py               入口:图片目录 → submission.csv
 │   ├── common/
@@ -70,7 +70,7 @@ c2/
 
 ## 五、方法概要
 
-两类图的痛点不同，走两条独立流水线。详细方法见 `report.pdf`。
+两类图的痛点不同，走两条独立流水线。详细方法见 `report.md`。
 
 ### LONG（面条图，长宽比 > 30）
 
