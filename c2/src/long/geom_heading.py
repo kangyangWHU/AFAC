@@ -11,6 +11,9 @@
 
 字号 = 行内 core 高度(墨量≥中位×0.6 的行数),相对本文正文中位、每文档独立。
 需 rapidocr(格级 rec ~9ms/行,结果按图像 hash 存盘)。表格/目录区按规则排除。
+
+与 heading_norm 的关系:pipeline 里 heading_norm 先给条带内相对层级,本模块最后
+在整篇 + 图像证据上重定级,**以此为准**。
 """
 import re
 import os
@@ -21,7 +24,8 @@ import collections
 import numpy as np
 from rapidfuzz import fuzz
 from long.slicer_long import table_bands
-from long.heading_norm import _CHAP1
+from long.heading_norm import (_CHAP1, parse_marker as _pm, _is_pseudo_heading,
+                               _LEADIN_END, _SENT_END)
 
 _H = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 
@@ -72,23 +76,6 @@ def light_rules(im, bands):
         out.append((int(s0), int(prev)))
     return [(r0, r1) for r0, r1 in out
             if not any(b0 - 10 < r0 < b1 + 10 for b0, b1 in bands)]
-
-
-def _toc_keys(md):
-    keys = set()
-    pl = [l for l in (md or "").splitlines() if l.strip()]
-    ti = next((i for i, l in enumerate(pl) if re.search(r"目\s*录", l)), None)
-    if ti is None:
-        return keys
-    seen = False
-    for l in pl[ti + 1:]:
-        mm = _CHAP1.match(l)
-        if mm:
-            if seen:
-                break
-            seen = True
-        keys.add(_norm(re.sub(r"^#+\s*", "", l)))
-    return keys
 
 
 def _align(heads_norm, geo):
@@ -157,12 +144,11 @@ def correct(md, im, ocr, cache_key=None):
 
     # 封面标题被 API 拆成多行:开头连续的无编号 heading 合成一个 H1。
     # 遇编号标题 / 正文实体 / 目录 即停;空行占位保行号不变。
-    from long.heading_norm import parse_marker as _pm0
     _tidx = []
     for _i, _l in enumerate(lines):
         _m = _H.match(_l)
         if _m and _m.group(2):
-            if _pm0(_m.group(2))[0] != "title" or re.search(r"目\s*录", _m.group(2)):
+            if _pm(_m.group(2))[0] != "title" or re.search(r"目\s*录", _m.group(2)):
                 break                       # 编号标题 / 目录 → 停
             _tidx.append(_i)
         elif _l.strip():
@@ -181,19 +167,18 @@ def correct(md, im, ocr, cache_key=None):
     if len(L) < 20:
         return md, []
     body = collections.Counter(l[4] for l in L).most_common(1)[0][0]
-    toc = _toc_keys(md)
 
     geo = [(line_ocr[k], L[k][4], L[k][0])     # (norm_text, core, y0)
            for k in range(len(L)) if len(line_ocr[k]) >= 2]
 
     hnorm = [_norm(h[2]) for h in heads]
     pair = _align(hnorm, geo)
-    matched_geo = set(pair.values())
     core_of = {hi: geo[pair[hi]][1] for hi in pair}
     line_core = {heads[hi][0]: c for hi, c in core_of.items()}   # 行号 → 字号(core height)
     changes = []
 
-    # 目录护栏(用户裁决:目录不修改):目录 heading 起到章编号第二次从 1 重启为止的行号区间
+    # 目录区行号范围:「目录」标题起,到章编号第二次从 1 重启为止(区内单独两层分级,
+    # 之后各 pass 跳过此区)。
     toc_end_line = -1
     ti = next((i for i, l in enumerate(lines)
                if _H.match(l) and re.search(r"目\s*录", l)), None)
@@ -213,7 +198,6 @@ def correct(md, im, ocr, cache_key=None):
     # 跟踪章序号:值 = 上一章+1 的 bare-int(即便 API 漏标成正文)也补成 H1(如 9→10 附表)。
     # 目录整段仍被后续 pass 跳过,只在这里就地定级,不改内容/顺序。
     if ti is not None:
-        from long.heading_norm import parse_marker as _pm1
         last_chap = 0
         for i in range(ti, min(toc_end_line, len(lines))):
             m = _H.match(lines[i])
@@ -223,7 +207,7 @@ def correct(md, im, ocr, cache_key=None):
                 continue
             if i == ti:
                 lines[i] = "# " + t; continue             # 目录标题
-            k, p = _pm1(t)
+            k, p = _pm(t)
             if k == "int" and p:                          # 单整数(1/1./1、)= 章 → H1
                 if is_head or p[0] == last_chap + 1:       #   已标 或 延续序列的漏标章(9→10 附表)
                     lines[i] = "# " + t; last_chap = p[0]
@@ -233,9 +217,8 @@ def correct(md, im, ocr, cache_key=None):
                 lines[i] = "## " + t
             # 无编号标题(封面题名)保持原级,不降 —— 目录区里夹的题名是 H1
 
-    # pass 0(用户裁决:淡横线上方 = H1):横线上方最近的文本行,在预测里找到对应行,
-    # 强制为 H1 —— 正文行加 `# `,已是标题的改成一个 `#`。这是唯一的绝对层级锚点,
-    # 顺带救回 API 整个漏标的章(e33f4bfb 章1/章2 正是横线证据找回的)。
+    # pass 0(用户裁决:淡横线上方 = H1):横线上方最近文本行匹配到预测行,强制为 H1
+    # —— 正文行加 `# `、已是标题的改成一个 `#`。顺带救回 API 整章漏标(如 e33f4bfb)。
     line_bottoms = [(l[1], k) for k, l in enumerate(L)]
     rule_lines = set()                      # 被淡横线锚定的预测行号(确认或提升为 H1)
     for r0, r1 in rule_yranges:
@@ -257,11 +240,10 @@ def correct(md, im, ocr, cache_key=None):
             continue
         m = _H.match(lines[best])
         body_txt = m.group(2) if m else lines[best].strip()
-        # 横线上方偶尔是**上一节的末行**(长列举/提示段/表格)/伪标题/HTML,不是章标题。
-        # 格式优先:dec(x.y)点数已定死其深度,横线不覆盖(2.1 永远是子节,不是章)。
-        from long.heading_norm import _is_pseudo_heading, parse_marker as _pmk
+        # 横线上方偶尔是上一节末行/伪标题/HTML,不是章标题;且格式优先:dec(x.y)
+        # 点数已定死深度,横线不覆盖(2.1 永远是子节)。
         if (body_txt.lstrip().startswith("<") or _is_pseudo_heading(body_txt)
-                or _pmk(body_txt)[0] == "dec"):
+                or _pm(body_txt)[0] == "dec"):
             continue
         rule_lines.add(best)
         if not m or len(m.group(1)) != 1:
@@ -269,9 +251,7 @@ def correct(md, im, ocr, cache_key=None):
             changes.append({"op": "rule_h1", "text": body_txt[:60],
                             "was": (len(m.group(1)) if m else 0)})
 
-    # 编号格式判定 + 约定 rank(定级用,见下方栈循环)。
-    from long.heading_norm import parse_marker as _pm
-
+    # 编号格式判定(_fmt/_val)+ 约定 rank,供下方栈循环定级。
     def _fmt(txt):
         k, p = _pm(txt)
         if k == "title":
@@ -306,7 +286,6 @@ def correct(md, im, ocr, cache_key=None):
     # ── 伪定义项降级(一致性):带编号标题以「：」引出定义,而其同格式 ±1 兄弟是**正文**
     #   → 它也是正文。如 `## 2. 医学必需:指…条件:` 与正文 `1. 符合通常惯例:指…。` 并列。
     #   GT 里 `96.胆道重建手术:` 这类真标题成串出现(邻项亦标题、无正文兄弟),不受影响。
-    from long.heading_norm import _LEADIN_END, _SENT_END
     _LI = _LEADIN_END + _SENT_END                     # 冒号/句号/分号结尾 = 定义引出或句末 → 正文信号
     meta = []                                         # (li, fmt, val, is_heading)
     for i, ln in enumerate(lines):
@@ -409,13 +388,8 @@ def correct(md, im, ocr, cache_key=None):
     return "\n".join(lines), changes
 
 
-# ---------------------------------------------------------------------------
-# 独立驱动:在已有的 pipeline 文本产出上单独施加几何定级,不重跑 API。
-# 主链路已把 correct() 内置在 main.py 的 long 分支,跑 run.sh 用不到这里;
-# 只调定级逻辑时用:
-#   cd src && python -m long.geom_heading --txt ../out/x_txt.csv \
-#       --images <LONG>/images --out ../out/x_raw.csv
-# ---------------------------------------------------------------------------
+# 独立驱动:只在已有 pipeline 文本产出上单独施加几何定级(不重跑 API)。主链路
+# 已把 correct() 内置于 main.py 的 long 分支,此 CLI 仅供单独调定级时用。
 
 _IMAGES = None          # 子进程经 fork 继承;由 _cli 设定
 _PREDS = None

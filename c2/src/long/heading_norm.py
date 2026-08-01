@@ -13,6 +13,7 @@ FinixDoc-VL 是按横条识别的。每个横条里的 Markdown `#` 是局部判
 """
 import re
 import unicodedata
+import collections
 
 _H = re.compile(r"^([#＃]{1,6})\s+(.*)$")
 _CN = "一二三四五六七八九十百零两〇"
@@ -786,8 +787,6 @@ def enforce_enum_consistency(md, gate_len=False):
         if k != "title" and p and len(p) == 1:
             items.append((i, k, p[0], len(m.group(1)) if m else 0))
 
-    chains = collections_defaultdict_list = {}
-    order = []                                   # active chain per kind
     per_kind = {}
     out_chains = []
     for it in items:
@@ -820,56 +819,5 @@ def enforce_enum_consistency(md, gate_len=False):
             for i, k, v, lv in hs:
                 m = _H.match(lines[i])
                 lines[i] = m.group(2)
-                changed = True
-    return "\n".join(lines) if changed else md
-
-
-import collections
-
-
-def resolve_format_clash(md):
-    """同级不能并存两种编号格式(用户原则):dec(x.y) 与单值枚举((N)/N、)撞级时,
-    dec 保持其格式自带的结构深度(9.8 就是二级),枚举项沉一级。
-
-    典型:中段碎片页 (七十三)…(一百) 与 9.8…9.34 全被拍平在 H2 —— 疾病清单的
-    真父级(9.x 重大疾病)在上一页不可见,定级只能拍到锚点层;dec 的深度却是
-    格式自带的硬信息。只在同一文档区域(无编号 H1 合同名重置)内且两组均 ≥3 时触发。
-    """
-    lines = md.split("\n")
-    heads = []
-    for i, l in enumerate(lines):
-        m = _H.match(l)
-        if m and m.group(2):
-            heads.append((i, len(m.group(1)), m.group(2)))
-    # 区域划分:无编号 H1(合同名/封面)开新区域
-    regions, cur = [], []
-    for h in heads:
-        if h[1] == 1 and parse_marker(h[2])[0] == "title":
-            if cur:
-                regions.append(cur)
-            cur = []
-        cur.append(h)
-    if cur:
-        regions.append(cur)
-
-    changed = False
-    for reg in regions:
-        by_lv = {}
-        for i, lv, txt in reg:
-            k, p = parse_marker(txt)
-            if k == "dec":
-                by_lv.setdefault(lv, {}).setdefault("dec", []).append((i, txt))
-            elif k != "title" and p and len(p) == 1:
-                by_lv.setdefault(lv, {}).setdefault("enum", []).append((i, txt))
-        min_lv = min(h[1] for h in reg)
-        for lv, g in by_lv.items():
-            # 触发条件收窄:仅当区域内**没有比撞级更浅的标题**(整片拍平的中段碎片页,
-            # 连章级都不可见)。有正常 H1/上级结构的文档,GT 允许 dec 与枚举同级
-            # (一刀切版本训练集 64.77→64.00 回退,已否决)。
-            if lv > min_lv:
-                continue
-            if len(g.get("dec", [])) >= 3 and len(g.get("enum", [])) >= 3 and lv < 6:
-                for i, txt in g["enum"]:
-                    lines[i] = "#" * (lv + 1) + " " + txt
                 changed = True
     return "\n".join(lines) if changed else md

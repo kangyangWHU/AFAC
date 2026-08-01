@@ -9,13 +9,11 @@ kind:
             决定丢为文本 or 拼回 colspan 表头行。
 
 三步:① split_table_texts 剥表外文字(geom) ② subtables 按子表缝切段 ③ _peel_title 剥表顶标题。
-产物是可复核裁块,dump_plan 落盘 overlay + crop + manifest 供人工审阅。所有 OCR 相关判定
-(表/标题、表头小条合并)都在 Stage III,不在这里。子表缝/框线/并排等几何原语见 geom.py。
+所有 OCR 相关判定(表/标题、表头小条合并)都在 Stage III,不在这里。
+子表缝/框线/并排等几何原语见 geom.py。
 """
 import os
-import json
 import numpy as np
-from PIL import ImageDraw
 
 from table.geom import (split_table_texts, _runlen_lines, band_blank, panel_seam_xs,
                         row_bnds, col_bnds, LINE_COVER, FRAME_MIN_RUN,
@@ -366,24 +364,3 @@ def crop(im):
     items = [(k, bb) for k, bb in items if bb[2] > bb[0] and bb[3] > bb[1]]  # 丢退化空块
     items.sort(key=lambda kb: (kb[1][1], kb[1][0]))      # 阅读顺序 (y, x)
     return items or [('seg', (0, 0, im.width, im.height))]
-
-
-def dump_plan(im, blocks, out_dir):
-    """把 Stage I 裁块落盘供人工审阅:overlay.jpg(彩框标注)+ crop_NN.jpg + manifest.json。"""
-    os.makedirs(out_dir, exist_ok=True)
-    ov = im.convert("RGB").copy()
-    dr = ImageDraw.Draw(ov)
-    color = {'text': (0, 128, 255), 'seg': (255, 0, 0), 'title': (0, 200, 0)}
-    manifest = []
-    for i, (kind, bb) in enumerate(blocks):
-        c = color.get(kind, (0, 255, 0))
-        dr.rectangle(bb, outline=c, width=4)
-        dr.text((bb[0] + 4, bb[1] + 4), f"{i}:{kind}", fill=c)
-        cr = im.crop(bb)
-        if cr.width > 0 and cr.height > 0:
-            cr.save(os.path.join(out_dir, f"crop_{i:02d}_{kind}.jpg"))
-        manifest.append({"order": i, "kind": kind, "bbox": [int(v) for v in bb]})
-    ov.save(os.path.join(out_dir, "overlay.jpg"))
-    with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
-        json.dump({"blocks": manifest}, f, ensure_ascii=False, indent=2)
-    return out_dir

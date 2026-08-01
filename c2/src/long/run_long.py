@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
-"""LONG 端到端 runner + A/B 评测。
+"""LONG 端到端 runner + 训练集评测。
 
-对比两种策略，量化智能切点的收益：
-  - naive : 等高裸切 + 直接拼（对照）
-  - smart : 行间空白带切 + 接缝去重（本方案）
-
-用训练集（带 GT）跑若干图，打印三指标。所有 API 调用走缓存。
+run_smart = 行间空白带切 + 接缝去重(本方案)。用训练集(带 GT)跑若干图,
+打印 text/read 指标。所有 API 调用走缓存。
 """
 import os
 import glob
@@ -45,16 +42,6 @@ def run_smart(im, target_h=5000, timeout=240):
     return md, len(strips)
 
 
-def run_naive(im, target_h=5000, timeout=240):
-    """等高裸切 + 裸拼（对照）。"""
-    w, h = im.size
-    k = max(1, -(-h // target_h))
-    strips = [im.crop((0, i * target_h, w, min(h, (i + 1) * target_h)))
-              for i in range(k)]
-    outs = call_tiles(strips, timeout=timeout, retry_rounds=4)
-    return "\n".join(outs), k
-
-
 def _score(pred, gt):
     te = text_edit_loss(pred, gt, include_tables=True)
     ro = read_order_loss(pred, gt)
@@ -76,8 +63,7 @@ def main():
     mid = len(files) // 2
     files = files[mid: mid + args.n]
 
-    agg = {"naive": {"text": [], "read": []},
-           "smart": {"text": [], "read": []}}
+    agg = {"text": [], "read": []}
     for md in files:
         uuid = os.path.basename(md)[:-3]
         img = os.path.join(TRAIN_LONG_DIR, "images", uuid + ".jpg")
@@ -85,21 +71,15 @@ def main():
             continue
         gt = open(md, encoding="utf-8").read()
         im = prep(Image.open(img))
-
-        pn, kn = run_naive(im, args.target_h, args.timeout)
         ps, ks = run_smart(im, args.target_h, args.timeout)
-        sn, ss = _score(pn, gt), _score(ps, gt)
-        agg["naive"]["text"].append(sn["text"]); agg["naive"]["read"].append(sn["read"])
-        agg["smart"]["text"].append(ss["text"]); agg["smart"]["read"].append(ss["read"])
-        print(f"[{uuid[:8]}] gt_len={len(gt)}")
-        print(f"   naive(k={kn}): text={sn['text']} read={sn['read']} len={sn['len']}")
-        print(f"   smart(k={ks}): text={ss['text']} read={ss['read']} len={ss['len']}")
+        ss = _score(ps, gt)
+        agg["text"].append(ss["text"]); agg["read"].append(ss["read"])
+        print(f"[{uuid[:8]}] gt_len={len(gt)} smart(k={ks}): "
+              f"text={ss['text']} read={ss['read']} len={ss['len']}")
 
     def avg(v):
         return round(sum(v) / len(v), 2) if v else None
-    print("\n===== 均值 =====")
-    for m in ("naive", "smart"):
-        print(f"  {m}: text={avg(agg[m]['text'])}  read={avg(agg[m]['read'])}")
+    print(f"\n均值: text={avg(agg['text'])}  read={avg(agg['read'])}")
 
 
 if __name__ == "__main__":

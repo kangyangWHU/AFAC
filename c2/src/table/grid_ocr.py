@@ -279,13 +279,6 @@ def _parse_cap(raw):
     return cap, rows
 
 
-def _w(row):
-    """行有效宽 = 到最后一个非空格的位置(尾部去空——API 常给稀疏行拖尾部空 <td>,
-    那是零信息,不算内容宽)。"""
-    last = max((k for k, s in enumerate(row) if s.strip()), default=-1)
-    return last + 1
-
-
 def span_cross(seg_gray, rb, cb, ri, rj, ci, cj):
     """跨列笔画检测(纯几何):返回 {骨架行 i: [被横穿的边界 j, ...]}。
     横穿 = 同一像素行的连通笔画过边界中心且两侧各有墨(≥2 像素行);贴线不算
