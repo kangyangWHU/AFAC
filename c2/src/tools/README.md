@@ -1,22 +1,7 @@
 # src/tools —— 开发期工具
 
-除 `apply_geom_long.py` 外，本目录下的脚本**均不参与推理主链路**。`main.py` / `run.sh`
-产出提交结果的过程不会 import 这里的任何模块——它们只在开发调参阶段用来评测、诊断和
-人工审阅。
-
-## 例外：apply_geom_long.py
-
-`long/geom_heading.correct()`（几何标题定级）是 LONG 路的正式最后一步，**已内置在
-`main.py` 里**，跑 `run.sh` 会自动执行，无需手工调用本脚本。
-
-本脚本是同一步骤的**独立驱动**：在已有的 pipeline 文本产出 `*_txt.csv` 之上单独施加
-几何定级，写出 `*_raw.csv`。用途是只调定级逻辑时不必重跑 API——
-
-```bash
-cd src
-python -m tools.apply_geom_long --txt ../out/xxx_txt.csv \
-    --images <LONG>/images --out ../out/xxx_raw.csv
-```
+本目录下的脚本**均不参与推理主链路**。`main.py` / `run.sh` 产出提交结果的过程不会
+import 这里的任何模块——它们只在开发调参阶段用来评测、诊断和人工审阅。
 
 ## 评测（复现官方三指标，需要带 GT 的训练集）
 

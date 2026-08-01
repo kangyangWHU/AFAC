@@ -407,3 +407,65 @@ def correct(md, im, ocr, cache_key=None):
         i = j
 
     return "\n".join(lines), changes
+
+
+# ---------------------------------------------------------------------------
+# 独立驱动:在已有的 pipeline 文本产出上单独施加几何定级,不重跑 API。
+# 主链路已把 correct() 内置在 main.py 的 long 分支,跑 run.sh 用不到这里;
+# 只调定级逻辑时用:
+#   cd src && python -m long.geom_heading --txt ../out/x_txt.csv \
+#       --images <LONG>/images --out ../out/x_raw.csv
+# ---------------------------------------------------------------------------
+
+_IMAGES = None          # 子进程经 fork 继承;由 _cli 设定
+_PREDS = None
+
+
+def _apply_one(name):
+    from PIL import Image
+    from common.preprocess import prep
+    from main import _local_ocr
+    im = prep(Image.open(os.path.join(_IMAGES, name)))
+    new, ch = correct(_PREDS[name], im, _local_ocr(), cache_key=name)
+    return name, new, ch
+
+
+def _cli():
+    import sys
+    import csv
+    import argparse
+    from multiprocessing import Pool
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = None
+    csv.field_size_limit(sys.maxsize)
+
+    ap = argparse.ArgumentParser(description="在 *_txt.csv 上施加几何标题定级")
+    ap.add_argument("--txt", required=True, help="pipeline 文本产出 *_txt.csv")
+    ap.add_argument("--images", required=True, help="对应原图目录")
+    ap.add_argument("--out", required=True, help="输出 *_raw.csv")
+    ap.add_argument("--workers", type=int, default=16)
+    a = ap.parse_args()
+
+    global _IMAGES, _PREDS
+    _IMAGES = a.images
+    with open(a.txt, encoding="utf-8") as f:
+        _PREDS = {r["file_name"]: r["ground_truth"] for r in csv.DictReader(f)}
+
+    names = [n for n in sorted(os.listdir(_IMAGES)) if n in _PREDS]
+    with Pool(a.workers) as p:
+        res = p.map(_apply_one, names)
+
+    out = {n: new for n, new, _ in res}
+    nch = sum(1 for _, _, ch in res if ch)
+    ndrop = sum(len(ch) for _, _, ch in res)
+    with open(a.out, "w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f, quoting=csv.QUOTE_ALL)
+        w.writerow(["file_name", "ground_truth"])
+        for n in sorted(_PREDS):
+            w.writerow([n, out.get(n, _PREDS[n])])
+    print(f"geom 施加 {len(names)} 篇;{ndrop} 处标题改动 across {nch} 篇 → {a.out}")
+
+
+if __name__ == "__main__":
+    _cli()
