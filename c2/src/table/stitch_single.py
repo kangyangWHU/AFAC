@@ -101,10 +101,9 @@ def _width_segments(parsed, n_col):
            for g in (parsed[r] + [None] * n_col)[:n_col]] for r in range(n_band)]
     cuts = []
     for c in range(n_col):
-        # 排除 ≤2 列的 band：纯文本兜底(只读出年度号单列)、近空 tile 会产生"1列"，
-        # 那是 OCR 没读出数据的**假**宽度突变，不是真的窄子表。若不排除，连续多个兜底
-        # band 会被误判成"不同宽度子表"、分段后独立重组成 1 列、不补齐(底部稀疏区
-        # 多行只剩 1 列、TEDS 大跌)。真子表最少也 2-3 列,排除 ≤2 安全。
+        # 排除 ≤2 列的 band:纯文本兜底/近空 tile 产生的"1列"是 OCR 没读出数据的**假**宽度
+        # 突变(非窄子表),不排除会被误判成"不同宽度子表"、分段成 1 列不补齐(TEDS 大跌)。
+        # 真子表最少 2-3 列,排除 ≤2 安全。
         seq = [(r, bw[r][c]) for r in range(n_band) if bw[r][c] > 2]
         if len(seq) < 6:                            # 太短不足以判双峰
             continue
@@ -180,12 +179,10 @@ def _reconstruct_grid(parsed, col_cells, col_cuts=None, framed=False):
                 cc = min(cc, round(density * pix_w(c)))   # 无框才用密度封顶防列爆炸;有框直接用框线列数
             W.append(max(1, cc))
 
-    # 第二遍：按 W_c 重组。band 行数取「最密集列的行数」= max(各列行数)。
-    # 稀疏列(三角表数据列)会把空格行折叠→读得少；密集列(行标签列)读满全行=真实行数。
-    # 不能用"中位/比中位"判断:稀疏列占多数时中位被拖低，密集列反被当成离群剔除
-    # (实测 GT 250 行的表，中位重建只剩 125、按比中位剔除后也只 152)。
-    # 幻觉(超高行)已由上游 _clean_segs 物理封顶(≤band高/8)，故此处直接取 max 安全。
-    # 稀疏列短读的行在底部补空对齐。
+    # 第二遍：按 W_c 重组。band 行数取 max(各列行数)=最密集列行数:稀疏列(三角数据列)折叠
+    # 空格行读得少,密集列(行标签列)读满=真实行数。不能用中位(稀疏列占多数时中位被拖低、
+    # 密集列反被当离群剔除:GT 250 行表中位重建只剩 125)。幻觉超高行已由 _clean_segs 封顶
+    # (≤band高/8),故取 max 安全;稀疏列短读的行底部补空对齐。
     all_rows = []
     for r in range(n_band):
         grids = parsed[r]
@@ -312,10 +309,9 @@ def _peel_ragged_top(bands, framed=False):
     caps = []
     while len(left) > base and left and len(_filled(left[0])) <= 3:
         cell = _filled(left[0])
-        # 结构判据①:下一行首格(角格)为空 → 候选本身就是被 API 劈开的【角格】(投保年龄\
-        # 保单年度 之类)→ 填回角格、不剥。区分"子表标签 vs 角格轴表头":标签下方是合规表头
-        # (年度/年龄|18…,角格非空)→剥;角格下方是裸数据行(|1|2…,角格空)→塞回。纯结构、
-        # 不靠词表。修无框多子表把角格剥成 caption 的泄漏。
+        # 结构判据①:下一行首格(角格)空 → 候选是被 API 劈开的角格 → 填回不剥。区分子表标签
+        # vs 角格轴表头:标签下方是合规表头(角格非空)→剥;角格下方是裸数据行(角格空)→塞回。
+        # 纯结构不靠词表,修无框多子表把角格剥成 caption 的泄漏。
         if not framed and len(left) >= 2 and left[1] and not (left[1][0] or "").strip():
             left[1][0] = " ".join(cell)
             left.pop(0)

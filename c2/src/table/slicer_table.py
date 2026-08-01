@@ -106,10 +106,9 @@ def slice_table(im):
 
     # 列分流(column_cuts,与 Stage I 剥标题共用):墨柱找框线,不够回退白缝(Otsu宽度门杀数字白河)。
     col_lines, col_framed = column_cuts(dark, dark180)
-    # 行：与列对称用墨柱（横向最长墨段）。关键纠正——文字行**不会连成一条线**：
-    # 一行 `8504 8504 …` 的字/格之间有缝，最长横墨段只有一个数字宽(中位~2px)，而横框线
-    # 全宽贯穿(几千px)，120px 阈值有 ~60× 余量，不会把文字行误判成线。横墨柱比密度法更准
-    # （行估更准），且连 15px 挤死的行都能救。无框→回退低墨缝。
+    # 行：与列对称用墨柱（横向最长墨段）。关键——文字行不会连成线:一行数字字/格间有缝、
+    # 最长横墨段只一个数字宽(~2px),横框线全宽贯穿(几千px),120px 阈值 ~60× 余量不误判。
+    # 横墨柱比密度法行估更准,连 15px 挤死的行都能救;无框→回退低墨缝。
     runl_rows = _runlen_lines(dark180.T, min_run=120)
     gap_rows = _gap_lines(dark.mean(axis=1))
     if len(runl_rows) > 1 and len(runl_rows) >= 0.5 * len(gap_rows):
@@ -122,9 +121,8 @@ def slice_table(im):
 
     textink = _textink_cols(dark)
     # tile 直接限行列：每 tile ≤MAX_TILE_ROWS 行 × ≤MAX_TILE_COLS 列。
-    # 全宽模式自动门控:表宽刚过 limit(1~1.4×)——拆列会把表切成不均衡的小块,8a4 那种"重复
-    # 标签列被孤立成小tile"会触发 API 复读幻觉/丢列。改成不拆列、全宽短行(8行),下游走
-    # stitch 单表组装(列重建/稀疏补位照常)。稀疏表全宽也无害,只需宽度门控。
+    # 全宽模式门控:表宽刚过 limit(1~1.4×)时拆列会切成不均衡小块(重复标签列被孤立成小tile
+    # → API 复读幻觉/丢列),改不拆列、全宽短行(8行),下游走 stitch 单表组装。稀疏表全宽也无害。
     ctm, mr = TILE_MAX, MAX_TILE_ROWS
     if TILE_MAX < W <= 1.4 * TILE_MAX:   # 全宽模式
         ctm, mr = W, 8
@@ -160,10 +158,9 @@ def slice_table(im):
     # 左右并排子表：横线断裂中缝数 + 1 = 并排栏数（多数表为 1，不拆）
     panel_n = _panel_seams(g) + 1
 
-    # 密集判据：每 cell 平均像素的边长 = √(去margin面积 / (行数×列数))。
-    # 边长小 = 小字密集 → API 在原分辨率会读崩(行幻觉/列漂移)。用二维(行×列)而非
-    # 一维列间距：能抓"列稀但行密"。<UP_EDGE 则上采样到目标 UP_TARGET。
-    # slicer 行列估计实测误差仅 2~4%(密集表亦然)，故此判据可信。
+    # 密集判据：每 cell 平均边长 = √(去margin面积 / (行数×列数))。边长小=小字密集 → API 原
+    # 分辨率会读崩(行幻觉/列漂移),故 <UP_EDGE 上采样到 UP_TARGET。用二维(行×列)而非一维
+    # 列间距能抓"列稀但行密";slicer 行列估计实测误差仅 2~4%,判据可信。
     nrow = sum(row_cells); ncol = sum(col_cells)
     edge = (H * W / max(1, nrow * ncol)) ** 0.5
     upsample = upsample_for(edge)

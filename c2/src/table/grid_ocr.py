@@ -111,11 +111,9 @@ def _split_merged_cols(im, dark, rb, cb, meta):
                 f"骨架col{j} 互斥区带插线x{[int(c) for c in cuts]}"
                 f"(区带{len(zones)},支持{support})")
         elif n_co >= 0.7 * len(row_runs):
-            # 同行共存:一个被劈的数字('88. 81'/'1,946.57')或真两列('9 3421.59')。
-            # 裁决只信 API(rec 3x 对千分位格噪声多形态:'254 78'/'1583-00'/
-            # '3.841 70',文本规则不可救;API 实测缝合版式缝、拆开真列都稳定):
-            # 裁该列条带问一次 API,它也看到 ≥区带数 列 → 采纳
-            # (用户判据:local 区带切分 == API 切分 ⟺ 缺列)
+            # 同行共存:一个被劈的数字('88. 81')或真两列('9 3421.59')。裁决只信 API
+            # (rec 3x 对千分位格噪声多形态、文本规则不可救;API 缝合/拆开都稳定):裁该列条带
+            # 问一次 API,它也看到 ≥区带数 列 → 采纳(用户判据:local 区带切分==API 切分 ⟺ 缺列)
             rs = sorted(row_runs)
             r1_ = min(len(rb) - 1, rs[0] + 8)
             strip = im.crop((int(cb[j]), int(rb[rs[0]]),
@@ -235,14 +233,13 @@ def slice_grid(im):
     # 密集判据(与 slicer 共用 upsample_for):每 cell 平均边长小 → 上采样
     edge = (g.shape[0] * g.shape[1] / max(1, R * C)) ** 0.5
     meta["upsample"] = upsample_for(edge)
-    # 硬上限 行25×列15(上榜版参数,让渡已废——双田实测密集表35列≈69%/15列≥99.5%,
-    # 让渡为省调用把列放大到37~187是密集内容错误的第一元凶;矮宽表也不例外)
+    # 硬上限 行25×列15(上榜版参数):双田实测密集表 35列≈69%/15列≥99.5%,放大列到 37~187
+    # 省调用是密集内容错误第一元凶,矮宽表亦然。
     row_bands = _chunk(rb, MAX_TILE_ROWS)
     col_bands = _chunk(cb, MAX_TILE_COLS)
-    # 一律 tile+拼接,不整读(小段快路已退役:整读的"单tile无冗余+极端宽比"一次失败全丢)。
-    # 像素长宽比约束:API 拒收 >200:1(400)。矮表单tile可超 200:1(如 2 行的
-    # 极扁尾表)——列带宽 > 180×最矮行带高 时对半加密列带(切在列边界上,骨架拼接原生
-    # 支持多tile;不垫白,内容无损)
+    # 一律 tile+拼接不整读(整读单tile无冗余,一次失败全丢)。像素长宽比 API 拒收 >200:1;
+    # 矮表单tile可超(2 行极扁尾表)→ 列带宽 > 180×最矮行带高 时对半加密列带(切在列边界,
+    # 骨架拼接原生支持多tile、不垫白无损)。
     min_bh = min(rb[j] - rb[i] for i, j in row_bands)
     while col_bands:
         wmax = max(cb[j] - cb[i] for i, j in col_bands)
@@ -393,10 +390,8 @@ def _calibrate_cols(parsed, meta):
         if votes:
             top, n = Counter(votes).most_common(1)[0]
             if nc < top <= nc + 3 and n >= 2:
-                # v6 审计模式:不采纳,只上报。均匀口吃(+1整带一致)能骗过票数判据
-                # (三票一致实为每行复读一格,采纳后=空列+幻读列);
-                # 真漏检列线(+2 型,新增列内容互不重复)再现时凭本 audit 名单
-                # 加内容判据后再启用采纳。
+                # v6 审计模式:只上报不采纳。均匀口吃(+1整带一致)能骗过票数(三票实为每行
+                # 复读一格,采纳后=空列+幻读列);真漏检列线(+2 型)待加内容判据再启用采纳。
                 meta.setdefault("audit", []).append(
                     f"列带{c} 疑漏检列线 骨架{cj - ci}→{top}({n}票) 未采纳(审计模式)")
         band_nc.append(nc)
@@ -492,10 +487,8 @@ def _assemble(im, parsed, meta, band_nc, cell_ink, cell_gray):
             nzrows = [x for x in rows if any(s.strip() for s in x)]
 
             def _occ_ok(row, hasrow):
-                # 占位恒等:每格 非空⟺有墨,逐格判。宽度恒等是它的一维投影——
-                # 只查最后非空位置会漏"前/中段占位缺失"(方洞型:
-                # API 行前段空、右侧有值,宽==墨迹宽照样通过)。口吃复制值、
-                # 幻觉填充也全被占位差抓住。
+                # 占位恒等:每格 非空⟺有墨,逐格判。宽度恒等只是一维投影,会漏前/中段占位
+                # 缺失(方洞型:前段空右侧有值,宽仍==墨迹宽)。口吃/幻觉填充也被占位差抓住。
                 for j in range(len(hasrow)):
                     if bool(j < len(row) and row[j].strip()) != bool(hasrow[j]):
                         return False
@@ -505,12 +498,10 @@ def _assemble(im, parsed, meta, band_nc, cell_ink, cell_gray):
                           for x, i in zip(nzrows, E)))
             local_k = set()
             if not ok and E:
-                # 整 tile 本地重读,无例外(曾有"colspan行保留API原读"豁免,按行序
-                # 取行依赖行流与E对齐——不合格tile恰恰对不齐,错位复制教训)。
-                # 条带合并只跨**被横穿的边界**:相邻格仅当其间边界确有笔画横穿才并入
-                # 同一条带整条识别(跨列文字不切碎、行首空档保真);未被横穿的格间
-                # 照旧逐格。**范围限定表首带**(用户拍板):跨列表头/说明行只住在表顶,
-                # 数据区的横穿一律视为假信号(幻影列/残线),不做任何合并。
+                # 整 tile 本地重读,无例外(曾豁免 colspan 行保留 API 原读,按行序取行依赖
+                # 行流对齐,不合格 tile 恰对不齐→错位复制)。条带合并只跨**被横穿的边界**:
+                # 相邻格间边界确有笔画横穿才并入整条识别(跨列文字不切碎),否则逐格。
+                # **仅限表首带**:跨列表头只住表顶,数据区横穿视为假信号(幻影列/残线)不合并。
                 cross = (span_cross(seg_gray, rb, cb, ri, rj, ci, cj)
                          if r == 0 else {})
                 if cross:
@@ -741,9 +732,8 @@ def _fill_seq(grid, meta):
         return None
 
     def _one_axis(cells, tag):
-        # 局部连续段补齐(非全局仿射——双panel列号行 1..30,1..30 两段截距不同,
-        # 全局众数判据必挂):
-        # · 两已知整数 a@pa,b@pb 间距==值差(步长1一致)→ 空档线性补;
+        # 局部连续段补齐(非全局仿射:双panel列号行 1..30,1..30 两段截距不同,全局众数必挂):
+        # · 两已知整数间距==值差(步长1)→ 空档线性补;
         # · 连续段(长≥3)首尾各外推1格;digits==期望但格式错 → 归一
         posmap = {p: (i, j, t) for p, i, j, t in cells}
         known = sorted(p for p, v in posmap.items() if v[2].isdigit())

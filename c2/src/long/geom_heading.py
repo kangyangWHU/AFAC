@@ -110,11 +110,10 @@ _GEO_CACHE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 
 
 def _image_features(im, ocr, cache_key=None):
-    """图像相关特征(逐行 OCR + core + 淡横线),只依赖图像 → 存盘缓存。
+    """图像相关特征(逐行 OCR + core + 淡横线),只依赖图像 → 按图像内容哈希存盘缓存。
 
-    99% 的耗时在"全文每行 OCR"(大文档 741 行 × 230ms ≈ 3min),而图像不变则结果不变。
-    改定级逻辑重跑时命中缓存 → 12min 降到几秒。key = 图像内容哈希。
-    返回 (L, line_ocr, rule_yranges) —— L 每行 (y0,y1,x0,x1,core),line_ocr 同序 OCR。
+    99% 耗时在逐行 OCR(741 行 × 230ms ≈ 3min),图像不变结果不变,改定级逻辑重跑命中缓存。
+    返回 (L, line_ocr, rule_yranges):L 每行 (y0,y1,x0,x1,core),line_ocr 同序 OCR。
     """
     cpath = None
     if cache_key:
