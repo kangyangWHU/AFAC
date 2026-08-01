@@ -14,15 +14,6 @@ bash run.sh <数据集根目录>  # 数据集在别处
 
 数据根目录下需是官方原始结构 `finix_huge_long_rest_B/images/` 与 `finix_huge_table_rest_B/images/`（各 50 张）。跑 A 榜把 `run.sh` 里的 `LONG_SUB` / `TABLE_SUB` 改成 `..._rest_A`。
 
-也可直接调入口：
-
-```bash
-cd src
-python main.py --long_dir <LONG>/images --table_dir <TABLE>/images --out ../out/submission.csv
-```
-
-可选 `--procs` 图级并行进程数（默认 6）、`--timeout` 单图超时（240s）、`--target_h` LONG 切条高度（5000px）、`--limit` 只跑前 N 张。
-
 `long` / `table` 由输入目录给定，不靠长宽比猜——官方数据集本就分两类发布，自动分类只会平白引入一类错误。
 
 ## 二、环境与硬件
