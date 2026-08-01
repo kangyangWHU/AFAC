@@ -603,16 +603,6 @@ def roman_to_unicode(s):
 
 
 # ---------------------------------------------------------------------------
-# 下标 → LaTeX(GT 用 ${T}_{1}{N}_{0}{M}_{0}$,VLM 常吐 unicode 下标 T₁N₀M₀)
-# ---------------------------------------------------------------------------
-_SUB = "₀₁₂₃₄₅₆₇₈₉"
-_SUBMAP = {c: str(i) for i, c in enumerate(_SUB)}
-_SUBRUN = re.compile(r"(?:[A-Za-z]+[" + _SUB + r"]+)+")
-_SUBPAIR = re.compile(r"([A-Za-z]+)([" + _SUB + r"]+)")
-_TNM_BASE = re.compile(r"^(?:T|N|M|pT|pN|pM|cT|cN|cM|ypT|ypN|ypM)$")
-
-
-# ---------------------------------------------------------------------------
 # unicode 上/下标 → 普通字符：GT 里这类字符出现 0 次
 # ---------------------------------------------------------------------------
 # GT 全量 200 篇统计:unicode 上标/下标字符一个都没有,写法一律是压平的普通数字
@@ -653,21 +643,6 @@ def flatten_math(md):
     md = re.sub(r"\$\$(.+?)\$\$", conv, md or "", flags=re.S)
     md = re.sub(r"\$([^$\n]+)\$", conv, md)
     return md
-
-
-def subscript_to_latex(s):
-    def repl(m):
-        pairs = _SUBPAIR.findall(m.group(0))
-        # GT uses LaTeX for TNM cancer staging (T₁N₀M₀, pT₃...), but keeps
-        # ordinary medical notation such as PaO₂ / SaO₂ / FiO₂ as Unicode.  The old
-        # global conversion damaged 31/100 training documents to help only eight.
-        if not pairs or any(not _TNM_BASE.match(base) for base, _ in pairs):
-            return m.group(0)
-        body = "".join(
-            "{%s}_{%s}" % (base, "".join(_SUBMAP[c] for c in sub))
-            for base, sub in pairs)
-        return "$" + body + "$"
-    return _SUBRUN.sub(repl, s or "")
 
 
 # ---------------------------------------------------------------------------

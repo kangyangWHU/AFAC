@@ -24,7 +24,7 @@ from long.heading_norm import (relevel_strips, toc_bullets_to_headings,
                                infer_missing_headings, flatten_math,
                                enforce_enum_consistency,
                                flatten_scripts,
-                               roman_to_unicode, subscript_to_latex)
+                               roman_to_unicode)
 from metrics.evaluate import text_edit_loss, read_order_loss
 
 
@@ -40,8 +40,6 @@ def run_smart(im, target_h=5000, timeout=240):
     # GT 规范:罗马数字→unicode;上/下标一律压平成普通字符,不产出 LaTeX。
     # GT 全量 200 篇里 unicode 上下标出现 0 次(×10⁹/L 写成 "109/L"),故压平只会更贴近。
     # 注:本地 text_edit 走 NFKC,看不出压平的差别(⁹ 与 9 等价),线上若不归一化才有收益。
-    # subscript_to_latex 保留未用:GT 在 14/100 篇里确有 295 处 ${pT}_{3a}$ 式 TNM 分期,
-    # 改回 flatten_scripts(subscript_to_latex(...)) 即恢复(实测 text +0.05 / read +0.07)。
     md = flatten_scripts(roman_to_unicode(md))
     md = flatten_math(md)                   # API 的 $$\text{}$$ 公式 → GT 风格纯文本($$ 在 GT 出现 0 次)
     return md, len(strips)
