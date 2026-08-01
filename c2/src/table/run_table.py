@@ -2,26 +2,21 @@
 """TABLE Stage II/III：逐块识别(ocr/ocr_text) + 合并拼接(merge) + 入口 parse_table。
 
 主路:crop 裁块 → ocr_seg 骨架 OCR;列错位表回退 ocr_table 自由读(tile+重组),
-坏 tile 由 _refine_bad_tiles 裁剪重读。main() 是抽样冒烟测试 CLI。所有 API 调用走缓存。
+坏 tile 由 _refine_bad_tiles 裁剪重读。所有 API 调用走缓存。
 """
-import os
 import re
-import glob
-import argparse
 from collections import Counter
 
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
 import common.api_client as api
-from common.config import TRAIN_TABLE_DIR, BIN_FAINT
-from common.preprocess import prep
+from common.config import BIN_FAINT
 from table.slicer_table import slice_table
 from table.crop import crop
 from table.grid_ocr import ocr_seg
 from table.tiles import upscale, pad_white, call_tiles, ASPECT_SAFE
 from table.stitch_single import stitch_single_table, parse_tile, parse_tile_segments, rows_to_html
-from metrics.evaluate import table_teds, text_edit_loss
 
 
 def _merge_side_by_side(left_rows, right_rows):
@@ -490,46 +485,3 @@ def parse_table(im, timeout=240):
     items, ncalls = ocr(im, blocks, timeout)  # Stage II
     md, ntab = merge(items)                    # Stage III
     return md, ncalls, {"subs": ntab}
-
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--n", type=int, default=3)
-    ap.add_argument("--timeout", type=int, default=240)
-    ap.add_argument("--pick", choices=["median", "small", "spread"],
-                    default="median")
-    args = ap.parse_args()
-
-    files = sorted(glob.glob(os.path.join(TRAIN_TABLE_DIR, "mds", "*.md")),
-                   key=os.path.getsize)
-    if args.pick == "median":
-        mid = len(files) // 2
-        sel = files[mid: mid + args.n]
-    elif args.pick == "small":
-        sel = files[:args.n]
-    else:  # spread
-        step = max(1, len(files) // args.n)
-        sel = files[::step][:args.n]
-
-    teds_list = []
-    for md in sel:
-        uuid = os.path.basename(md)[:-3]
-        img = os.path.join(TRAIN_TABLE_DIR, "images", uuid + ".jpg")
-        if not os.path.exists(img):
-            continue
-        gt = open(md, encoding="utf-8").read()
-        im = prep(Image.open(img))
-        pred, ncalls, meta = parse_table(im, args.timeout)
-        teds = table_teds(pred, gt)
-        te = text_edit_loss(pred, gt, include_tables=True)
-        teds_list.append(teds if teds is not None else 0.0)
-        print(f"[{uuid[:8]}] gt_len={len(gt):>7} subs={meta.get('subs')} calls={ncalls} "
-              f"| TEDS={teds:.4f} textScore={(1-te)*100:.1f} pred_len={len(pred)}")
-
-    if teds_list:
-        print(f"\n===== 均值 TEDS = {sum(teds_list)/len(teds_list):.4f} "
-              f"(×100 = {sum(teds_list)/len(teds_list)*100:.1f}) =====")
-
-
-if __name__ == "__main__":
-    main()
