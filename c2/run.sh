@@ -29,7 +29,7 @@ done
 
 # 依赖自检:缺包直接报错,别跑到一半才 ImportError(rapidocr 是惰性导入的重灾区)
 python - <<'PY'
-import importlib, sys
+import importlib.util, sys
 missing = [m for m in ("numpy", "PIL", "cv2", "requests", "rapidfuzz",
                        "apted", "lxml", "bs4", "rapidocr", "onnxruntime")
            if importlib.util.find_spec(m) is None]
