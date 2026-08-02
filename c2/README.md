@@ -16,6 +16,8 @@ bash run.sh <数据集根目录>  # 数据集在别处
 
 `long` / `table` 由输入目录给定，不靠长宽比猜——官方数据集本就分两类发布，自动分类只会平白引入一类错误。
 
+**API 凭据**在 `src/common/config.py`：`API_URL`（第 43 行）、`API_KEY`（第 44 行）、`API_USER_IDS`（第 45 行起，5 个白名单 userId 轮询）。换凭据直接改这三处即可，无需环境变量或额外配置文件。
+
 ## 二、环境与硬件
 
 不需要 GPU，全流程 CPU + 远端 API。Python 3.11 / Linux；建议 ≥ 8 核、≥ 16GB 内存（单页最大 3.8 亿像素）、≥ 2GB 磁盘（缓存）；需可访问 `finixdocapi.alipay.com`。依赖见 `requirements.txt`，`run.sh` 启动前会自检。
